@@ -1,0 +1,146 @@
+digraph BusinessPerformanceAgent {
+  graph [
+    label="业务绩效智能体 — 完整数据模型",
+    labelloc=t,
+    fontsize=24,
+    fontname="PingFang SC",
+    fontcolor="#102A56",
+    bgcolor="#FAFCFF",
+    rankdir=LR,
+    splines=polyline,
+    nodesep=0.45,
+    ranksep=1.0,
+    pad=0.35,
+    outputorder=edgesfirst
+  ];
+  node [shape=plain, fontname="PingFang SC"];
+  edge [color="#51647A", penwidth=1.4, arrowsize=0.75, fontname="PingFang SC", fontsize=9];
+
+  customers [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5" COLOR="#1877D2">
+      <TR><TD BGCOLOR="#DCEEFF"><B>客户 Customers</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><B>customer_id｜客户编号（主键）</B><BR ALIGN="LEFT"/>full_name｜姓名<BR ALIGN="LEFT"/>age｜年龄<BR ALIGN="LEFT"/>gender｜性别<BR ALIGN="LEFT"/>email｜邮箱<BR ALIGN="LEFT"/>phone｜电话<BR ALIGN="LEFT"/>street_address｜街道地址<BR ALIGN="LEFT"/>city｜城市<BR ALIGN="LEFT"/>state｜州/省<BR ALIGN="LEFT"/>zip_code｜邮政编码<BR ALIGN="LEFT"/>registration_date｜注册日期<BR ALIGN="LEFT"/>preferred_channel｜偏好渠道</TD></TR>
+    </TABLE>
+  >];
+
+  transactions [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5" COLOR="#1877D2">
+      <TR><TD BGCOLOR="#DCEEFF"><B>交易 Transactions</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><B>transaction_id｜交易编号（主键）</B><BR ALIGN="LEFT"/>customer_id｜客户编号（外键）<BR ALIGN="LEFT"/>product_id｜产品编号（外键）<BR ALIGN="LEFT"/>product_name｜产品名称<BR ALIGN="LEFT"/>product_category｜产品类别<BR ALIGN="LEFT"/>quantity｜购买数量<BR ALIGN="LEFT"/>price｜单价<BR ALIGN="LEFT"/>transaction_date｜交易日期<BR ALIGN="LEFT"/>store_id｜门店编号（外键）<BR ALIGN="LEFT"/>store_location｜销售地点<BR ALIGN="LEFT"/>payment_method｜支付方式<BR ALIGN="LEFT"/>discount_applied｜折扣百分比<BR ALIGN="LEFT"/>gross_sales｜折前销售额<BR ALIGN="LEFT"/>discount_amount｜折扣金额<BR ALIGN="LEFT"/>net_sales｜净销售额</TD></TR>
+    </TABLE>
+  >];
+
+  products [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5" COLOR="#1877D2">
+      <TR><TD BGCOLOR="#DCEEFF"><B>产品 Products</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><B>product_id｜产品编号（主键）</B><BR ALIGN="LEFT"/>product_name｜产品名称<BR ALIGN="LEFT"/>product_category｜产品类别<BR ALIGN="LEFT"/>average_selling_price｜平均销售单价<BR ALIGN="LEFT"/>cost_ratio｜成本比例（模拟）<BR ALIGN="LEFT"/>unit_cost｜单位进货成本（模拟）<BR ALIGN="LEFT"/>is_cost_synthetic｜成本是否为模拟数据</TD></TR>
+    </TABLE>
+  >];
+
+  stores [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5" COLOR="#1877D2">
+      <TR><TD BGCOLOR="#DCEEFF"><B>门店 Stores</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><B>store_id｜门店编号（主键）</B><BR ALIGN="LEFT"/>store_location｜门店位置<BR ALIGN="LEFT"/>store_type｜门店类型</TD></TR>
+    </TABLE>
+  >];
+
+  interactions [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5" COLOR="#1877D2">
+      <TR><TD BGCOLOR="#DCEEFF"><B>客户互动 Interactions</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><B>interaction_id｜互动编号（主键）</B><BR ALIGN="LEFT"/>customer_id｜客户编号（外键）<BR ALIGN="LEFT"/>channel｜渠道<BR ALIGN="LEFT"/>interaction_type｜互动类型<BR ALIGN="LEFT"/>interaction_date｜互动日期<BR ALIGN="LEFT"/>duration｜持续时长<BR ALIGN="LEFT"/>page_or_product｜页面或产品<BR ALIGN="LEFT"/>session_id｜会话编号</TD></TR>
+    </TABLE>
+  >];
+
+  support [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5" COLOR="#1877D2">
+      <TR><TD BGCOLOR="#DCEEFF"><B>客服工单 Support Tickets</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><B>ticket_id｜工单编号（主键）</B><BR ALIGN="LEFT"/>customer_id｜客户编号（外键）<BR ALIGN="LEFT"/>issue_category｜问题类别<BR ALIGN="LEFT"/>priority｜优先级<BR ALIGN="LEFT"/>submission_date｜提交日期<BR ALIGN="LEFT"/>resolution_date｜解决日期<BR ALIGN="LEFT"/>resolution_status｜处理状态<BR ALIGN="LEFT"/>resolution_time_hours｜解决时长（小时）<BR ALIGN="LEFT"/>customer_satisfaction_score｜客户满意度评分<BR ALIGN="LEFT"/>notes｜备注</TD></TR>
+    </TABLE>
+  >];
+
+  reviews [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5" COLOR="#1877D2">
+      <TR><TD BGCOLOR="#DCEEFF"><B>客户评价 Customer Reviews</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><B>review_id｜评价编号（主键）</B><BR ALIGN="LEFT"/>customer_id｜客户编号（外键）<BR ALIGN="LEFT"/>product_name｜产品名称<BR ALIGN="LEFT"/>product_category｜产品类别<BR ALIGN="LEFT"/>full_name｜客户姓名<BR ALIGN="LEFT"/>transaction_date｜交易日期<BR ALIGN="LEFT"/>review_date｜评价日期<BR ALIGN="LEFT"/>rating｜评分<BR ALIGN="LEFT"/>review_title｜评价标题<BR ALIGN="LEFT"/>review_text｜评价正文</TD></TR>
+    </TABLE>
+  >];
+
+  campaigns [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5" COLOR="#1877D2">
+      <TR><TD BGCOLOR="#DCEEFF"><B>营销活动 Campaigns</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><B>campaign_id｜活动编号（主键）</B><BR ALIGN="LEFT"/>campaign_name｜活动名称<BR ALIGN="LEFT"/>campaign_type｜活动类型<BR ALIGN="LEFT"/>start_date｜开始日期<BR ALIGN="LEFT"/>end_date｜结束日期<BR ALIGN="LEFT"/>target_segment｜目标客户群<BR ALIGN="LEFT"/>budget｜预算<BR ALIGN="LEFT"/>impressions｜展示次数<BR ALIGN="LEFT"/>clicks｜点击次数<BR ALIGN="LEFT"/>conversions｜转化次数<BR ALIGN="LEFT"/>conversion_rate｜转化率<BR ALIGN="LEFT"/>roi｜投资回报率</TD></TR>
+    </TABLE>
+  >];
+
+  inventory [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5" COLOR="#E39100" STYLE="DASHED">
+      <TR><TD BGCOLOR="#FFF0CE"><B>库存 Inventory【模拟数据】</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><B>inventory_id｜库存编号（主键）</B><BR ALIGN="LEFT"/>product_id｜产品编号（外键）<BR ALIGN="LEFT"/>store_id｜门店编号（外键）<BR ALIGN="LEFT"/>stock_quantity｜库存数量<BR ALIGN="LEFT"/>reorder_level｜补货阈值<BR ALIGN="LEFT"/>last_restock_date｜最近补货日期<BR ALIGN="LEFT"/>snapshot_date｜快照日期<BR ALIGN="LEFT"/>needs_reorder｜是否需要补货<BR ALIGN="LEFT"/>is_synthetic｜是否模拟数据</TD></TR>
+    </TABLE>
+  >];
+
+  expenses [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5" COLOR="#E39100" STYLE="DASHED">
+      <TR><TD BGCOLOR="#FFF0CE"><B>费用 Expenses【模拟数据】</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><B>expense_id｜费用编号（主键）</B><BR ALIGN="LEFT"/>expense_date｜费用日期<BR ALIGN="LEFT"/>store_id｜门店编号（外键）<BR ALIGN="LEFT"/>expense_category｜费用类别<BR ALIGN="LEFT"/>amount｜金额<BR ALIGN="LEFT"/>is_synthetic｜是否模拟数据</TD></TR>
+    </TABLE>
+  >];
+
+  returns [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5" COLOR="#E39100" STYLE="DASHED">
+      <TR><TD BGCOLOR="#FFF0CE"><B>退货与退款 Returns &amp; Refunds【模拟数据】</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><B>return_id｜退货编号（主键）</B><BR ALIGN="LEFT"/>transaction_id｜交易编号（外键）<BR ALIGN="LEFT"/>customer_id｜客户编号（外键）<BR ALIGN="LEFT"/>return_date｜退货日期<BR ALIGN="LEFT"/>return_quantity｜退货数量<BR ALIGN="LEFT"/>return_reason｜退货原因<BR ALIGN="LEFT"/>refund_status｜退款状态<BR ALIGN="LEFT"/>requested_refund_amount｜申请退款金额<BR ALIGN="LEFT"/>refund_amount｜实际退款金额<BR ALIGN="LEFT"/>is_synthetic｜是否模拟数据</TD></TR>
+    </TABLE>
+  >];
+
+  attribution [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5" COLOR="#E39100" STYLE="DASHED">
+      <TR><TD BGCOLOR="#FFF0CE"><B>营销归因 Campaign Attribution【模拟数据】</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><B>attribution_id｜归因编号（主键）</B><BR ALIGN="LEFT"/>transaction_id｜交易编号（外键）<BR ALIGN="LEFT"/>campaign_id｜活动编号（外键）<BR ALIGN="LEFT"/>attribution_date｜归因日期<BR ALIGN="LEFT"/>attribution_method｜归因方法<BR ALIGN="LEFT"/>attributed_revenue｜归因收入<BR ALIGN="LEFT"/>is_synthetic｜是否模拟数据</TD></TR>
+    </TABLE>
+  >];
+
+  business_documents [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5" COLOR="#248C78">
+      <TR><TD BGCOLOR="#DDF5EF"><B>业务文档 Business Documents【pgvector】</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><B>document_id｜文档编号（主键）</B><BR ALIGN="LEFT"/>source_type｜来源类型<BR ALIGN="LEFT"/>source_id｜来源编号<BR ALIGN="LEFT"/>customer_id｜客户编号（外键）<BR ALIGN="LEFT"/>content｜文本内容<BR ALIGN="LEFT"/>metadata｜元数据（JSONB）<BR ALIGN="LEFT"/>embedding_model｜嵌入模型<BR ALIGN="LEFT"/>embedding｜向量（384维）<BR ALIGN="LEFT"/>created_at｜创建时间</TD></TR>
+    </TABLE>
+  >];
+
+  transaction_profitability [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5" COLOR="#7656B5" STYLE="DASHED">
+      <TR><TD BGCOLOR="#ECE5FA"><B>交易利润 Transaction Profitability【视图】</B></TD></TR>
+      <TR><TD ALIGN="LEFT">transactions.*｜全部交易字段<BR ALIGN="LEFT"/>estimated_unit_cost｜估算单位成本<BR ALIGN="LEFT"/>cost_method｜成本计算方法<BR ALIGN="LEFT"/>completed_refund_amount｜已完成退款金额<BR ALIGN="LEFT"/>recognized_revenue｜退款后确认收入<BR ALIGN="LEFT"/>cost_of_goods_sold｜进货成本<BR ALIGN="LEFT"/>gross_profit｜毛利润<BR ALIGN="LEFT"/>gross_margin_percent｜毛利率</TD></TR>
+    </TABLE>
+  >];
+
+  business_profit_summary [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5" COLOR="#7656B5" STYLE="DASHED">
+      <TR><TD BGCOLOR="#ECE5FA"><B>业务利润汇总 Business Profit Summary【视图】</B></TD></TR>
+      <TR><TD ALIGN="LEFT">net_sales_before_refunds｜退款前净销售额<BR ALIGN="LEFT"/>completed_refunds｜已完成退款额<BR ALIGN="LEFT"/>refund_adjusted_revenue｜退款后收入<BR ALIGN="LEFT"/>cost_coverage_percent｜成本覆盖率<BR ALIGN="LEFT"/>cost_of_goods_sold｜进货成本<BR ALIGN="LEFT"/>estimated_gross_profit_on_costed_sales｜已覆盖销售估算毛利润<BR ALIGN="LEFT"/>operating_expenses｜经营费用<BR ALIGN="LEFT"/>campaign_spend｜营销活动支出<BR ALIGN="LEFT"/>estimated_operating_profit_on_costed_sales｜已覆盖销售估算经营利润</TD></TR>
+    </TABLE>
+  >];
+
+  customers -> transactions [label="一对多"];
+  customers -> interactions [label="一对多"];
+  customers -> support [label="一对多"];
+  customers -> reviews [label="一对多"];
+  customers -> returns [label="一对多", style=dashed, color="#D08A16"];
+  customers -> business_documents [label="一对多", color="#248C78"];
+  products -> transactions [label="一对多"];
+  products -> inventory [label="一对多", style=dashed, color="#D08A16"];
+  stores -> transactions [label="一对多"];
+  stores -> inventory [label="一对多", style=dashed, color="#D08A16"];
+  stores -> expenses [label="一对多", style=dashed, color="#D08A16"];
+  transactions -> returns [label="一对零或多", style=dashed, color="#D08A16"];
+  transactions -> attribution [label="一对零或一", style=dashed, color="#D08A16"];
+  campaigns -> attribution [label="一对多", style=dashed, color="#D08A16"];
+  reviews -> business_documents [label="生成向量", style=dotted, color="#248C78"];
+  support -> business_documents [label="生成向量", style=dotted, color="#248C78"];
+  transactions -> transaction_profitability [label="来源", style=dotted, color="#7656B5"];
+  products -> transaction_profitability [label="估算成本", style=dotted, color="#7656B5"];
+  returns -> transaction_profitability [label="退款", style=dotted, color="#7656B5"];
+  transaction_profitability -> business_profit_summary [label="汇总", style=dotted, color="#7656B5"];
+  expenses -> business_profit_summary [label="经营费用", style=dotted, color="#7656B5"];
+  campaigns -> business_profit_summary [label="活动预算", style=dotted, color="#7656B5"];
+}
