@@ -18,7 +18,7 @@ management dashboard. It currently includes:
 
 ## Run the dashboard on this computer
 
-The root `.env` file must contain a valid Supabase Session Pooler
+The root `.env` file must contain a valid Supabase pooler
 `DATABASE_URL`. Keep that file local; it is excluded from Git.
 
 ```bash
@@ -30,7 +30,9 @@ uvicorn app:app --reload
 Open [http://127.0.0.1:8000](http://127.0.0.1:8000). FastAPI documentation is
 available at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
 
-## Set up a fresh clone
+## 组员首次运行：连接现有数据库
+
+拉取 `shiying-branch` 后，在项目根目录执行以下命令（macOS / Linux）：
 
 ```bash
 python3 -m venv .venv
@@ -39,10 +41,44 @@ python -m pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Replace the placeholder `DATABASE_URL` in `.env` with the Supabase Session
-Pooler URI. Never commit `.env`.
+如果已有 `.env`，跳过复制命令，保留已有配置。
 
-For a new, empty Supabase project:
+向项目负责人通过私密渠道获取数据库连接信息，将 `.env` 中的
+`DATABASE_URL` 替换为完整连接地址。本项目当前使用 **Transaction pooler，
+端口 6543**；以下仅为占位示例：
+
+```dotenv
+DATABASE_URL=postgresql://postgres.PROJECT_REF:PASSWORD@HOST:6543/postgres
+```
+
+主机、用户名和密码必须使用负责人提供的值。密码包含特殊字符时，需要进行
+URL 百分号编码。不要将真实连接地址或 `.env` 提交到 GitHub。
+
+启动服务：
+
+```bash
+uvicorn app:app --reload --port 8001
+```
+
+保持终端运行，在运行服务的这台电脑上打开：
+
+- Dashboard：http://127.0.0.1:8001/
+- 数据库连接检查：http://127.0.0.1:8001/api/health
+- API 文档及测试：http://127.0.0.1:8001/docs
+
+健康接口返回 `"database": "connected"` 表示连接成功。若端口被占用，可以改用
+`--port 8002`，浏览器地址也同步改成 8002。修改 `.env` 后需停止并重新启动服务。
+
+**组员共用现有 Supabase 数据库，不需要本地 CSV，也不要执行建表、数据导入或
+数据更新脚本。** 本地原始、清洗后和模拟数据均未上传 GitHub；运行 Dashboard
+直接读取云端数据库。`database/load_data.py` 会清空并重新加载共享表。
+
+## Initialize a separate, empty database
+
+Only use these steps when intentionally setting up a separate, empty Supabase
+project. Configure `.env` to point to that new project first. Obtain the source
+CSV files separately and place them in `data/raw/`; datasets are not included in
+this repository.
 
 1. Run `database/schema.sql` in the Supabase SQL Editor.
 2. Generate the cleaned and synthetic CSV files.
