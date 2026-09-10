@@ -1,1 +1,8 @@
-
+pandas
+numpy
+psycopg[binary]
+pgvector
+python-dotenv
+sentence-transformers
+fastapi
+uvicorn

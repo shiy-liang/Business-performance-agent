@@ -1,0 +1,145 @@
+digraph BusinessPerformanceAgent {
+  graph [
+    label="Business Performance Agent — Complete Data Model",
+    labelloc=t,
+    fontsize=24,
+    fontname="Arial Bold",
+    fontcolor="#102A56",
+    bgcolor="#FAFCFF",
+    rankdir=LR,
+    splines=ortho,
+    nodesep=0.45,
+    ranksep=1.0,
+    pad=0.25
+  ];
+  node [shape=plain, fontname="Arial"];
+  edge [color="#51647A", penwidth=1.4, arrowsize=0.75, fontname="Arial", fontsize=9];
+
+  customers [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5" COLOR="#1877D2">
+      <TR><TD BGCOLOR="#DCEEFF"><B>Customers</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><B>customer_id (PK)</B><BR ALIGN="LEFT"/>full_name<BR ALIGN="LEFT"/>age<BR ALIGN="LEFT"/>gender<BR ALIGN="LEFT"/>email<BR ALIGN="LEFT"/>phone<BR ALIGN="LEFT"/>street_address<BR ALIGN="LEFT"/>city<BR ALIGN="LEFT"/>state<BR ALIGN="LEFT"/>zip_code<BR ALIGN="LEFT"/>registration_date<BR ALIGN="LEFT"/>preferred_channel</TD></TR>
+    </TABLE>
+  >];
+
+  transactions [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5" COLOR="#1877D2">
+      <TR><TD BGCOLOR="#DCEEFF"><B>Transactions</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><B>transaction_id (PK)</B><BR ALIGN="LEFT"/>customer_id (FK)<BR ALIGN="LEFT"/>product_id (FK)<BR ALIGN="LEFT"/>product_name<BR ALIGN="LEFT"/>product_category<BR ALIGN="LEFT"/>quantity<BR ALIGN="LEFT"/>price<BR ALIGN="LEFT"/>transaction_date<BR ALIGN="LEFT"/>store_id (FK)<BR ALIGN="LEFT"/>store_location<BR ALIGN="LEFT"/>payment_method<BR ALIGN="LEFT"/>discount_applied<BR ALIGN="LEFT"/>gross_sales<BR ALIGN="LEFT"/>discount_amount<BR ALIGN="LEFT"/>net_sales</TD></TR>
+    </TABLE>
+  >];
+
+  products [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5" COLOR="#1877D2">
+      <TR><TD BGCOLOR="#DCEEFF"><B>Products</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><B>product_id (PK)</B><BR ALIGN="LEFT"/>product_name<BR ALIGN="LEFT"/>product_category<BR ALIGN="LEFT"/>average_selling_price<BR ALIGN="LEFT"/>cost_ratio [Synthetic]<BR ALIGN="LEFT"/>unit_cost [Synthetic]<BR ALIGN="LEFT"/>is_cost_synthetic</TD></TR>
+    </TABLE>
+  >];
+
+  stores [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5" COLOR="#1877D2">
+      <TR><TD BGCOLOR="#DCEEFF"><B>Stores</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><B>store_id (PK)</B><BR ALIGN="LEFT"/>store_location<BR ALIGN="LEFT"/>store_type</TD></TR>
+    </TABLE>
+  >];
+
+  interactions [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5" COLOR="#1877D2">
+      <TR><TD BGCOLOR="#DCEEFF"><B>Interactions</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><B>interaction_id (PK)</B><BR ALIGN="LEFT"/>customer_id (FK)<BR ALIGN="LEFT"/>channel<BR ALIGN="LEFT"/>interaction_type<BR ALIGN="LEFT"/>interaction_date<BR ALIGN="LEFT"/>duration<BR ALIGN="LEFT"/>page_or_product<BR ALIGN="LEFT"/>session_id</TD></TR>
+    </TABLE>
+  >];
+
+  support [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5" COLOR="#1877D2">
+      <TR><TD BGCOLOR="#DCEEFF"><B>Support Tickets</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><B>ticket_id (PK)</B><BR ALIGN="LEFT"/>customer_id (FK)<BR ALIGN="LEFT"/>issue_category<BR ALIGN="LEFT"/>priority<BR ALIGN="LEFT"/>submission_date<BR ALIGN="LEFT"/>resolution_date<BR ALIGN="LEFT"/>resolution_status<BR ALIGN="LEFT"/>resolution_time_hours<BR ALIGN="LEFT"/>customer_satisfaction_score<BR ALIGN="LEFT"/>notes</TD></TR>
+    </TABLE>
+  >];
+
+  reviews [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5" COLOR="#1877D2">
+      <TR><TD BGCOLOR="#DCEEFF"><B>Customer Reviews</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><B>review_id (PK)</B><BR ALIGN="LEFT"/>customer_id (FK)<BR ALIGN="LEFT"/>product_name<BR ALIGN="LEFT"/>product_category<BR ALIGN="LEFT"/>full_name<BR ALIGN="LEFT"/>transaction_date<BR ALIGN="LEFT"/>review_date<BR ALIGN="LEFT"/>rating<BR ALIGN="LEFT"/>review_title<BR ALIGN="LEFT"/>review_text</TD></TR>
+    </TABLE>
+  >];
+
+  campaigns [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5" COLOR="#1877D2">
+      <TR><TD BGCOLOR="#DCEEFF"><B>Campaigns</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><B>campaign_id (PK)</B><BR ALIGN="LEFT"/>campaign_name<BR ALIGN="LEFT"/>campaign_type<BR ALIGN="LEFT"/>start_date<BR ALIGN="LEFT"/>end_date<BR ALIGN="LEFT"/>target_segment<BR ALIGN="LEFT"/>budget<BR ALIGN="LEFT"/>impressions<BR ALIGN="LEFT"/>clicks<BR ALIGN="LEFT"/>conversions<BR ALIGN="LEFT"/>conversion_rate<BR ALIGN="LEFT"/>roi</TD></TR>
+    </TABLE>
+  >];
+
+  inventory [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5" COLOR="#E39100" STYLE="DASHED">
+      <TR><TD BGCOLOR="#FFF0CE"><B>Inventory [Synthetic]</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><B>inventory_id (PK)</B><BR ALIGN="LEFT"/>product_id (FK)<BR ALIGN="LEFT"/>store_id (FK)<BR ALIGN="LEFT"/>stock_quantity<BR ALIGN="LEFT"/>reorder_level<BR ALIGN="LEFT"/>last_restock_date<BR ALIGN="LEFT"/>snapshot_date<BR ALIGN="LEFT"/>needs_reorder<BR ALIGN="LEFT"/>is_synthetic</TD></TR>
+    </TABLE>
+  >];
+
+  expenses [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5" COLOR="#E39100" STYLE="DASHED">
+      <TR><TD BGCOLOR="#FFF0CE"><B>Expenses [Synthetic]</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><B>expense_id (PK)</B><BR ALIGN="LEFT"/>expense_date<BR ALIGN="LEFT"/>store_id (FK)<BR ALIGN="LEFT"/>expense_category<BR ALIGN="LEFT"/>amount<BR ALIGN="LEFT"/>is_synthetic</TD></TR>
+    </TABLE>
+  >];
+
+  returns [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5" COLOR="#E39100" STYLE="DASHED">
+      <TR><TD BGCOLOR="#FFF0CE"><B>Returns &amp; Refunds [Synthetic]</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><B>return_id (PK)</B><BR ALIGN="LEFT"/>transaction_id (FK)<BR ALIGN="LEFT"/>customer_id (FK)<BR ALIGN="LEFT"/>return_date<BR ALIGN="LEFT"/>return_quantity<BR ALIGN="LEFT"/>return_reason<BR ALIGN="LEFT"/>refund_status<BR ALIGN="LEFT"/>requested_refund_amount<BR ALIGN="LEFT"/>refund_amount<BR ALIGN="LEFT"/>is_synthetic</TD></TR>
+    </TABLE>
+  >];
+
+  attribution [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5" COLOR="#E39100" STYLE="DASHED">
+      <TR><TD BGCOLOR="#FFF0CE"><B>Campaign Attribution [Synthetic]</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><B>attribution_id (PK)</B><BR ALIGN="LEFT"/>transaction_id (FK)<BR ALIGN="LEFT"/>campaign_id (FK)<BR ALIGN="LEFT"/>attribution_date<BR ALIGN="LEFT"/>attribution_method<BR ALIGN="LEFT"/>attributed_revenue<BR ALIGN="LEFT"/>is_synthetic</TD></TR>
+    </TABLE>
+  >];
+
+  business_documents [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5" COLOR="#248C78">
+      <TR><TD BGCOLOR="#DDF5EF"><B>Business Documents [pgvector]</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><B>document_id (PK)</B><BR ALIGN="LEFT"/>source_type<BR ALIGN="LEFT"/>source_id<BR ALIGN="LEFT"/>customer_id (FK)<BR ALIGN="LEFT"/>content<BR ALIGN="LEFT"/>metadata (JSONB)<BR ALIGN="LEFT"/>embedding_model<BR ALIGN="LEFT"/>embedding (vector 384)<BR ALIGN="LEFT"/>created_at</TD></TR>
+    </TABLE>
+  >];
+
+  transaction_profitability [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5" COLOR="#7656B5" STYLE="DASHED">
+      <TR><TD BGCOLOR="#ECE5FA"><B>Transaction Profitability [View]</B></TD></TR>
+      <TR><TD ALIGN="LEFT">transactions.*<BR ALIGN="LEFT"/>estimated_unit_cost<BR ALIGN="LEFT"/>cost_method<BR ALIGN="LEFT"/>completed_refund_amount<BR ALIGN="LEFT"/>recognized_revenue<BR ALIGN="LEFT"/>cost_of_goods_sold<BR ALIGN="LEFT"/>gross_profit<BR ALIGN="LEFT"/>gross_margin_percent</TD></TR>
+    </TABLE>
+  >];
+
+  business_profit_summary [label=<
+    <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="5" COLOR="#7656B5" STYLE="DASHED">
+      <TR><TD BGCOLOR="#ECE5FA"><B>Business Profit Summary [View]</B></TD></TR>
+      <TR><TD ALIGN="LEFT">net_sales_before_refunds<BR ALIGN="LEFT"/>completed_refunds<BR ALIGN="LEFT"/>refund_adjusted_revenue<BR ALIGN="LEFT"/>cost_coverage_percent<BR ALIGN="LEFT"/>cost_of_goods_sold<BR ALIGN="LEFT"/>estimated_gross_profit_on_costed_sales<BR ALIGN="LEFT"/>operating_expenses<BR ALIGN="LEFT"/>campaign_spend<BR ALIGN="LEFT"/>estimated_operating_profit_on_costed_sales</TD></TR>
+    </TABLE>
+  >];
+
+  customers -> transactions [label="1 : many"];
+  customers -> interactions [label="1 : many"];
+  customers -> support [label="1 : many"];
+  customers -> reviews [label="1 : many"];
+  customers -> returns [label="1 : many", style=dashed, color="#D08A16"];
+  customers -> business_documents [label="1 : many", color="#248C78"];
+  products -> transactions [label="1 : many"];
+  products -> inventory [label="1 : many", style=dashed, color="#D08A16"];
+  stores -> transactions [label="1 : many"];
+  stores -> inventory [label="1 : many", style=dashed, color="#D08A16"];
+  stores -> expenses [label="1 : many", style=dashed, color="#D08A16"];
+  transactions -> returns [label="1 : 0..many", style=dashed, color="#D08A16"];
+  transactions -> attribution [label="1 : 0..1", style=dashed, color="#D08A16"];
+  campaigns -> attribution [label="1 : many", style=dashed, color="#D08A16"];
+  reviews -> business_documents [label="embedded as", style=dotted, color="#248C78"];
+  support -> business_documents [label="embedded as", style=dotted, color="#248C78"];
+  transactions -> transaction_profitability [label="source", style=dotted, color="#7656B5"];
+  products -> transaction_profitability [label="estimated cost", style=dotted, color="#7656B5"];
+  returns -> transaction_profitability [label="refund", style=dotted, color="#7656B5"];
+  transaction_profitability -> business_profit_summary [label="aggregate", style=dotted, color="#7656B5"];
+  expenses -> business_profit_summary [label="expense", style=dotted, color="#7656B5"];
+  campaigns -> business_profit_summary [label="campaign budget", style=dotted, color="#7656B5"];
+}
