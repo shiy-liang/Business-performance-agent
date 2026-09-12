@@ -6,3 +6,7 @@ python-dotenv
 sentence-transformers
 fastapi
 uvicorn
+tzdata
+openai
+PyYAML
+tenacity
