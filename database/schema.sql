@@ -68,7 +68,8 @@ CREATE TABLE IF NOT EXISTS customer_reviews (
   product_name TEXT NOT NULL, product_category TEXT NOT NULL, full_name TEXT,
   transaction_date DATE NOT NULL, review_date DATE NOT NULL,
   rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
-  review_title TEXT, review_text TEXT, CHECK (review_date >= transaction_date)
+  review_title TEXT, review_text TEXT, embedding extensions.vector,
+  CHECK (review_date >= transaction_date)
 );
 CREATE TABLE IF NOT EXISTS inventory (
   inventory_id TEXT PRIMARY KEY,
@@ -111,6 +112,28 @@ CREATE TABLE IF NOT EXISTS business_documents (
   content TEXT NOT NULL, metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   embedding_model TEXT NOT NULL, embedding extensions.vector(384) NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), UNIQUE (source_type, source_id)
+);
+
+CREATE TABLE IF NOT EXISTS knowledge_files (
+  file_id BIGSERIAL PRIMARY KEY,
+  original_filename TEXT NOT NULL,
+  file_hash CHAR(64) NOT NULL,
+  storage_path TEXT NOT NULL,
+  mime_type TEXT,
+  file_size BIGINT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT knowledge_files_hash_unique UNIQUE (file_hash)
+);
+
+CREATE TABLE IF NOT EXISTS unstructured_knowledge_chunks (
+  chunk_id BIGSERIAL PRIMARY KEY,
+  source_type TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  chunk_index INTEGER NOT NULL,
+  content TEXT NOT NULL,
+  embedding extensions.vector NOT NULL,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  UNIQUE (source_type, source_id, chunk_index)
 );
 
 CREATE OR REPLACE VIEW transaction_profitability AS
@@ -177,6 +200,8 @@ CREATE INDEX IF NOT EXISTS idx_transactions_store ON transactions(store_id);
 CREATE INDEX IF NOT EXISTS idx_interactions_customer ON interactions(customer_id);
 CREATE INDEX IF NOT EXISTS idx_support_customer ON support_tickets(customer_id);
 CREATE INDEX IF NOT EXISTS idx_reviews_customer ON customer_reviews(customer_id);
+CREATE INDEX IF NOT EXISTS idx_customer_reviews_embedding_hnsw ON customer_reviews
+  USING hnsw (embedding extensions.vector_cosine_ops);
 CREATE INDEX IF NOT EXISTS idx_documents_embedding_hnsw ON business_documents
   USING hnsw (embedding extensions.vector_cosine_ops);
 COMMIT;

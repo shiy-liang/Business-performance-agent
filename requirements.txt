@@ -5,8 +5,13 @@ pgvector
 python-dotenv
 sentence-transformers
 fastapi
+python-multipart
 uvicorn
 tzdata
 openai
 PyYAML
 tenacity
+langchain-community
+langchain-text-splitters
+pypdf
+chardet
