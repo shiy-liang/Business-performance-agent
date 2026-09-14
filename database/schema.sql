@@ -112,6 +112,26 @@ CREATE TABLE IF NOT EXISTS business_documents (
   embedding_model TEXT NOT NULL, embedding extensions.vector(384) NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), UNIQUE (source_type, source_id)
 );
+CREATE TABLE IF NOT EXISTS agent_runs (
+  run_id UUID PRIMARY KEY,
+  run_type TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'running', 'completed', 'failed')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  started_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  error_message TEXT,
+  CHECK (started_at IS NULL OR started_at >= created_at),
+  CHECK (completed_at IS NULL OR completed_at >= COALESCE(started_at, created_at))
+);
+CREATE TABLE IF NOT EXISTS run_events (
+  event_id BIGSERIAL PRIMARY KEY,
+  run_id UUID NOT NULL REFERENCES agent_runs(run_id) ON DELETE CASCADE,
+  event_type TEXT NOT NULL,
+  message TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb
+);
 
 CREATE OR REPLACE VIEW transaction_profitability AS
 WITH completed_refunds AS (
@@ -177,6 +197,8 @@ CREATE INDEX IF NOT EXISTS idx_transactions_store ON transactions(store_id);
 CREATE INDEX IF NOT EXISTS idx_interactions_customer ON interactions(customer_id);
 CREATE INDEX IF NOT EXISTS idx_support_customer ON support_tickets(customer_id);
 CREATE INDEX IF NOT EXISTS idx_reviews_customer ON customer_reviews(customer_id);
+CREATE INDEX IF NOT EXISTS idx_run_events_run_created
+  ON run_events(run_id, created_at, event_id);
 CREATE INDEX IF NOT EXISTS idx_documents_embedding_hnsw ON business_documents
   USING hnsw (embedding extensions.vector_cosine_ops);
 COMMIT;

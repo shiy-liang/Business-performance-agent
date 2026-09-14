@@ -13,6 +13,7 @@ from backend.routers.chat import router as chat_router
 from backend.routers.finance import router as finance_router
 from backend.routers.marketing import router as marketing_router
 from backend.routers.products import router as products_router
+from backend.routers.runs import router as runs_router
 
 
 app = FastAPI(
@@ -28,6 +29,7 @@ app.include_router(action_center_router)
 app.include_router(products_router)
 app.include_router(marketing_router)
 app.include_router(chat_router)
+app.include_router(runs_router)
 
 
 @app.get("/", include_in_schema=False)
