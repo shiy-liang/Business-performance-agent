@@ -368,6 +368,216 @@ h1 {
   grid-column: span 5;
 }
 
+.knowledge-panel {
+  grid-column: span 12;
+}
+
+.knowledge-header {
+  align-items: center;
+}
+
+.knowledge-header-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.review-sync-button {
+  padding: 8px 12px;
+  cursor: pointer;
+  border: 1px solid var(--green);
+  border-radius: 9px;
+  color: #fff;
+  background: var(--green);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.review-sync-button:hover {
+  background: var(--green-dark);
+}
+
+.review-sync-button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.knowledge-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.85fr) minmax(360px, 1.45fr);
+  gap: 18px;
+}
+
+.knowledge-drop-zone {
+  display: flex;
+  min-height: 210px;
+  padding: 26px;
+  cursor: pointer;
+  text-align: center;
+  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+  border: 1.5px dashed #aebbb1;
+  border-radius: var(--radius-md);
+  background: #f7f9f4;
+  transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+
+.knowledge-drop-zone:hover,
+.knowledge-drop-zone.is-dragging {
+  border-color: var(--green);
+  background: var(--green-soft);
+  transform: translateY(-1px);
+}
+
+.knowledge-drop-zone.is-uploading {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.knowledge-drop-zone:focus-visible,
+.review-sync-button:focus-visible,
+.knowledge-file-actions a:focus-visible,
+.knowledge-file-actions button:focus-visible {
+  outline: 3px solid rgba(22, 125, 90, 0.28);
+  outline-offset: 2px;
+}
+
+.upload-icon {
+  display: grid;
+  width: 45px;
+  height: 45px;
+  margin-bottom: 13px;
+  place-items: center;
+  border-radius: 14px;
+  color: var(--green-dark);
+  background: var(--green-soft);
+}
+
+.upload-icon svg {
+  width: 23px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.knowledge-drop-zone strong {
+  font-size: 15px;
+}
+
+.knowledge-drop-zone > span:not(.upload-icon) {
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.knowledge-drop-zone small {
+  margin-top: 14px;
+  color: #87908a;
+  font-size: 9px;
+}
+
+.knowledge-library {
+  min-width: 0;
+}
+
+.upload-status {
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 11px;
+}
+
+.upload-status.loading {
+  color: #7c430d;
+  background: var(--amber-soft);
+}
+
+.upload-status.success {
+  color: var(--green-dark);
+  background: var(--green-soft);
+}
+
+.upload-status.error {
+  color: #87342f;
+  background: var(--red-soft);
+}
+
+.knowledge-file-list {
+  min-height: 210px;
+}
+
+.knowledge-file-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  min-height: 62px;
+  padding: 10px 2px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+}
+
+.knowledge-file-row:last-child {
+  border-bottom: 0;
+}
+
+.file-type-badge {
+  min-width: 38px;
+  padding: 7px 5px;
+  text-align: center;
+  border-radius: 8px;
+  color: var(--green-dark);
+  background: var(--green-soft);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.knowledge-file-copy {
+  min-width: 0;
+}
+
+.knowledge-file-copy strong,
+.knowledge-file-copy span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knowledge-file-copy strong {
+  font-size: 12px;
+}
+
+.knowledge-file-copy span {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.knowledge-file-actions {
+  display: flex;
+  gap: 7px;
+}
+
+.knowledge-file-actions a,
+.knowledge-file-actions button {
+  padding: 6px 8px;
+  cursor: pointer;
+  text-decoration: none;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  background: var(--surface-strong);
+  font-size: 9px;
+}
+
+.knowledge-file-actions button:hover {
+  color: var(--red);
+  border-color: #e8bab5;
+}
+
 .panel-header,
 .subsection-heading,
 .chart-heading,
@@ -1044,6 +1254,10 @@ footer {
   }
 
   .metric-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .knowledge-layout {
     grid-template-columns: 1fr;
   }
 

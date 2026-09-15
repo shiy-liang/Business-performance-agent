@@ -7,6 +7,7 @@ const state = {
   productData: null,
   requestController: null,
   filterTimer: null,
+  knowledgeAllowedExtensions: [],
 };
 
 const elements = {
@@ -31,6 +32,14 @@ const elements = {
   chatForm: document.querySelector("#chat-form"),
   chatInput: document.querySelector("#chat-input"),
   chatResponse: document.querySelector("#chat-response"),
+  knowledgeDropZone: document.querySelector("#knowledge-drop-zone"),
+  knowledgeFileInput: document.querySelector("#knowledge-file-input"),
+  knowledgeFileCount: document.querySelector("#knowledge-file-count"),
+  knowledgeUploadStatus: document.querySelector("#knowledge-upload-status"),
+  knowledgeFileList: document.querySelector("#knowledge-file-list"),
+  knowledgeUploadPolicy: document.querySelector("#knowledge-upload-policy"),
+  reviewSyncButton: document.querySelector("#review-sync-button"),
+  reviewSyncStatus: document.querySelector("#review-sync-status"),
 };
 
 const moneyFormatter = new Intl.NumberFormat("zh-CN", {
@@ -86,7 +95,7 @@ function endpoint(path, options = {}) {
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, options);
   if (!response.ok) {
-    let detail = `请求失败（${response.status}）`;
+    let detail = `Request failed (${response.status})`;
     try {
       const body = await response.json();
       detail = body.detail || detail;
@@ -117,6 +126,148 @@ function clearGlobalError() {
 function renderEmpty(container, message) {
   container.className = "empty-state";
   container.textContent = message;
+}
+
+function formatFileSize(bytes) {
+  const value = Number(bytes) || 0;
+  if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${value} B`;
+}
+
+function setUploadStatus(mode, message) {
+  elements.knowledgeUploadStatus.hidden = false;
+  elements.knowledgeUploadStatus.className = `upload-status ${mode}`;
+  elements.knowledgeUploadStatus.textContent = message;
+}
+
+function renderKnowledgeFiles(data) {
+  const policy = data.upload_policy;
+  state.knowledgeAllowedExtensions = policy.allowed_extensions;
+  elements.knowledgeFileInput.accept = policy.allowed_extensions.join(",");
+  elements.knowledgeUploadPolicy.textContent = `${policy.allowed_extensions
+    .map((extension) => extension.slice(1).toUpperCase())
+    .join(", ")} · One file · Up to ${formatFileSize(policy.max_file_size_bytes)}`;
+  elements.knowledgeFileCount.textContent = `${data.count} files`;
+  elements.knowledgeFileList.className = "knowledge-file-list";
+  if (!data.files.length) {
+    renderEmpty(elements.knowledgeFileList, "No knowledge files have been uploaded yet");
+    return;
+  }
+
+  elements.knowledgeFileList.innerHTML = data.files
+    .map(
+      (file) => `
+        <article class="knowledge-file-row">
+          <span class="file-type-badge">${escapeHtml(
+            file.original_filename.split(".").pop().toUpperCase(),
+          )}</span>
+          <div class="knowledge-file-copy">
+            <strong title="${escapeHtml(file.original_filename)}">${escapeHtml(
+              file.original_filename,
+            )}</strong>
+            <span>${escapeHtml(formatFileSize(file.file_size))} · ${escapeHtml(
+              new Date(file.created_at).toLocaleString("en-US"),
+            )}</span>
+          </div>
+          <div class="knowledge-file-actions">
+            <a href="/api/knowledge/files/${encodeURIComponent(file.file_id)}/download">Download</a>
+            <button type="button" data-delete-file-id="${escapeHtml(file.file_id)}">Delete</button>
+          </div>
+        </article>
+      `,
+    )
+    .join("");
+}
+
+async function loadKnowledgeFiles() {
+  try {
+    const data = await fetchJson("/api/knowledge/files");
+    renderKnowledgeFiles(data);
+  } catch (error) {
+    elements.knowledgeFileCount.textContent = "Unavailable";
+    renderEmpty(elements.knowledgeFileList, `Knowledge files could not be loaded: ${error.message}`);
+  }
+}
+
+async function uploadKnowledgeFile(file) {
+  if (!file) return;
+  const extension = file.name.includes(".")
+    ? `.${file.name.split(".").pop().toLowerCase()}`
+    : "";
+  if (
+    state.knowledgeAllowedExtensions.length &&
+    !state.knowledgeAllowedExtensions.includes(extension)
+  ) {
+    setUploadStatus(
+      "error",
+      `Allowed file types: ${state.knowledgeAllowedExtensions.join(", ")}`,
+    );
+    return;
+  }
+
+  elements.knowledgeDropZone.classList.add("is-uploading");
+  setUploadStatus("loading", `Validating and uploading ${file.name}…`);
+  const formData = new FormData();
+  formData.append("file", file, file.name);
+
+  try {
+    const data = await fetchJson("/api/knowledge/files", {
+      method: "POST",
+      body: formData,
+    });
+    setUploadStatus(
+      "success",
+      `${data.file.original_filename} was stored as ${data.knowledge.chunk_count} knowledge chunks`,
+    );
+    await loadKnowledgeFiles();
+  } catch (error) {
+    setUploadStatus("error", `Upload failed: ${error.message}`);
+  } finally {
+    elements.knowledgeDropZone.classList.remove("is-uploading");
+    elements.knowledgeFileInput.value = "";
+  }
+}
+
+function acceptDroppedFiles(files) {
+  if (!files || files.length === 0) return;
+  if (files.length > 1) {
+    setUploadStatus("error", "Only one file can be uploaded at a time");
+    return;
+  }
+  uploadKnowledgeFile(files[0]);
+}
+
+async function deleteKnowledgeFile(fileId) {
+  if (!window.confirm("Delete this knowledge file?")) return;
+  try {
+    await fetchJson(`/api/knowledge/files/${encodeURIComponent(fileId)}`, {
+      method: "DELETE",
+    });
+    setUploadStatus("success", "The file was deleted");
+    await loadKnowledgeFiles();
+  } catch (error) {
+    setUploadStatus("error", `Delete failed: ${error.message}`);
+  }
+}
+
+async function syncCustomerReviews() {
+  elements.reviewSyncButton.disabled = true;
+  elements.reviewSyncStatus.hidden = false;
+  elements.reviewSyncStatus.className = "upload-status loading";
+  elements.reviewSyncStatus.textContent = "Synchronizing customer reviews…";
+
+  try {
+    const data = await fetchJson("/api/knowledge/reviews/sync", { method: "POST" });
+    elements.reviewSyncStatus.className = "upload-status success";
+    elements.reviewSyncStatus.textContent =
+      `Synced ${data.synced_count} customer reviews into the knowledge base`;
+  } catch (error) {
+    elements.reviewSyncStatus.className = "upload-status error";
+    elements.reviewSyncStatus.textContent = `Review synchronization failed: ${error.message}`;
+  } finally {
+    elements.reviewSyncButton.disabled = false;
+  }
 }
 
 async function loadStores() {
@@ -580,7 +731,65 @@ elements.chatForm.addEventListener("submit", (event) => {
   submitChat(elements.chatInput.value);
 });
 
+elements.knowledgeDropZone.addEventListener("click", () => {
+  elements.knowledgeFileInput.click();
+});
+
+elements.knowledgeDropZone.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    elements.knowledgeFileInput.click();
+  }
+});
+
+elements.knowledgeFileInput.addEventListener("change", () => {
+  acceptDroppedFiles(elements.knowledgeFileInput.files);
+});
+
+for (const eventName of ["dragenter", "dragover"]) {
+  elements.knowledgeDropZone.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    elements.knowledgeDropZone.classList.add("is-dragging");
+  });
+}
+
+for (const eventName of ["dragleave", "drop"]) {
+  elements.knowledgeDropZone.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    elements.knowledgeDropZone.classList.remove("is-dragging");
+  });
+}
+
+elements.knowledgeDropZone.addEventListener("drop", (event) => {
+  acceptDroppedFiles(event.dataTransfer.files);
+});
+
+elements.knowledgeDropZone.addEventListener("paste", (event) => {
+  const files = event.clipboardData?.files;
+  if (files?.length) {
+    event.preventDefault();
+    acceptDroppedFiles(files);
+  }
+});
+
+document.addEventListener("paste", (event) => {
+  if (event.defaultPrevented) return;
+  const files = event.clipboardData?.files;
+  if (files?.length) {
+    event.preventDefault();
+    acceptDroppedFiles(files);
+  }
+});
+
+elements.knowledgeFileList.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-delete-file-id]");
+  if (button) deleteKnowledgeFile(button.dataset.deleteFileId);
+});
+
+elements.reviewSyncButton.addEventListener("click", syncCustomerReviews);
+
 async function initialise() {
+  loadKnowledgeFiles();
   try {
     await loadStores();
     await loadDashboard();

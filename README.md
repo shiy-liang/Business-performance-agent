@@ -30,6 +30,14 @@ uvicorn app:app --reload
 Open [http://127.0.0.1:8000](http://127.0.0.1:8000). FastAPI documentation is
 available at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
 
+For the Windows Conda development environment, install and test with:
+
+```powershell
+conda activate agent_project
+python -m pip install -r requirements-dev.txt
+python -m pytest -v
+```
+
 ## 组员首次运行：连接现有数据库
 
 拉取 `shiying-branch` 后，在项目根目录执行以下命令（macOS / Linux）：
@@ -109,6 +117,11 @@ python database/update_expenses.py
 | `GET` | `/api/dashboard/product-performance` | Four Top-5 product rankings |
 | `GET` | `/api/dashboard/marketing-performance` | Top campaigns overlapping the selected month |
 | `POST` | `/api/chat` | Stable placeholder contract for the future assistant |
+| `POST` | `/api/knowledge/files` | Validate, store, split, embed, and index one TXT/PDF/CSV file |
+| `GET` | `/api/knowledge/files` | List registered knowledge-base source files |
+| `GET` | `/api/knowledge/files/{file_id}/download` | Download a managed source file |
+| `DELETE` | `/api/knowledge/files/{file_id}` | Delete a source file, its record, and its vector chunks |
+| `POST` | `/api/knowledge/reviews/sync` | Embed customer reviews whose embedding value is null |
 
 The month-based endpoints accept `month=YYYY-MM`. Finance, inventory and product
 sales also accept `store_id`; campaign and support-ticket source data do not have
@@ -122,3 +135,24 @@ run, the dashboard keeps the chatbot clearly marked as a placeholder.
 Product costs, inventory, expenses, returns/refunds and campaign attribution are
 synthetic prototype data. Financial metrics that depend on them are labelled as
 estimates in the interface.
+
+## Knowledge source file management
+
+The dashboard accepts one `.txt`, `.pdf`, or `.csv` file at a time by file picker,
+drag-and-drop, or clipboard paste. The backend streams the upload through SHA-256,
+rejects empty, unsupported, mismatched, oversized (over 25 MB), and duplicate
+files, then saves it under `data/knowledge_files/` using its hash as the storage
+path. The original filename and file metadata are written to `knowledge_files`.
+
+The allowed file types and MIME types, local storage directory, maximum file
+size, filename limit, unknown-MIME fallback, upload stream chunk size, semantic
+chunk size, chunk overlap, and separator priority are configured in
+`config/rag.yml`. The upload stream size controls physical file reads and is
+separate from semantic chunking.
+
+After storage, LangChain lazily loads the TXT, PDF, or CSV source and splits its
+text into overlapping chunks. The shared embedding model converts those chunks
+to vectors, which are upserted into `unstructured_knowledge_chunks` with
+`source_type=other` and the matching `knowledge_files.file_id` as `source_id`.
+The database registration and vector rows are committed together; a processing
+failure rolls them back and removes the newly stored file.
