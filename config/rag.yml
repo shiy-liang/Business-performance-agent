@@ -1,0 +1,31 @@
+file_upload:
+  storage_directory: data/knowledge_files
+  max_file_size_bytes: 26214400
+  stream_chunk_size_bytes: 1048576
+  max_filename_length: 255
+  allow_unknown_mime_type: true
+  allowed_file_types:
+    .txt:
+      - text/plain
+    .pdf:
+      - application/pdf
+    .csv:
+      - text/csv
+      - application/csv
+      - application/vnd.ms-excel
+      - text/plain
+
+document_processing:
+  chunk_size: 700
+  chunk_overlap: 150
+  separators:
+    - "\n\n"
+    - "\n"
+    - "."
+    - "!"
+    - "?"
+    - "。"
+    - "！"
+    - "？"
+    - " "
+    - ""

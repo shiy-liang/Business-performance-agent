@@ -207,6 +207,55 @@
               营销无门店字段，始终为全公司；展示与所选月重叠的活动，指标为活动全周期数据。
             </p>
           </section>
+
+          <section class="panel knowledge-panel" aria-labelledby="knowledge-title">
+            <div class="panel-header knowledge-header">
+              <div>
+                <p class="panel-kicker">06 · Knowledge sources</p>
+                <h2 id="knowledge-title">RAG Knowledge Files</h2>
+              </div>
+              <div class="knowledge-header-actions">
+                <button id="review-sync-button" class="review-sync-button" type="button">
+                  Sync customer reviews
+                </button>
+                <span id="knowledge-file-count" class="soft-badge">Loading</span>
+              </div>
+            </div>
+
+            <div id="review-sync-status" class="upload-status" role="status" hidden></div>
+
+            <div class="knowledge-layout">
+              <div
+                id="knowledge-drop-zone"
+                class="knowledge-drop-zone"
+                role="button"
+                tabindex="0"
+                aria-controls="knowledge-file-input"
+                aria-label="Select, drop, or paste a knowledge file"
+              >
+                <input
+                  id="knowledge-file-input"
+                  type="file"
+                  hidden
+                />
+                <span class="upload-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4" />
+                  </svg>
+                </span>
+                <strong>Drop a file here</strong>
+                <span>Click to browse, or copy and paste a file</span>
+                <small id="knowledge-upload-policy">Loading upload policy…</small>
+              </div>
+
+              <div class="knowledge-library">
+                <div id="knowledge-upload-status" class="upload-status" role="status" hidden></div>
+                <div id="knowledge-file-list" class="knowledge-file-list loading-copy">
+                  Loading knowledge files…
+                </div>
+              </div>
+            </div>
+          </section>
         </div>
       </main>
 
