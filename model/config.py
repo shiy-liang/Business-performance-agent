@@ -22,6 +22,7 @@ class ChatModelConfig:
     model: str
     fallback_model: str | None
     temperature: float | None
+    reasoning_effort: str
     max_output_tokens: int
     timeout_seconds: float
     max_retries: int
@@ -112,6 +113,12 @@ def load_model_config(path: Path = DEFAULT_CONFIG_PATH) -> ModelConfig:
                 "chat_model.temperature must be between 0 (inclusive) and 2"
             )
 
+    reasoning_effort = chat.get("reasoning_effort", "medium")
+    supported_reasoning_efforts = {"none", "low", "medium", "xhigh"}
+    if reasoning_effort not in supported_reasoning_efforts:
+        allowed = ", ".join(sorted(supported_reasoning_efforts))
+        raise ModelConfigError(f"chat_model.reasoning_effort must be one of: {allowed}")
+
     chat_timeout = chat.get("timeout_seconds", 15)
     embedding_timeout = embedding.get("timeout_seconds", 15)
     if not isinstance(chat_timeout, (int, float)) or chat_timeout <= 0:
@@ -135,6 +142,7 @@ def load_model_config(path: Path = DEFAULT_CONFIG_PATH) -> ModelConfig:
             model=chat_model_name,
             fallback_model=fallback,
             temperature=float(temperature) if temperature is not None else None,
+            reasoning_effort=reasoning_effort,
             max_output_tokens=_positive(
                 chat.get("max_output_tokens", 2048),
                 "chat_model.max_output_tokens",

@@ -1,6 +1,7 @@
 .env*
 !.env.example
 .venv/
+node_modules/
 __pycache__/
 .pytest_cache/
 .pytest-tmp/
@@ -19,3 +20,4 @@ config/*
 *apiKey*.csv
 tests/
 *.ini
+docs/RAG_docs/

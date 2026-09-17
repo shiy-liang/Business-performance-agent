@@ -116,7 +116,8 @@ python database/update_expenses.py
 | `GET` | `/api/dashboard/action-center` | Severe stock alerts and long-open priority tickets |
 | `GET` | `/api/dashboard/product-performance` | Four Top-5 product rankings |
 | `GET` | `/api/dashboard/marketing-performance` | Top campaigns overlapping the selected month |
-| `POST` | `/api/chat` | Stable placeholder contract for the future assistant |
+| `POST` | `/api/chat` | Run the Supervisor and return the collected answer |
+| `POST` | `/api/chat/stream` | Stream public progress, tool events, answer tokens, and citations over SSE |
 | `POST` | `/api/knowledge/files` | Validate, store, split, embed, and index one TXT/PDF/CSV file |
 | `GET` | `/api/knowledge/files` | List registered knowledge-base source files |
 | `GET` | `/api/knowledge/files/{file_id}/download` | Download a managed source file |
@@ -156,3 +157,53 @@ to vectors, which are upserted into `unstructured_knowledge_chunks` with
 `source_type=other` and the matching `knowledge_files.file_id` as `source_id`.
 The database registration and vector rows are committed together; a processing
 failure rolls them back and removes the newly stored file.
+
+## Supervisor and specialist agents
+
+The chat panel is connected to a three-agent LangGraph runtime under `rag/agent/`.
+The user-facing Supervisor routes structured questions to Finance or Operations,
+and those specialists generate PostgreSQL queries through agent-scoped tools. All
+models use `langchain-openai` with the OpenAI Responses API. Tool permissions are
+enforced centrally in `rag/agent/tools/registry.py`, and safe public progress is
+streamed through `/api/chat/stream`.
+
+The current tools are:
+
+- `search_knowledge`: semantic pgvector retrieval with file and chunk citations.
+- `delegate_finance`: runs the Finance specialist graph.
+- `delegate_operations`: runs the Operations specialist graph.
+- `search_finance_schema`, `resolve_finance_entity`, `execute_finance_sql`:
+  Finance-only schema, entity, and read-only SQL capabilities.
+- `search_operations_schema`, `resolve_operations_entity`,
+  `execute_operations_sql`: Operations-only equivalents.
+
+Finance and Operations share a reusable specialist graph but have independent
+prompts, skills, table permissions, and tool instances. Their handlers register
+with `specialist_dispatcher` when the Supervisor graph is built. Prompts and skills
+are Markdown files under `rag/agent/prompts/` and `rag/agent/skills/` and are
+injected at runtime.
+
+Generated SQL is parsed with `sqlglot` before execution. The runtime accepts only
+one explicit-column `SELECT`, applies a per-agent table whitelist, blocks sensitive
+and vector columns, dangerous functions, locking reads, DDL/DML, and system
+schemas, then executes inside a read-only transaction with a timeout and result
+cap. Configure a database role with SELECT-only grants through
+`AGENT_READONLY_DATABASE_URL`; `DATABASE_URL` is a development fallback.
+
+The frontend displays public stages, applied skills, tool lifecycle events,
+streamed answer text, and resolvable knowledge citations. It deliberately does not
+display or log private model chain-of-thought.
+
+Chat answers are rendered locally with Marked, sanitized with DOMPurify, and use
+KaTeX for inline and display formulas. Rebuild and verify the browser bundle after
+changing the renderer:
+
+```powershell
+npm --prefix frontend run build
+npm --prefix frontend test
+```
+
+`chat_model.reasoning_effort` in `config/model.yml` controls Qwen reasoning for
+the Responses API (`none`, `low`, `medium`, or `xhigh`). The UI reports that
+configuration and safe lifecycle status in the Activity panel; raw private
+reasoning text is never forwarded to the browser.
