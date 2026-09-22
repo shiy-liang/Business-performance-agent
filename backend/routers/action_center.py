@@ -112,7 +112,7 @@ def action_center(
                     inventory_scope = {
                         "type": "company",
                         "store_id": None,
-                        "label": "全部门店",
+                        "label": "All stores",
                     }
                 else:
                     cursor.execute(
@@ -216,7 +216,7 @@ def action_center(
         "support_tickets": {
             "scope": {
                 "type": "company",
-                "label": "全公司",
+                "label": "Company-wide",
                 "store_filter_available": False,
             },
             "data_through": ticket_data_through,

@@ -12,6 +12,10 @@ openai
 PyYAML
 tenacity
 langchain-community
+langchain-core
+langchain-openai
+langgraph
+sqlglot
 langchain-text-splitters
 pypdf
 chardet

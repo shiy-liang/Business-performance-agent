@@ -181,7 +181,7 @@ def product_performance(
                     scope = {
                         "type": "company",
                         "store_id": None,
-                        "label": "全部门店",
+                        "label": "All stores",
                     }
                 else:
                     cursor.execute(
