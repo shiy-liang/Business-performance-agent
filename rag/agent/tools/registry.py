@@ -17,6 +17,7 @@ from rag.agent.tools.finance import (
 from rag.agent.tools.operations import (
     execute_operations_sql,
     resolve_operations_entity,
+    search_customer_reviews,
     search_operations_schema,
 )
 from rag.agent.tools.supervisor.delegation import (
@@ -84,6 +85,7 @@ default_tool_registry = ToolRegistry(
         ToolRegistration(search_operations_schema, frozenset({"operations"})),
         ToolRegistration(resolve_operations_entity, frozenset({"operations"})),
         ToolRegistration(execute_operations_sql, frozenset({"operations"})),
+        ToolRegistration(search_customer_reviews, frozenset({"operations"})),
     )
 )
 

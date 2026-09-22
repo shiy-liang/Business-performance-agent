@@ -148,9 +148,14 @@
                   <p>Get a structured answer with an auditable activity trail and cited evidence.</p>
                 </div>
               </div>
-              <p class="assistant-status">
-                <i></i> Supervisor online
-              </p>
+              <div class="assistant-header-actions">
+                <p class="assistant-status">
+                  <i></i> Supervisor online
+                </p>
+                <button id="new-chat-button" class="new-chat-button" type="button">
+                  New Chat
+                </button>
+              </div>
             </div>
 
             <div class="prompt-grid" aria-label="Suggested questions">
@@ -159,6 +164,8 @@
               <button type="button" class="prompt-chip">Which campaign delivered the highest return?</button>
               <button type="button" class="prompt-chip">What are customers complaining about recently?</button>
             </div>
+
+            <div id="chat-history" class="chat-history" aria-label="Conversation history"></div>
 
             <div id="chat-response" class="chat-response" aria-live="polite" hidden>
               <div class="chat-question-row">

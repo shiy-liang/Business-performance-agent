@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import SystemMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
@@ -26,20 +26,45 @@ def build_supervisor_graph(
     ensure_default_specialists_registered()
     active_registry = tool_registry or default_tool_registry
     tools = active_registry.tools_for("supervisor")
-    active_model = model or create_supervisor_model()
-    model_with_tools = active_model.bind_tools(tools)
+    routing_model = model or create_supervisor_model(phase="routing")
+    synthesis_model = model or create_supervisor_model(phase="synthesis")
+    routing_model_with_tools = routing_model.bind_tools(tools)
     tool_descriptions = active_registry.describe_for("supervisor")
 
     async def call_supervisor(state: SupervisorState) -> dict[str, Any]:
+        has_tool_evidence = any(
+            isinstance(message, ToolMessage) for message in state["messages"]
+        )
         system_prompt = build_supervisor_prompt(
             user_question=state["user_question"],
             available_tools=tool_descriptions,
         )
-        response = await model_with_tools.ainvoke(
+        if has_tool_evidence:
+            system_prompt += (
+                "\n\n## Current execution phase\n\n"
+                "Tool execution is complete. Synthesize the final user answer from the "
+                "available validated evidence. Do not request, call, or propose another "
+                "tool or specialist in this turn. If evidence is incomplete, state the "
+                "gap explicitly."
+            )
+            active_model = synthesis_model
+            run_name = "supervisor_synthesis_model"
+            tags = ["supervisor", "supervisor-synthesis", "public-answer"]
+        else:
+            system_prompt += (
+                "\n\n## Current execution phase\n\n"
+                "Plan the complete evidence request now. Call every independently required "
+                "tool in this single turn, with at most one call per specialist. If no tool "
+                "is needed, answer the user directly."
+            )
+            active_model = routing_model_with_tools
+            run_name = "supervisor_routing_model"
+            tags = ["supervisor", "supervisor-routing", "public-answer"]
+        response = await active_model.ainvoke(
             [SystemMessage(content=system_prompt), *state["messages"]],
             config={
-                "run_name": "supervisor_model",
-                "tags": ["supervisor", "public-answer"],
+                "run_name": run_name,
+                "tags": tags,
             },
         )
         return {"messages": [response]}

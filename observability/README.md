@@ -135,7 +135,13 @@ logger.model_event(
 
 ## 5. Tool 日志
 
-使用 `tool_event()` 记录工具的开始、完成或失败状态。只记录参数摘要、参数哈希、查询 ID、行数、新鲜度和耗时，不记录完整查询结果或敏感原始数据。
+使用 `tool_event()` 记录工具的开始、完成或失败状态。记录参数摘要、参数哈希、查询 ID、行数、新鲜度和耗时，不记录完整查询结果或参数值。Agent 生成的 SQL 是一个有意保留的审计例外：`execute_finance_sql` 和 `execute_operations_sql` 会额外写入 `sql.generated` 事件，其中 `sql` 字段保存带命名占位符的原始查询语句。调用方仍不得把 SQL 参数字典写入日志。
+
+SQL 本地验证失败时，`tool.completed` 会同时记录：
+
+- `error_type=validation_error`
+- `validation_error_type`：对应验证器中的稳定失败分类，例如 `parse_error`、`parameter_mismatch`、`unauthorized_table` 或 `column_not_exposed`
+- `validation_error`：供开发者阅读的具体安全错误说明
 
 ```python
 logger.tool_event(
@@ -260,5 +266,7 @@ LOG_TIMEZONE=Asia/Singapore
 - `.env` 内容或完整数据库连接地址。
 - 完整用户文件、客户隐私数据或 Tool 原始结果。
 - 完整 Prompt、模型私有思维链或未经处理的模型上下文。
+
+完整 Agent SQL 是上述规则的受控例外，仅用于查询审计和验证失败诊断。SQL 可能包含模型直接写入的字面量，因此生产环境必须限制日志文件访问并按既定轮转策略及时清理。参数值、查询结果和数据库凭据仍然禁止记录。
 
 推荐记录版本、数量、哈希、ID、耗时、状态和脱敏摘要，以便监控与问题定位。

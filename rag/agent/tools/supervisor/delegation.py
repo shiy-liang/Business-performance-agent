@@ -57,10 +57,44 @@ class SpecialistDispatcher:
 specialist_dispatcher = SpecialistDispatcher()
 
 
+def _claim_delegation(config: RunnableConfig, agent_name: str) -> bool:
+    """Allow one delegation per specialist for the current supervisor run."""
+
+    configurable = config.get("configurable")
+    if not isinstance(configurable, dict):
+        configurable = {}
+        config["configurable"] = configurable
+    runtime_state = configurable.get("delegation_runtime_state")
+    if not isinstance(runtime_state, dict):
+        runtime_state = {}
+        configurable["delegation_runtime_state"] = runtime_state
+    if runtime_state.get(agent_name) is True:
+        return False
+    runtime_state[agent_name] = True
+    return True
+
+
+def _duplicate_delegation_result(agent_name: str) -> str:
+    return json.dumps(
+        {
+            "status": "duplicate_blocked",
+            "agent": agent_name,
+            "message": (
+                f"The {agent_name} specialist was already delegated for this request. "
+                "Use the existing specialist evidence and complete the answer."
+            ),
+            "sources": [],
+        },
+        ensure_ascii=False,
+    )
+
+
 @tool(args_schema=DelegationInput)
 async def delegate_finance(task: str, config: RunnableConfig) -> str:
     """Delegate revenue, margin, expense, refund, or cash analysis to Finance."""
 
+    if not _claim_delegation(config, "finance"):
+        return _duplicate_delegation_result("finance")
     started_at = perf_counter()
     logger.tool_event(status="started", tool_name="delegate_finance")
     result = await specialist_dispatcher.dispatch("finance", task, config)
@@ -77,6 +111,8 @@ async def delegate_finance(task: str, config: RunnableConfig) -> str:
 async def delegate_operations(task: str, config: RunnableConfig) -> str:
     """Delegate sales, inventory, customer, refund, or service analysis to Operations."""
 
+    if not _claim_delegation(config, "operations"):
+        return _duplicate_delegation_result("operations")
     started_at = perf_counter()
     logger.tool_event(status="started", tool_name="delegate_operations")
     result = await specialist_dispatcher.dispatch("operations", task, config)

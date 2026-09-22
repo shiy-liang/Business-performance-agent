@@ -43,6 +43,9 @@ a financial calculation.
    such as `%(period_start)s` and supply matching values in `parameters`.
 5. Call `execute_finance_sql`. This is the only mechanism allowed to access the
    database.
+   Build one comprehensive query for the delegated task. Never submit multiple
+   SQL calls in parallel, and stop querying immediately after the first successful
+   result. A new SQL attempt is allowed only to correct a failed execution.
 6. If validation or PostgreSQL reports an error, use that error and the retrieved
    schema to correct the query. Never repeat the same failed query.
 7. If the query succeeds with zero rows, check time coverage, exact entities,

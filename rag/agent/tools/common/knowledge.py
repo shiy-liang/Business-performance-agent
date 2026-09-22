@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from time import perf_counter
 from typing import Any
 
@@ -12,9 +13,9 @@ from pgvector import Vector
 from pgvector.psycopg import register_vector
 from pydantic import BaseModel, Field
 
-from backend.database import connect
 from model import embedding_model
 from observability import logger
+from rag.agent.tools.common.sql_runtime import connect_readonly, set_readonly_guards
 
 
 class KnowledgeSearchInput(BaseModel):
@@ -33,9 +34,23 @@ class KnowledgeSearchInput(BaseModel):
     )
 
 
-def _search_chunks(query_vector: list[float], top_k: int) -> list[dict[str, Any]]:
+def _minimum_similarity() -> float:
+    try:
+        value = float(os.getenv("AGENT_KNOWLEDGE_MIN_SIMILARITY", "0.25"))
+    except ValueError:
+        return 0.25
+    return value if -1.0 <= value <= 1.0 else 0.25
+
+
+def _search_chunks(
+    query_vector: list[float],
+    top_k: int,
+    minimum_similarity: float,
+) -> list[dict[str, Any]]:
     vector = Vector(query_vector)
-    with connect() as connection:
+    with connect_readonly() as connection:
+        with connection.cursor() as guard_cursor:
+            set_readonly_guards(guard_cursor)
         register_vector(connection)
         with connection.cursor() as cursor:
             cursor.execute(
@@ -59,10 +74,18 @@ def _search_chunks(query_vector: list[float], top_k: int) -> list[dict[str, Any]
                       'generation_assumptions.txt',
                       'cross_document_consistency_report.txt'
                   )
+                  AND 1 - (c.embedding <=> %s) >= %s
                 ORDER BY c.embedding <=> %s
                 LIMIT %s
                 """,
-                (vector, len(query_vector), vector, top_k),
+                (
+                    vector,
+                    len(query_vector),
+                    vector,
+                    minimum_similarity,
+                    vector,
+                    top_k,
+                ),
             )
             rows = cursor.fetchall()
 
@@ -95,7 +118,13 @@ async def search_knowledge(query: str, top_k: int = 5) -> str:
     )
     try:
         query_vector = await embedding_model.aembed_query(query)
-        matches = await asyncio.to_thread(_search_chunks, query_vector, top_k)
+        minimum_similarity = _minimum_similarity()
+        matches = await asyncio.to_thread(
+            _search_chunks,
+            query_vector,
+            top_k,
+            minimum_similarity,
+        )
     except Exception as error:
         logger.exception(
             "tool.failed",
@@ -103,7 +132,18 @@ async def search_knowledge(query: str, top_k: int = 5) -> str:
             component="tool",
             tool_name="search_knowledge",
         )
-        raise
+        return json.dumps(
+            {
+                "success": False,
+                "tool": "search_knowledge",
+                "error_type": "retrieval_error",
+                "error": "Uploaded knowledge evidence is temporarily unavailable.",
+                "query": query,
+                "matches": [],
+                "sources": [],
+            },
+            ensure_ascii=False,
+        )
 
     sources: list[dict[str, Any]] = []
     seen: set[tuple[int, int]] = set()
@@ -129,9 +169,17 @@ async def search_knowledge(query: str, top_k: int = 5) -> str:
         duration_ms=round((perf_counter() - started_at) * 1000, 2),
         top_k=top_k,
         match_count=len(matches),
+        minimum_similarity=minimum_similarity,
     )
     return json.dumps(
-        {"query": query, "matches": matches, "sources": sources},
+        {
+            "success": True,
+            "tool": "search_knowledge",
+            "query": query,
+            "minimum_similarity": minimum_similarity,
+            "matches": matches,
+            "sources": sources,
+        },
         ensure_ascii=False,
         default=str,
     )

@@ -11,10 +11,13 @@ access or write capability.
 2. Resolve uncertain entity values when required.
 3. Generate one explicit-column `SELECT` statement.
 4. Submit the query to the agent-scoped execution tool.
+   Submit exactly one SQL call at a time. Never issue parallel alternatives.
 5. Distinguish validation errors, SQL errors, empty results, and successful data.
 6. Correct only from concrete schema or error evidence, with no more than three
    execution attempts.
 7. Return only the final successful query and its database citation.
+8. Stop SQL execution after the first successful query. Additional attempts exist
+   only to correct a failed query, not to collect optional extra breakdowns.
 
 ## Query rules
 

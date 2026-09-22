@@ -29,7 +29,7 @@ def build_specialist_graph(
     tools = active_registry.tools_for(agent_name)
     if not tools:
         raise RuntimeError(f"No tools are registered for {agent_name}")
-    active_model = model or create_specialist_model()
+    active_model = model or create_specialist_model(agent_name)
     model_with_tools = active_model.bind_tools(tools)
     tool_descriptions = active_registry.describe_for(agent_name)
 

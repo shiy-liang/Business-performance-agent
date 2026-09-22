@@ -9,8 +9,10 @@ const state = {
   filterTimer: null,
   knowledgeAllowedExtensions: [],
   chatController: null,
+  chatSessionId: "",
   chatAnswerText: "",
   chatRenderFrame: null,
+  chatTurnComplete: false,
 };
 
 const elements = {
@@ -33,6 +35,8 @@ const elements = {
   campaignCount: document.querySelector("#campaign-count"),
   campaignList: document.querySelector("#campaign-list"),
   chatForm: document.querySelector("#chat-form"),
+  chatHistory: document.querySelector("#chat-history"),
+  newChatButton: document.querySelector("#new-chat-button"),
   chatInput: document.querySelector("#chat-input"),
   chatResponse: document.querySelector("#chat-response"),
   chatQuestion: document.querySelector("#chat-question"),
@@ -291,6 +295,89 @@ function resizeChatInput() {
   elements.chatInput.style.overflowY = elements.chatInput.scrollHeight > 150 ? "auto" : "hidden";
 }
 
+function resetConversationUi() {
+  state.chatAnswerText = "";
+  state.chatTurnComplete = false;
+  if (state.chatRenderFrame !== null) {
+    window.cancelAnimationFrame(state.chatRenderFrame);
+    state.chatRenderFrame = null;
+  }
+  elements.chatHistory.replaceChildren();
+  elements.chatResponse.hidden = true;
+  elements.chatQuestion.textContent = "";
+  elements.chatProgress.replaceChildren();
+  elements.chatAnswer.replaceChildren();
+  elements.chatSources.replaceChildren();
+  elements.chatSources.hidden = true;
+  elements.chatCopyButton.hidden = true;
+  setThinking("", false);
+}
+
+async function createChatSession({ clearUi = false } = {}) {
+  const data = await fetchJson("/api/sessions", { method: "POST" });
+  state.chatSessionId = data.session_id;
+  if (clearUi) resetConversationUi();
+  return state.chatSessionId;
+}
+
+async function ensureChatSession() {
+  if (!state.chatSessionId) await createChatSession();
+  return state.chatSessionId;
+}
+
+function archiveCompletedTurn() {
+  if (!state.chatTurnComplete || elements.chatResponse.hidden) return;
+  const archived = elements.chatResponse.cloneNode(true);
+  archived.removeAttribute("id");
+  archived.removeAttribute("aria-live");
+  archived.hidden = false;
+  archived.classList.add("chat-turn--archived");
+  archived.querySelector(".chat-trace")?.remove();
+  archived.querySelector(".answer-actions")?.remove();
+  archived.querySelectorAll("[id]").forEach((node) => node.removeAttribute("id"));
+  archived.querySelector("[aria-labelledby]")?.removeAttribute("aria-labelledby");
+  elements.chatHistory.append(archived);
+}
+
+function prepareChatResponse(question) {
+  state.chatAnswerText = "";
+  state.chatTurnComplete = false;
+  elements.chatResponse.hidden = false;
+  elements.chatQuestion.textContent = question;
+  elements.chatProgress.replaceChildren();
+  elements.chatAnswer.replaceChildren();
+  elements.chatAnswer.classList.remove("is-streaming");
+  elements.chatSources.replaceChildren();
+  elements.chatSources.hidden = true;
+  elements.chatCopyButton.hidden = true;
+  elements.chatAnswerStatus.textContent = "Thinking";
+  elements.chatAnswerStatus.classList.add("is-streaming");
+  setThinking("Connecting to the model…");
+}
+
+async function startNewChat() {
+  const oldSessionId = state.chatSessionId;
+  if (state.chatController) state.chatController.abort();
+  state.chatSessionId = "";
+  elements.newChatButton.disabled = true;
+  try {
+    if (oldSessionId) {
+      const response = await fetch(`/api/sessions/${encodeURIComponent(oldSessionId)}`, {
+        method: "DELETE",
+      });
+      if (!response.ok && response.status !== 404) {
+        throw new Error(`Could not delete the previous session (${response.status})`);
+      }
+    }
+    await createChatSession({ clearUi: true });
+    elements.chatInput.focus();
+  } catch (error) {
+    showGlobalError(`New chat could not be created: ${error.message}`);
+  } finally {
+    elements.newChatButton.disabled = false;
+  }
+}
+
 function renderChatAnswer() {
   state.chatRenderFrame = null;
   if (window.ChatRenderer?.renderMarkdown) {
@@ -400,6 +487,10 @@ function handleChatEvent(eventName, data) {
     appendChatActivity("tool-start", "Tool call", message || String(data?.name || "Tool started"));
   } else if (eventName === "tool_end") {
     appendChatActivity("tool-end", "Tool result", message || String(data?.name || "Tool completed"));
+  } else if (eventName === "validation") {
+    const agent = String(data?.agent || "Specialist");
+    const label = data?.valid === true ? "Evidence validated" : "Evidence rejected";
+    appendChatActivity("validation", `${agent} · ${label}`, message);
   } else if (eventName === "sources") {
     renderChatSources(data?.items);
   } else if (eventName === "token") {
@@ -422,6 +513,7 @@ function handleChatEvent(eventName, data) {
     elements.chatAnswerStatus.textContent = "Complete";
     elements.chatAnswerStatus.classList.remove("is-streaming");
     elements.chatCopyButton.hidden = !state.chatAnswerText;
+    state.chatTurnComplete = true;
     setThinking("", false);
   } else if (eventName === "error") {
     throw new Error(message || "The assistant could not complete this request.");
@@ -443,34 +535,38 @@ function parseSseFrame(frame) {
 async function submitChat(question) {
   const cleanQuestion = String(question || "").trim();
   if (!cleanQuestion) return;
+  try {
+    await ensureChatSession();
+  } catch (error) {
+    showGlobalError(`Chat session could not be created: ${error.message}`);
+    return;
+  }
   if (state.chatController) state.chatController.abort();
   const controller = new AbortController();
   state.chatController = controller;
-  state.chatAnswerText = "";
-
-  elements.chatResponse.hidden = false;
-  elements.chatQuestion.textContent = cleanQuestion;
-  elements.chatProgress.replaceChildren();
-  elements.chatAnswer.replaceChildren();
-  elements.chatAnswer.classList.remove("is-streaming");
-  elements.chatSources.replaceChildren();
-  elements.chatSources.hidden = true;
-  elements.chatCopyButton.hidden = true;
-  elements.chatAnswerStatus.textContent = "Thinking";
-  elements.chatAnswerStatus.classList.add("is-streaming");
-  setThinking("Connecting to the model…");
+  archiveCompletedTurn();
+  prepareChatResponse(cleanQuestion);
 
   const submitButton = elements.chatForm.querySelector('button[type="submit"]');
   submitButton.disabled = true;
   elements.chatSubmitLabel.textContent = "Working";
 
   try {
-    const response = await fetch("/api/chat/stream", {
-      method: "POST",
-      headers: { "Accept": "text/event-stream", "Content-Type": "application/json" },
-      body: JSON.stringify({ message: cleanQuestion }),
-      signal: controller.signal,
-    });
+    let response;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      response = await fetch("/api/chat/stream", {
+        method: "POST",
+        headers: { "Accept": "text/event-stream", "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: state.chatSessionId,
+          message: cleanQuestion,
+        }),
+        signal: controller.signal,
+      });
+      if (response.status !== 404 || attempt > 0) break;
+      await createChatSession({ clearUi: true });
+      prepareChatResponse(cleanQuestion);
+    }
     if (!response.ok || !response.body) {
       let message = `Chat request failed (${response.status})`;
       try {
@@ -500,6 +596,7 @@ async function submitChat(question) {
     elements.chatAnswerStatus.textContent = "Failed";
     elements.chatAnswerStatus.classList.remove("is-streaming");
     state.chatAnswerText = `The assistant could not complete this request.\n\n${error.message}`;
+    state.chatTurnComplete = false;
     renderChatAnswer();
     appendChatActivity("error", "Error", error.message);
     setThinking("", false);
@@ -991,6 +1088,7 @@ elements.knowledgeFileList.addEventListener("click", (event) => {
 });
 
 elements.reviewSyncButton.addEventListener("click", syncCustomerReviews);
+elements.newChatButton.addEventListener("click", startNewChat);
 
 elements.chatInput.addEventListener("input", resizeChatInput);
 elements.chatInput.addEventListener("keydown", (event) => {
@@ -1030,6 +1128,11 @@ elements.chatCopyButton.addEventListener("click", async () => {
 });
 
 async function initialise() {
+  try {
+    await createChatSession({ clearUi: true });
+  } catch (error) {
+    showGlobalError(`Chat session initialization failed: ${error.message}`);
+  }
   loadKnowledgeFiles();
   try {
     await loadStores();

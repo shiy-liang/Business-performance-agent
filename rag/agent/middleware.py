@@ -83,6 +83,7 @@ class PublicEventMiddleware:
         self._streamed_text = False
         self._reasoning_announced = False
         self._announced_specialists: set[str] = set()
+        self._model_turns: dict[str, int] = {}
 
     def started(self, run_id: str) -> PublicAgentEvent:
         return {
@@ -101,7 +102,19 @@ class PublicEventMiddleware:
         tags = set(event.get("tags") or [])
         translated: list[PublicAgentEvent] = []
 
-        if (
+        if event_type == "on_chat_model_start":
+            progress = self._model_progress_message(name, tags)
+            if progress:
+                translated.append(
+                    {
+                        "event": "status",
+                        "data": {
+                            "stage": "reasoning",
+                            "message": progress,
+                        },
+                    }
+                )
+        elif (
             event_type == "on_chain_start"
             and name in {"finance-agent", "operations-agent"}
             and name not in self._announced_specialists
@@ -164,6 +177,32 @@ class PublicEventMiddleware:
                         translated.append(
                             {"event": "sources", "data": {"items": self.sources}}
                         )
+                if name.startswith("delegate_"):
+                    validation = payload.get("validation")
+                    if isinstance(validation, dict):
+                        valid = validation.get("valid") is True
+                        translated.append(
+                            {
+                                "event": "validation",
+                                "data": {
+                                    "agent": name.removeprefix("delegate_"),
+                                    "valid": valid,
+                                    "successful_query_count": int(
+                                        validation.get("successful_query_count") or 0
+                                    ),
+                                    "evidence_count": int(
+                                        validation.get("evidence_count") or 0
+                                    ),
+                                    "errors": validation.get("errors") or [],
+                                    "warnings": validation.get("warnings") or [],
+                                    "message": (
+                                        "Specialist evidence passed deterministic validation."
+                                        if valid
+                                        else "Specialist evidence failed deterministic validation."
+                                    ),
+                                },
+                            }
+                        )
             translated.extend(
                 [
                     {
@@ -172,10 +211,7 @@ class PublicEventMiddleware:
                     },
                     {
                         "event": "status",
-                        "data": {
-                            "stage": "answering",
-                            "message": "Evidence is ready. Preparing the final answer.",
-                        },
+                        "data": self._status_after_tool(name, payload),
                     },
                 ]
             )
@@ -213,6 +249,95 @@ class PublicEventMiddleware:
     def answer(self) -> str:
         return "".join(self.answer_parts).strip()
 
+    def _model_progress_message(self, name: str, tags: set[str]) -> str:
+        """Return a safe phase summary, never model chain-of-thought text."""
+
+        if "supervisor-routing" in tags or name == "supervisor_routing_model":
+            return "Supervisor is identifying the period, metrics, and required evidence sources."
+        if "supervisor-synthesis" in tags or name == "supervisor_synthesis_model":
+            return "Supervisor is reconciling validated evidence and drafting the final answer."
+
+        agent = "finance" if "finance" in tags else "operations" if "operations" in tags else ""
+        if not agent:
+            return ""
+        turn = self._model_turns.get(agent, 0) + 1
+        self._model_turns[agent] = turn
+        label = "Finance" if agent == "finance" else "Operations"
+        if turn == 1:
+            return f"{label} is identifying the required measures and authorized schema."
+        if turn == 2:
+            return f"{label} is composing one governed read-only query."
+        if turn == 3:
+            return f"{label} is checking returned evidence and preparing its finding."
+        return f"{label} is correcting an evidence gap using validator feedback."
+
+    @staticmethod
+    def _status_after_tool(
+        name: str,
+        payload: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        payload = payload or {}
+        if name.startswith("search_") and name.endswith("_schema"):
+            return {
+                "stage": "query_planning",
+                "message": "Authorized schema is ready; the specialist is composing a read-only query.",
+            }
+        if name.startswith("resolve_") and name.endswith("_entity"):
+            return {
+                "stage": "query_planning",
+                "message": "Entity candidates are ready; the specialist is applying the validated filter.",
+            }
+        if name.startswith("execute_") and name.endswith("_sql"):
+            if payload.get("success") is True:
+                return {
+                    "stage": "evidence_validation",
+                    "message": "The query succeeded; the specialist is validating the returned evidence.",
+                }
+            if payload.get("error_type") == "concurrent_query_blocked":
+                return {
+                    "stage": "query_guard",
+                    "message": "A parallel SQL alternative was blocked; the active query remains authoritative.",
+                }
+            if payload.get("error_type") == "already_succeeded":
+                return {
+                    "stage": "query_guard",
+                    "message": "An extra SQL call was blocked because successful evidence already exists.",
+                }
+            return {
+                "stage": "query_revision",
+                "message": "The query needs correction; the specialist is using validator feedback.",
+            }
+        if name.startswith("delegate_"):
+            validation = payload.get("validation") or {}
+            if payload.get("status") == "completed" and validation.get("valid") is True:
+                return {
+                    "stage": "answering",
+                    "message": "Validated specialist evidence is ready for final synthesis.",
+                }
+            if payload.get("status") == "duplicate_blocked":
+                return {
+                    "stage": "delegation_guard",
+                    "message": "A duplicate specialist delegation was blocked; existing evidence will be used.",
+                }
+            return {
+                "stage": "evidence_gap",
+                "message": "The specialist finished without validated evidence; the limitation will be reported.",
+            }
+        if name == "search_knowledge":
+            return {
+                "stage": "answering",
+                "message": "Knowledge evidence is ready for final synthesis.",
+            }
+        if name == "search_customer_reviews":
+            return {
+                "stage": "evidence_validation",
+                "message": "Review evidence is ready; Operations is checking it against the SQL baseline.",
+            }
+        return {
+            "stage": "working",
+            "message": "The completed step is being incorporated into the analysis.",
+        }
+
     @staticmethod
     def _tool_start_message(name: str) -> str:
         messages = {
@@ -225,14 +350,22 @@ class PublicEventMiddleware:
             "search_operations_schema": "Operations is selecting authorized tables and columns.",
             "resolve_operations_entity": "Operations is matching the requested entity to database values.",
             "execute_operations_sql": "Operations is validating and running a read-only SQL query.",
+            "search_customer_reviews": "Operations is searching customer review themes with structured filters.",
         }
         return messages.get(name, f"Running {name}.")
 
     @staticmethod
     def _tool_end_message(name: str, payload: dict[str, Any] | None) -> str:
         if name == "search_knowledge" and payload:
+            if payload.get("success") is False:
+                return f"{name} could not retrieve knowledge evidence."
             count = len(payload.get("matches") or [])
             return f"{name} returned {count} relevant knowledge chunks."
+        if name == "search_customer_reviews" and payload:
+            if payload.get("success") is False:
+                return f"{name} could not retrieve customer-review evidence."
+            count = len(payload.get("matches") or [])
+            return f"{name} returned {count} relevant customer reviews."
         if name.startswith("search_") and name.endswith("_schema") and payload:
             return f"{name} returned {len(payload.get('tables') or [])} authorized schemas."
         if name.startswith("resolve_") and name.endswith("_entity") and payload:
@@ -241,6 +374,13 @@ class PublicEventMiddleware:
             if payload.get("success"):
                 return f"{name} returned {payload.get('row_count', 0)} rows."
             return f"{name} reported {payload.get('error_type', 'an error')}; the specialist may revise the query."
+        if name.startswith("delegate_") and payload:
+            if payload.get("status") == "duplicate_blocked":
+                return f"{name} duplicate call was blocked."
+            validation = payload.get("validation") or {}
+            if payload.get("status") == "completed" and validation.get("valid") is True:
+                return f"{name} completed with validated evidence."
+            return f"{name} completed without usable validated evidence."
         return f"{name} completed."
 
 

@@ -10,7 +10,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from hashlib import sha256
 from time import perf_counter
-from typing import Any
+from typing import Any, Literal
 
 import psycopg
 import sqlglot
@@ -122,8 +122,33 @@ class ReadonlySqlInput(BaseModel):
         return value
 
 
+ValidationErrorType = Literal[
+    "column_not_exposed",
+    "empty_sql",
+    "forbidden_function",
+    "forbidden_statement",
+    "locking_select_forbidden",
+    "missing_authorized_table",
+    "multiple_statements",
+    "non_select_statement",
+    "parameter_mismatch",
+    "parse_error",
+    "positional_parameter_forbidden",
+    "prohibited_column",
+    "schema_scope_violation",
+    "select_into_forbidden",
+    "select_star_forbidden",
+    "unauthorized_table",
+    "unknown_qualifier",
+]
+
+
 class SqlValidationError(ValueError):
-    """Raised when model-generated SQL violates the read-only policy."""
+    """Raised with a stable code when SQL violates one real validator branch."""
+
+    def __init__(self, validation_error_type: ValidationErrorType, message: str) -> None:
+        super().__init__(message)
+        self.validation_error_type = validation_error_type
 
 
 def _json_value(value: Any) -> Any:
@@ -147,9 +172,15 @@ def _parse_for_validation(query: str) -> exp.Expression:
     try:
         statements = sqlglot.parse(parseable, read="postgres")
     except sqlglot.errors.ParseError as exc:
-        raise SqlValidationError(f"PostgreSQL parse failed: {exc}") from exc
+        raise SqlValidationError(
+            "parse_error",
+            f"PostgreSQL parse failed: {exc}",
+        ) from exc
     if len(statements) != 1 or statements[0] is None:
-        raise SqlValidationError("Exactly one SQL statement is required")
+        raise SqlValidationError(
+            "multiple_statements",
+            "Exactly one SQL statement is required",
+        )
     return statements[0]
 
 
@@ -162,7 +193,7 @@ def validate_readonly_sql(
 
     clean_query = query.strip().rstrip(";").strip()
     if not clean_query:
-        raise SqlValidationError("SQL must not be empty")
+        raise SqlValidationError("empty_sql", "SQL must not be empty")
 
     placeholder_names = set(PARAMETER_PATTERN.findall(clean_query))
     parameter_names = set(parameters)
@@ -170,10 +201,14 @@ def validate_readonly_sql(
         missing = sorted(placeholder_names - parameter_names)
         extra = sorted(parameter_names - placeholder_names)
         raise SqlValidationError(
+            "parameter_mismatch",
             f"SQL parameter mismatch; missing={missing}, extra={extra}"
         )
     if re.search(r"(?<!%)%s", clean_query):
-        raise SqlValidationError("Only named psycopg placeholders are allowed")
+        raise SqlValidationError(
+            "positional_parameter_forbidden",
+            "Only named psycopg placeholders are allowed",
+        )
 
     expression = _parse_for_validation(clean_query)
     allowed_roots = tuple(
@@ -187,7 +222,10 @@ def validate_readonly_sql(
         if node_type is not None
     )
     if not isinstance(expression, allowed_roots):
-        raise SqlValidationError("Only SELECT queries are allowed")
+        raise SqlValidationError(
+            "non_select_statement",
+            "Only SELECT queries are allowed",
+        )
 
     forbidden_types = tuple(
         node_type
@@ -198,18 +236,35 @@ def validate_readonly_sql(
         if (node_type := getattr(exp, type_name, None)) is not None
     )
     if forbidden_types and any(expression.find_all(*forbidden_types)):
-        raise SqlValidationError("DDL, DML, COPY, and transaction commands are forbidden")
+        raise SqlValidationError(
+            "forbidden_statement",
+            "DDL, DML, COPY, and transaction commands are forbidden",
+        )
     if any(expression.find_all(exp.Into)):
-        raise SqlValidationError("SELECT INTO is forbidden")
+        raise SqlValidationError(
+            "select_into_forbidden",
+            "SELECT INTO is forbidden",
+        )
     lock_type = getattr(exp, "Lock", None)
     if lock_type is not None and any(expression.find_all(lock_type)):
-        raise SqlValidationError("Locking SELECT statements are forbidden")
-    if any(expression.find_all(exp.Star)):
-        raise SqlValidationError("SELECT * is forbidden; name every required column")
+        raise SqlValidationError(
+            "locking_select_forbidden",
+            "Locking SELECT statements are forbidden",
+        )
+    for star in expression.find_all(exp.Star):
+        if isinstance(star.parent, exp.Count):
+            continue
+        raise SqlValidationError(
+            "select_star_forbidden",
+            "SELECT * is forbidden; name every required column",
+        )
 
     for column in expression.find_all(exp.Column):
         if column.name.lower() in PROHIBITED_COLUMNS:
-            raise SqlValidationError(f"Access to column '{column.name}' is forbidden")
+            raise SqlValidationError(
+                "prohibited_column",
+                f"Access to column '{column.name}' is forbidden",
+            )
 
     dangerous_functions = {
         "dblink", "dblink_connect", "lo_export", "lo_import", "pg_ls_dir",
@@ -218,7 +273,10 @@ def validate_readonly_sql(
     for function in expression.find_all(exp.Func):
         name = getattr(function, "name", "") or function.sql_name()
         if str(name).lower() in dangerous_functions:
-            raise SqlValidationError(f"Function '{name}' is forbidden")
+            raise SqlValidationError(
+                "forbidden_function",
+                f"Function '{name}' is forbidden",
+            )
 
     cte_names = {
         cte.alias_or_name.lower()
@@ -233,16 +291,75 @@ def validate_readonly_sql(
         schema_name = str(table.db or "").lower()
         catalog_name = str(table.catalog or "").lower()
         if catalog_name or schema_name not in {"", "public"}:
-            raise SqlValidationError("Only the public business schema is available")
+            raise SqlValidationError(
+                "schema_scope_violation",
+                "Only the public business schema is available",
+            )
         tables.add(table_name)
 
     if not tables:
-        raise SqlValidationError("The query must read at least one authorized business table")
+        raise SqlValidationError(
+            "missing_authorized_table",
+            "The query must read at least one authorized business table",
+        )
     unauthorized = sorted(tables - set(AGENT_TABLES[agent_name]))
     if unauthorized:
         raise SqlValidationError(
+            "unauthorized_table",
             f"{agent_name} is not authorized to query: {', '.join(unauthorized)}"
         )
+
+    table_aliases: dict[str, str] = {}
+    for table in expression.find_all(exp.Table):
+        physical_name = table.name.lower()
+        if physical_name in cte_names:
+            continue
+        table_aliases[physical_name] = physical_name
+        if table.alias:
+            table_aliases[str(table.alias).lower()] = physical_name
+
+    projection_aliases = {
+        str(item.alias).lower()
+        for select in expression.find_all(exp.Select)
+        for item in select.expressions
+        if item.alias
+    }
+    derived_aliases = {
+        subquery.alias_or_name.lower()
+        for subquery in expression.find_all(exp.Subquery)
+        if subquery.alias_or_name
+    }
+    allowed_columns_by_table = {
+        table_name: {
+            str(column).lower()
+            for column in SCHEMA_CATALOG[table_name]["columns"]
+        }
+        for table_name in tables
+    }
+    allowed_unqualified = set().union(*allowed_columns_by_table.values())
+    allowed_unqualified.update(projection_aliases)
+    for column in expression.find_all(exp.Column):
+        column_name = column.name.lower()
+        qualifier = str(column.table or "").lower()
+        if qualifier in cte_names or qualifier in derived_aliases:
+            continue
+        physical_table = table_aliases.get(qualifier) if qualifier else None
+        if physical_table is not None:
+            if column_name not in allowed_columns_by_table[physical_table]:
+                raise SqlValidationError(
+                    "column_not_exposed",
+                    f"Column '{column.name}' is not exposed for table '{physical_table}'"
+                )
+        elif qualifier:
+            raise SqlValidationError(
+                "unknown_qualifier",
+                f"Unknown table or derived-table qualifier '{column.table}'"
+            )
+        elif not qualifier and column_name not in allowed_unqualified:
+            raise SqlValidationError(
+                "column_not_exposed",
+                f"Column '{column.name}' is not exposed by the authorized schema"
+            )
     return clean_query, sorted(tables)
 
 
@@ -297,7 +414,7 @@ def search_schema_catalog(
     }
 
 
-def _readonly_database_url() -> str:
+def readonly_database_url() -> str:
     database_url = (
         os.getenv("AGENT_READONLY_DATABASE_URL", "").strip()
         or os.getenv("DATABASE_URL", "").strip()
@@ -309,15 +426,15 @@ def _readonly_database_url() -> str:
     return database_url
 
 
-def _connect_readonly() -> psycopg.Connection:
+def connect_readonly() -> psycopg.Connection:
     return psycopg.connect(
-        _readonly_database_url(),
+        readonly_database_url(),
         connect_timeout=5,
         prepare_threshold=None,
     )
 
 
-def _set_readonly_guards(cursor: psycopg.Cursor) -> None:
+def set_readonly_guards(cursor: psycopg.Cursor) -> None:
     cursor.execute("SET TRANSACTION READ ONLY")
     cursor.execute(
         "SELECT set_config('statement_timeout', %s, true)",
@@ -355,9 +472,9 @@ def _resolve_entity_sync(
         table=psycopg_sql.Identifier(table_name),
     )
     prefix_pattern = f"{user_term.strip()}%"
-    with _connect_readonly() as connection:
+    with connect_readonly() as connection:
         with connection.cursor(row_factory=dict_row) as cursor:
-            _set_readonly_guards(cursor)
+            set_readonly_guards(cursor)
             cursor.execute(statement, (pattern, user_term.strip(), prefix_pattern, limit))
             rows = cursor.fetchall()
     return {
@@ -391,9 +508,9 @@ def _execute_sql_sync(
         ).encode("utf-8")
     ).hexdigest()[:16]
 
-    with _connect_readonly() as connection:
+    with connect_readonly() as connection:
         with connection.cursor(row_factory=dict_row) as cursor:
-            _set_readonly_guards(cursor)
+            set_readonly_guards(cursor)
             cursor.execute(executable, parameters)
             raw_rows = cursor.fetchall()
             columns = [description.name for description in cursor.description or []]
@@ -436,18 +553,38 @@ def _execute_sql_sync(
     }
 
 
-def _claim_attempt(config: RunnableConfig) -> tuple[bool, int]:
-    configurable = config.get("configurable") or {}
+def _sql_runtime_state(config: RunnableConfig) -> dict[str, Any]:
+    configurable = config.get("configurable")
+    if not isinstance(configurable, dict):
+        configurable = {}
+        config["configurable"] = configurable
     runtime_state = configurable.get("sql_runtime_state")
     if not isinstance(runtime_state, dict):
-        runtime_state = {"attempts": 0}
+        runtime_state = {"attempts": 0, "in_flight": False, "succeeded": False}
         configurable["sql_runtime_state"] = runtime_state
+    return runtime_state
+
+
+def _claim_attempt(config: RunnableConfig) -> tuple[str, int]:
+    runtime_state = _sql_runtime_state(config)
     attempts = int(runtime_state.get("attempts", 0))
+    if runtime_state.get("succeeded") is True:
+        return "already_succeeded", attempts
+    if runtime_state.get("in_flight") is True:
+        return "concurrent_query_blocked", attempts
     maximum = sql_max_attempts()
     if attempts >= maximum:
-        return False, attempts
+        return "attempt_limit", attempts
     runtime_state["attempts"] = attempts + 1
-    return True, attempts + 1
+    runtime_state["in_flight"] = True
+    return "permitted", attempts + 1
+
+
+def _finish_attempt(config: RunnableConfig, *, success: bool) -> None:
+    runtime_state = _sql_runtime_state(config)
+    runtime_state["in_flight"] = False
+    if success:
+        runtime_state["succeeded"] = True
 
 
 def build_sql_tools(agent_name: SqlAgentName) -> tuple[BaseTool, BaseTool, BaseTool]:
@@ -541,13 +678,20 @@ def build_sql_tools(agent_name: SqlAgentName) -> tuple[BaseTool, BaseTool, BaseT
     ) -> str:
         started_at = perf_counter()
         tool_name = f"execute_{agent_name}_sql"
-        permitted, attempt = _claim_attempt(config)
-        if not permitted:
+        claim_status, attempt = _claim_attempt(config)
+        if claim_status != "permitted":
+            if claim_status == "already_succeeded":
+                error = "A successful SQL result already exists; use it to complete the analysis."
+            elif claim_status == "concurrent_query_blocked":
+                error = "Another SQL query is already running; parallel SQL calls are not allowed."
+            else:
+                error = f"The maximum of {sql_max_attempts()} SQL attempts was reached."
             return json.dumps(
                 {
                     "success": False,
-                    "error_type": "attempt_limit",
-                    "error": f"The maximum of {sql_max_attempts()} SQL attempts was reached.",
+                    "agent": agent_name,
+                    "error_type": claim_status,
+                    "error": error,
                     "retryable": False,
                     "sources": [],
                 },
@@ -561,6 +705,14 @@ def build_sql_tools(agent_name: SqlAgentName) -> tuple[BaseTool, BaseTool, BaseT
             sql_length=len(sql),
             parameter_count=len(actual_parameters),
         )
+        logger.info(
+            "sql.generated",
+            component="tool",
+            tool_name=tool_name,
+            attempt=attempt,
+            agent_name=agent_name,
+            sql=sql,
+        )
         try:
             result = await asyncio.to_thread(
                 _execute_sql_sync,
@@ -573,6 +725,7 @@ def build_sql_tools(agent_name: SqlAgentName) -> tuple[BaseTool, BaseTool, BaseT
             result = {
                 "success": False,
                 "error_type": "validation_error",
+                "validation_error_type": error.validation_error_type,
                 "error": str(error),
                 "retryable": attempt < sql_max_attempts(),
                 "sources": [],
@@ -604,6 +757,8 @@ def build_sql_tools(agent_name: SqlAgentName) -> tuple[BaseTool, BaseTool, BaseT
                 "retryable": False,
                 "sources": [],
             }
+        _finish_attempt(config, success=result.get("success") is True)
+        result.setdefault("agent", agent_name)
         logger.tool_event(
             status="completed",
             tool_name=tool_name,
@@ -612,6 +767,12 @@ def build_sql_tools(agent_name: SqlAgentName) -> tuple[BaseTool, BaseTool, BaseT
             success=result.get("success", False),
             row_count=result.get("row_count", 0),
             error_type=result.get("error_type"),
+            validation_error_type=result.get("validation_error_type"),
+            validation_error=(
+                result.get("error")
+                if result.get("error_type") == "validation_error"
+                else None
+            ),
         )
         return json.dumps(result, ensure_ascii=False, default=str)
 
@@ -619,11 +780,14 @@ def build_sql_tools(agent_name: SqlAgentName) -> tuple[BaseTool, BaseTool, BaseT
 
 
 __all__ = [
+    "connect_readonly",
     "EntityResolutionInput",
     "ReadonlySqlInput",
     "SchemaSearchInput",
     "SqlValidationError",
+    "ValidationErrorType",
     "build_sql_tools",
     "search_schema_catalog",
+    "set_readonly_guards",
     "validate_readonly_sql",
 ]

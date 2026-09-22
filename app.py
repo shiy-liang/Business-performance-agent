@@ -17,6 +17,7 @@ from backend.routers.knowledge_files import router as knowledge_files_router
 from backend.routers.knowledge_reviews import router as knowledge_reviews_router
 from backend.routers.marketing import router as marketing_router
 from backend.routers.products import router as products_router
+from backend.routers.sessions import router as sessions_router
 
 
 app = FastAPI(
@@ -41,6 +42,7 @@ app.include_router(action_center_router)
 app.include_router(products_router)
 app.include_router(marketing_router)
 app.include_router(chat_router)
+app.include_router(sessions_router)
 app.include_router(knowledge_files_router)
 app.include_router(knowledge_reviews_router)
 

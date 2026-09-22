@@ -13,11 +13,11 @@ from observability import logger
 from rag.agent.middleware import content_text
 from rag.agent.specialists.graph import SpecialistName, build_specialist_graph
 from rag.agent.tools.registry import ToolRegistry, default_tool_registry
+from rag.agent.validation import validate_specialist_evidence
 
 
-def _collect_sources(messages: list[Any]) -> list[dict[str, Any]]:
-    sources: list[dict[str, Any]] = []
-    seen: set[str] = set()
+def _collect_tool_payloads(messages: list[Any]) -> list[dict[str, Any]]:
+    payloads: list[dict[str, Any]] = []
     for message in messages:
         if not isinstance(message, ToolMessage) or not isinstance(message.content, str):
             continue
@@ -25,6 +25,15 @@ def _collect_sources(messages: list[Any]) -> list[dict[str, Any]]:
             payload = json.loads(message.content)
         except json.JSONDecodeError:
             continue
+        if isinstance(payload, dict):
+            payloads.append(payload)
+    return payloads
+
+
+def _collect_sources(tool_payloads: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    sources: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for payload in tool_payloads:
         for source in payload.get("sources") or []:
             if not isinstance(source, dict):
                 continue
@@ -66,7 +75,11 @@ async def run_specialist_agent(
     configurable.update(
         {
             "agent_name": agent_name,
-            "sql_runtime_state": {"attempts": 0},
+            "sql_runtime_state": {
+                "attempts": 0,
+                "in_flight": False,
+                "succeeded": False,
+            },
         }
     )
     child_config["configurable"] = configurable
@@ -90,7 +103,14 @@ async def run_specialist_agent(
 
     messages = list(result.get("messages") or [])
     answer = _final_answer(messages)
-    sources = _collect_sources(messages)
+    tool_payloads = _collect_tool_payloads(messages)
+    sources = _collect_sources(tool_payloads)
+    validation = validate_specialist_evidence(
+        agent_name,
+        answer,
+        tool_payloads,
+        sources,
+    )
     duration_ms = round((perf_counter() - started_at) * 1000, 2)
     logger.info(
         "agent.completed",
@@ -98,12 +118,15 @@ async def run_specialist_agent(
         agent_name=agent_name,
         duration_ms=duration_ms,
         evidence_count=len(sources),
+        validation_status="passed" if validation["valid"] else "failed",
+        validation_error_count=len(validation["errors"]),
     )
     return {
-        "status": "completed" if answer else "incomplete",
+        "status": "completed" if validation["valid"] else "invalid_evidence",
         "agent": agent_name,
         "answer": answer,
         "sources": sources,
+        "validation": validation,
         "duration_ms": duration_ms,
     }
 

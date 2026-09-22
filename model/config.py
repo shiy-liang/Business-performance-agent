@@ -23,6 +23,7 @@ class ChatModelConfig:
     fallback_model: str | None
     temperature: float | None
     reasoning_effort: str
+    agent_reasoning_effort: dict[str, str]
     max_output_tokens: int
     timeout_seconds: float
     max_retries: int
@@ -119,6 +120,40 @@ def load_model_config(path: Path = DEFAULT_CONFIG_PATH) -> ModelConfig:
         allowed = ", ".join(sorted(supported_reasoning_efforts))
         raise ModelConfigError(f"chat_model.reasoning_effort must be one of: {allowed}")
 
+    default_agent_reasoning = {
+        "supervisor_routing": "none",
+        "supervisor_synthesis": "low",
+        "finance": "low",
+        "operations": "low",
+    }
+    raw_agent_reasoning = chat.get(
+        "agent_reasoning_effort",
+        default_agent_reasoning,
+    )
+    if not isinstance(raw_agent_reasoning, dict):
+        raise ModelConfigError("chat_model.agent_reasoning_effort must be a mapping")
+    supported_agent_profiles = {
+        "supervisor_routing",
+        "supervisor_synthesis",
+        "finance",
+        "operations",
+    }
+    unknown_profiles = sorted(set(raw_agent_reasoning) - supported_agent_profiles)
+    if unknown_profiles:
+        raise ModelConfigError(
+            "chat_model.agent_reasoning_effort contains unsupported profiles: "
+            + ", ".join(unknown_profiles)
+        )
+    agent_reasoning_effort: dict[str, str] = {}
+    for profile in supported_agent_profiles:
+        effort = raw_agent_reasoning.get(profile, default_agent_reasoning[profile])
+        if effort not in supported_reasoning_efforts:
+            allowed = ", ".join(sorted(supported_reasoning_efforts))
+            raise ModelConfigError(
+                f"chat_model.agent_reasoning_effort.{profile} must be one of: {allowed}"
+            )
+        agent_reasoning_effort[profile] = effort
+
     chat_timeout = chat.get("timeout_seconds", 15)
     embedding_timeout = embedding.get("timeout_seconds", 15)
     if not isinstance(chat_timeout, (int, float)) or chat_timeout <= 0:
@@ -143,6 +178,7 @@ def load_model_config(path: Path = DEFAULT_CONFIG_PATH) -> ModelConfig:
             fallback_model=fallback,
             temperature=float(temperature) if temperature is not None else None,
             reasoning_effort=reasoning_effort,
+            agent_reasoning_effort=agent_reasoning_effort,
             max_output_tokens=_positive(
                 chat.get("max_output_tokens", 2048),
                 "chat_model.max_output_tokens",

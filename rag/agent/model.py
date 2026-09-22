@@ -11,7 +11,7 @@ from model.config import PROJECT_ROOT, load_model_config
 from model.factory import ModelEnvironmentError
 
 
-def create_agent_model() -> ChatOpenAI:
+def create_agent_model(*, reasoning_profile: str | None = None) -> ChatOpenAI:
     """Create a streaming ChatOpenAI client backed by the Responses API."""
     load_dotenv(PROJECT_ROOT / ".env")
     settings = load_model_config()
@@ -23,6 +23,11 @@ def create_agent_model() -> ChatOpenAI:
         raise ModelEnvironmentError(f"{settings.workspace_id_env} is not configured")
 
     chat = settings.chat_model
+    reasoning_effort = (
+        chat.agent_reasoning_effort.get(reasoning_profile, chat.reasoning_effort)
+        if reasoning_profile
+        else chat.reasoning_effort
+    )
     return ChatOpenAI(
         model=chat.model,
         api_key=api_key,
@@ -34,20 +39,24 @@ def create_agent_model() -> ChatOpenAI:
         streaming=True,
         use_responses_api=True,
         output_version="responses/v1",
-        reasoning={"effort": chat.reasoning_effort},
+        reasoning={"effort": reasoning_effort},
     )
 
 
-def create_supervisor_model() -> ChatOpenAI:
+def create_supervisor_model(*, phase: str = "routing") -> ChatOpenAI:
     """Create the model used by the user-facing supervisor."""
 
-    return create_agent_model()
+    if phase not in {"routing", "synthesis"}:
+        raise ValueError(f"Unsupported supervisor phase: {phase}")
+    return create_agent_model(reasoning_profile=f"supervisor_{phase}")
 
 
-def create_specialist_model() -> ChatOpenAI:
+def create_specialist_model(agent_name: str) -> ChatOpenAI:
     """Create the model used by Finance and Operations specialists."""
 
-    return create_agent_model()
+    if agent_name not in {"finance", "operations"}:
+        raise ValueError(f"Unsupported specialist: {agent_name}")
+    return create_agent_model(reasoning_profile=agent_name)
 
 
 __all__ = ["create_agent_model", "create_specialist_model", "create_supervisor_model"]
