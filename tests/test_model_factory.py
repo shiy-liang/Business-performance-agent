@@ -64,6 +64,13 @@ def test_bailian_connection_configuration() -> None:
     assert settings.api_key_env == "DASHSCOPE_API_KEY"
     assert settings.workspace_id_env == "DASHSCOPE_WORKSPACE_ID"
     assert settings.chat_model.fallback_model == "qwen3-max"
+    assert settings.chat_model.model == "qwen3.8-max"
+    assert settings.chat_model.agent_reasoning_effort == {
+        "supervisor_routing": "none",
+        "supervisor_synthesis": "low",
+        "finance": "low",
+        "operations": "low",
+    }
     assert settings.embedding_model.batch_size == 20
 
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time as time_module
 import traceback
 from contextvars import ContextVar, Token
 from datetime import datetime, time, timedelta
@@ -19,6 +20,18 @@ from typing import Any, Mapping
 from config.logging import logging_settings
 
 _log_context: ContextVar[dict[str, Any]] = ContextVar("log_context", default={})
+
+
+class _WindowsSafeTimedRotatingFileHandler(TimedRotatingFileHandler):
+    """Keep logging when another Windows process temporarily owns the log file."""
+
+    def doRollover(self) -> None:
+        try:
+            super().doRollover()
+        except PermissionError:
+            # A concurrently running development server can hold the file open.
+            # Defer rotation instead of dropping the current log record.
+            self.rolloverAt = self.computeRollover(int(time_module.time()))
 
 
 class LogManager:
@@ -69,7 +82,7 @@ class LogManager:
         console_handler._business_performance_handler = True  # type: ignore[attr-defined]
 
         rotation_time_utc = self._rotation_time_utc()
-        file_handler = TimedRotatingFileHandler(
+        file_handler = _WindowsSafeTimedRotatingFileHandler(
             log_directory / "business-performance.log",
             when="midnight",
             interval=1,
@@ -131,7 +144,12 @@ class LogManager:
     def reset_context(token: Token[dict[str, Any]]) -> None:
         """Restore the context that existed before ``bind_context``."""
 
-        _log_context.reset(token)
+        try:
+            _log_context.reset(token)
+        except ValueError:
+            # Async generators can be finalized in a copied context when their
+            # consumer stops early. Clear that copied context safely.
+            _log_context.set({})
 
     def debug(self, event: str, message: str = "", **fields: Any) -> None:
         self._write(logging.DEBUG, event, message, fields)

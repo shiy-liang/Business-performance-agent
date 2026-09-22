@@ -223,7 +223,7 @@ def list_dashboard_stores() -> dict[str, object]:
     return {
         "default_scope": {
             "type": "company",
-            "label": "全部门店",
+            "label": "All stores",
             "includes_online": True,
             "includes_unassigned_transactions": True,
         },
@@ -263,7 +263,7 @@ def financial_pulse(
                     scope = {
                         "type": "company",
                         "store_id": None,
-                        "label": "全部门店",
+                        "label": "All stores",
                     }
                 else:
                     cursor.execute(
@@ -343,7 +343,11 @@ def financial_pulse(
     except psycopg.Error as exc:
         raise HTTPException(status_code=503, detail="Database query failed") from exc
 
-    profit_label = "估算经营利润" if store_id is None else "估算门店贡献利润"
+    profit_label = (
+        "Estimated operating profit"
+        if store_id is None
+        else "Estimated store contribution profit"
+    )
     return {
         "scope": scope,
         "period": {
@@ -356,11 +360,11 @@ def financial_pulse(
         },
         "metrics": {
             "refund_adjusted_revenue": {
-                "label": "退款后营收",
+                "label": "Refund-adjusted revenue",
                 "value": _money(summary["refund_adjusted_revenue"]),
             },
             "estimated_gross_profit": {
-                "label": "估算毛利润",
+                "label": "Estimated gross profit",
                 "value": _money(summary["estimated_gross_profit"]),
             },
             "estimated_profit": {
