@@ -5,4 +5,17 @@ pgvector
 python-dotenv
 sentence-transformers
 fastapi
+python-multipart
 uvicorn
+tzdata
+openai
+PyYAML
+tenacity
+langchain-community
+langchain-core
+langchain-openai
+langgraph
+sqlglot
+langchain-text-splitters
+pypdf
+chardet

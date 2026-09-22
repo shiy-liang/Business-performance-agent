@@ -8,6 +8,12 @@ const state = {
   runId: null,
   requestController: null,
   filterTimer: null,
+  knowledgeAllowedExtensions: [],
+  chatController: null,
+  chatSessionId: "",
+  chatAnswerText: "",
+  chatRenderFrame: null,
+  chatTurnComplete: false,
 };
 
 const elements = {
@@ -30,17 +36,36 @@ const elements = {
   campaignCount: document.querySelector("#campaign-count"),
   campaignList: document.querySelector("#campaign-list"),
   chatForm: document.querySelector("#chat-form"),
+  chatHistory: document.querySelector("#chat-history"),
+  newChatButton: document.querySelector("#new-chat-button"),
   chatInput: document.querySelector("#chat-input"),
   chatResponse: document.querySelector("#chat-response"),
+  chatQuestion: document.querySelector("#chat-question"),
+  chatProgress: document.querySelector("#chat-progress"),
+  chatThinking: document.querySelector("#chat-thinking"),
+  chatThinkingLabel: document.querySelector("#chat-thinking-label"),
+  chatAnswer: document.querySelector("#chat-answer"),
+  chatAnswerStatus: document.querySelector("#chat-answer-status"),
+  chatCopyButton: document.querySelector("#chat-copy-button"),
+  chatSources: document.querySelector("#chat-sources"),
+  chatSubmitLabel: document.querySelector("#chat-submit-label"),
+  knowledgeDropZone: document.querySelector("#knowledge-drop-zone"),
+  knowledgeFileInput: document.querySelector("#knowledge-file-input"),
+  knowledgeFileCount: document.querySelector("#knowledge-file-count"),
+  knowledgeUploadStatus: document.querySelector("#knowledge-upload-status"),
+  knowledgeFileList: document.querySelector("#knowledge-file-list"),
+  knowledgeUploadPolicy: document.querySelector("#knowledge-upload-policy"),
+  reviewSyncButton: document.querySelector("#review-sync-button"),
+  reviewSyncStatus: document.querySelector("#review-sync-status"),
 };
 
-const moneyFormatter = new Intl.NumberFormat("zh-CN", {
+const moneyFormatter = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
   maximumFractionDigits: 0,
 });
 
-const numberFormatter = new Intl.NumberFormat("zh-CN", {
+const numberFormatter = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 0,
 });
 
@@ -73,7 +98,9 @@ function formatCompactMoney(value) {
 function formatMonth(month) {
   if (!month || !/^\d{4}-\d{2}$/.test(month)) return month || "—";
   const [year, monthNumber] = month.split("-");
-  return `${year} 年 ${Number(monthNumber)} 月`;
+  return new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" }).format(
+    new Date(Number(year), Number(monthNumber) - 1, 1),
+  );
 }
 
 function endpoint(path, options = {}) {
@@ -87,7 +114,7 @@ function endpoint(path, options = {}) {
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, options);
   if (!response.ok) {
-    let detail = `请求失败（${response.status}）`;
+    let detail = `Request failed (${response.status})`;
     try {
       const body = await response.json();
       detail = body.detail || detail;
@@ -120,6 +147,469 @@ function renderEmpty(container, message) {
   container.textContent = message;
 }
 
+function formatFileSize(bytes) {
+  const value = Number(bytes) || 0;
+  if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${value} B`;
+}
+
+function setUploadStatus(mode, message) {
+  elements.knowledgeUploadStatus.hidden = false;
+  elements.knowledgeUploadStatus.className = `upload-status ${mode}`;
+  elements.knowledgeUploadStatus.textContent = message;
+}
+
+function renderKnowledgeFiles(data) {
+  const policy = data.upload_policy;
+  state.knowledgeAllowedExtensions = policy.allowed_extensions;
+  elements.knowledgeFileInput.accept = policy.allowed_extensions.join(",");
+  elements.knowledgeUploadPolicy.textContent = `${policy.allowed_extensions
+    .map((extension) => extension.slice(1).toUpperCase())
+    .join(", ")} · One file · Up to ${formatFileSize(policy.max_file_size_bytes)}`;
+  elements.knowledgeFileCount.textContent = `${data.count} files`;
+  elements.knowledgeFileList.className = "knowledge-file-list";
+  if (!data.files.length) {
+    renderEmpty(elements.knowledgeFileList, "No knowledge files have been uploaded yet");
+    return;
+  }
+
+  elements.knowledgeFileList.innerHTML = data.files
+    .map(
+      (file) => `
+        <article class="knowledge-file-row">
+          <span class="file-type-badge">${escapeHtml(
+            file.original_filename.split(".").pop().toUpperCase(),
+          )}</span>
+          <div class="knowledge-file-copy">
+            <strong title="${escapeHtml(file.original_filename)}">${escapeHtml(
+              file.original_filename,
+            )}</strong>
+            <span>${escapeHtml(formatFileSize(file.file_size))} · ${escapeHtml(
+              new Date(file.created_at).toLocaleString("en-US"),
+            )}</span>
+          </div>
+          <div class="knowledge-file-actions">
+            <a href="/api/knowledge/files/${encodeURIComponent(file.file_id)}/download">Download</a>
+            <button type="button" data-delete-file-id="${escapeHtml(file.file_id)}">Delete</button>
+          </div>
+        </article>
+      `,
+    )
+    .join("");
+}
+
+async function loadKnowledgeFiles() {
+  try {
+    const data = await fetchJson("/api/knowledge/files");
+    renderKnowledgeFiles(data);
+  } catch (error) {
+    elements.knowledgeFileCount.textContent = "Unavailable";
+    renderEmpty(elements.knowledgeFileList, `Knowledge files could not be loaded: ${error.message}`);
+  }
+}
+
+async function uploadKnowledgeFile(file) {
+  if (!file) return;
+  const extension = file.name.includes(".")
+    ? `.${file.name.split(".").pop().toLowerCase()}`
+    : "";
+  if (
+    state.knowledgeAllowedExtensions.length &&
+    !state.knowledgeAllowedExtensions.includes(extension)
+  ) {
+    setUploadStatus(
+      "error",
+      `Allowed file types: ${state.knowledgeAllowedExtensions.join(", ")}`,
+    );
+    return;
+  }
+
+  elements.knowledgeDropZone.classList.add("is-uploading");
+  setUploadStatus("loading", `Validating and uploading ${file.name}…`);
+  const formData = new FormData();
+  formData.append("file", file, file.name);
+
+  try {
+    const data = await fetchJson("/api/knowledge/files", {
+      method: "POST",
+      body: formData,
+    });
+    setUploadStatus(
+      "success",
+      `${data.file.original_filename} was stored as ${data.knowledge.chunk_count} knowledge chunks`,
+    );
+    await loadKnowledgeFiles();
+  } catch (error) {
+    setUploadStatus("error", `Upload failed: ${error.message}`);
+  } finally {
+    elements.knowledgeDropZone.classList.remove("is-uploading");
+    elements.knowledgeFileInput.value = "";
+  }
+}
+
+function acceptDroppedFiles(files) {
+  if (!files || files.length === 0) return;
+  if (files.length > 1) {
+    setUploadStatus("error", "Only one file can be uploaded at a time");
+    return;
+  }
+  uploadKnowledgeFile(files[0]);
+}
+
+async function deleteKnowledgeFile(fileId) {
+  if (!window.confirm("Delete this knowledge file?")) return;
+  try {
+    await fetchJson(`/api/knowledge/files/${encodeURIComponent(fileId)}`, {
+      method: "DELETE",
+    });
+    setUploadStatus("success", "The file was deleted");
+    await loadKnowledgeFiles();
+  } catch (error) {
+    setUploadStatus("error", `Delete failed: ${error.message}`);
+  }
+}
+
+async function syncCustomerReviews() {
+  elements.reviewSyncButton.disabled = true;
+  elements.reviewSyncStatus.hidden = false;
+  elements.reviewSyncStatus.className = "upload-status loading";
+  elements.reviewSyncStatus.textContent = "Synchronizing customer reviews…";
+
+  try {
+    const data = await fetchJson("/api/knowledge/reviews/sync", { method: "POST" });
+    elements.reviewSyncStatus.className = "upload-status success";
+    elements.reviewSyncStatus.textContent =
+      `Synced ${data.synced_count} customer reviews into the knowledge base`;
+  } catch (error) {
+    elements.reviewSyncStatus.className = "upload-status error";
+    elements.reviewSyncStatus.textContent = `Review synchronization failed: ${error.message}`;
+  } finally {
+    elements.reviewSyncButton.disabled = false;
+  }
+}
+
+function resizeChatInput() {
+  elements.chatInput.style.height = "auto";
+  const height = Math.min(elements.chatInput.scrollHeight, 150);
+  elements.chatInput.style.height = `${height}px`;
+  elements.chatInput.style.overflowY = elements.chatInput.scrollHeight > 150 ? "auto" : "hidden";
+}
+
+function resetConversationUi() {
+  state.chatAnswerText = "";
+  state.chatTurnComplete = false;
+  if (state.chatRenderFrame !== null) {
+    window.cancelAnimationFrame(state.chatRenderFrame);
+    state.chatRenderFrame = null;
+  }
+  elements.chatHistory.replaceChildren();
+  elements.chatResponse.hidden = true;
+  elements.chatQuestion.textContent = "";
+  elements.chatProgress.replaceChildren();
+  elements.chatAnswer.replaceChildren();
+  elements.chatSources.replaceChildren();
+  elements.chatSources.hidden = true;
+  elements.chatCopyButton.hidden = true;
+  setThinking("", false);
+}
+
+async function createChatSession({ clearUi = false } = {}) {
+  const data = await fetchJson("/api/sessions", { method: "POST" });
+  state.chatSessionId = data.session_id;
+  if (clearUi) resetConversationUi();
+  return state.chatSessionId;
+}
+
+async function ensureChatSession() {
+  if (!state.chatSessionId) await createChatSession();
+  return state.chatSessionId;
+}
+
+function archiveCompletedTurn() {
+  if (!state.chatTurnComplete || elements.chatResponse.hidden) return;
+  const archived = elements.chatResponse.cloneNode(true);
+  archived.removeAttribute("id");
+  archived.removeAttribute("aria-live");
+  archived.hidden = false;
+  archived.classList.add("chat-turn--archived");
+  archived.querySelector(".chat-trace")?.remove();
+  archived.querySelector(".answer-actions")?.remove();
+  archived.querySelectorAll("[id]").forEach((node) => node.removeAttribute("id"));
+  archived.querySelector("[aria-labelledby]")?.removeAttribute("aria-labelledby");
+  elements.chatHistory.append(archived);
+}
+
+function prepareChatResponse(question) {
+  state.chatAnswerText = "";
+  state.chatTurnComplete = false;
+  elements.chatResponse.hidden = false;
+  elements.chatQuestion.textContent = question;
+  elements.chatProgress.replaceChildren();
+  elements.chatAnswer.replaceChildren();
+  elements.chatAnswer.classList.remove("is-streaming");
+  elements.chatSources.replaceChildren();
+  elements.chatSources.hidden = true;
+  elements.chatCopyButton.hidden = true;
+  elements.chatAnswerStatus.textContent = "Thinking";
+  elements.chatAnswerStatus.classList.add("is-streaming");
+  setThinking("Connecting to the model…");
+}
+
+async function startNewChat() {
+  const oldSessionId = state.chatSessionId;
+  if (state.chatController) state.chatController.abort();
+  state.chatSessionId = "";
+  elements.newChatButton.disabled = true;
+  try {
+    if (oldSessionId) {
+      const response = await fetch(`/api/sessions/${encodeURIComponent(oldSessionId)}`, {
+        method: "DELETE",
+      });
+      if (!response.ok && response.status !== 404) {
+        throw new Error(`Could not delete the previous session (${response.status})`);
+      }
+    }
+    await createChatSession({ clearUi: true });
+    elements.chatInput.focus();
+  } catch (error) {
+    showGlobalError(`New chat could not be created: ${error.message}`);
+  } finally {
+    elements.newChatButton.disabled = false;
+  }
+}
+
+function renderChatAnswer() {
+  state.chatRenderFrame = null;
+  if (window.ChatRenderer?.renderMarkdown) {
+    elements.chatAnswer.innerHTML = window.ChatRenderer.renderMarkdown(state.chatAnswerText);
+    return;
+  }
+  elements.chatAnswer.innerHTML = `<p>${escapeHtml(state.chatAnswerText).replaceAll("\n", "<br>")}</p>`;
+}
+
+function scheduleChatAnswerRender() {
+  if (state.chatRenderFrame !== null) return;
+  state.chatRenderFrame = window.requestAnimationFrame(renderChatAnswer);
+}
+
+function appendChatActivity(kind, label, message) {
+  const item = document.createElement("div");
+  item.className = `chat-progress-item ${kind}`;
+  const dot = document.createElement("i");
+  dot.setAttribute("aria-hidden", "true");
+  const copy = document.createElement("span");
+  const heading = document.createElement("b");
+  heading.textContent = label;
+  copy.append(heading, document.createTextNode(String(message || "")));
+  item.append(dot, copy);
+  elements.chatProgress.append(item);
+}
+
+function setThinking(message, visible = true) {
+  elements.chatThinking.hidden = !visible;
+  if (message) elements.chatThinkingLabel.textContent = message;
+}
+
+function safeSourceUrl(value) {
+  try {
+    const url = new URL(String(value || ""), window.location.origin);
+    if (!['http:', 'https:'].includes(url.protocol)) return null;
+    return url.href;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function renderChatSources(sources) {
+  elements.chatSources.replaceChildren();
+  if (!Array.isArray(sources) || sources.length === 0) {
+    elements.chatSources.hidden = true;
+    return;
+  }
+
+  const heading = document.createElement("div");
+  heading.className = "sources-heading";
+  const title = document.createElement("strong");
+  title.textContent = "References";
+  const count = document.createElement("span");
+  count.textContent = `${sources.length} cited source${sources.length === 1 ? "" : "s"}`;
+  heading.append(title, count);
+
+  const list = document.createElement("div");
+  list.className = "source-list";
+  sources.forEach((source, index) => {
+    const href = safeSourceUrl(source.download_url);
+    const entry = document.createElement(href ? "a" : "div");
+    if (href) entry.href = href;
+    entry.className = "source-entry";
+
+    const number = document.createElement("span");
+    number.className = "source-index";
+    number.textContent = String(index + 1).padStart(2, "0");
+    const copy = document.createElement("span");
+    copy.className = "source-copy";
+    const filename = document.createElement("strong");
+    filename.textContent = source.filename || source.citation || "Knowledge source";
+    const detail = document.createElement("small");
+    const similarity = Number(source.similarity);
+    detail.textContent = [
+      source.citation,
+      Number.isFinite(similarity) ? `${Math.round(similarity * 100)}% match` : "",
+    ].filter(Boolean).join(" · ");
+    copy.append(filename, detail);
+    const open = document.createElement("span");
+    open.className = "source-open";
+    open.textContent = href ? "↗" : "";
+    entry.append(number, copy, open);
+    list.append(entry);
+  });
+  elements.chatSources.append(heading, list);
+  elements.chatSources.hidden = false;
+}
+
+function handleChatEvent(eventName, data) {
+  const message = String(data?.message || "");
+  if (eventName === "status") {
+    setThinking(message || "Working on your request");
+    appendChatActivity("status", "Status", message);
+  } else if (eventName === "reasoning") {
+    const effort = data?.effort ? ` (${data.effort})` : "";
+    setThinking(data?.active === false ? "Reasoning is disabled" : "Reasoning over the request…");
+    appendChatActivity("reasoning", `Reasoning${effort}`, message);
+  } else if (eventName === "skills") {
+    const items = Array.isArray(data?.items) ? data.items : [];
+    if (items.length) {
+      items.forEach((item) => appendChatActivity("skill", "Skill", String(item)));
+    } else {
+      appendChatActivity("skill", "Skills", message);
+    }
+  } else if (eventName === "tool_start") {
+    appendChatActivity("tool-start", "Tool call", message || String(data?.name || "Tool started"));
+  } else if (eventName === "tool_end") {
+    appendChatActivity("tool-end", "Tool result", message || String(data?.name || "Tool completed"));
+  } else if (eventName === "validation") {
+    const agent = String(data?.agent || "Specialist");
+    const label = data?.valid === true ? "Evidence validated" : "Evidence rejected";
+    appendChatActivity("validation", `${agent} · ${label}`, message);
+  } else if (eventName === "sources") {
+    renderChatSources(data?.items);
+  } else if (eventName === "token") {
+    const text = String(data?.text || "");
+    if (!text) return;
+    state.chatAnswerText += text;
+    elements.chatAnswer.classList.add("is-streaming");
+    elements.chatAnswerStatus.textContent = "Streaming";
+    elements.chatAnswerStatus.classList.add("is-streaming");
+    setThinking("", false);
+    scheduleChatAnswerRender();
+  } else if (eventName === "done") {
+    if (typeof data?.answer === "string" && data.answer && !state.chatAnswerText) {
+      state.chatAnswerText = data.answer;
+    }
+    if (state.chatRenderFrame !== null) window.cancelAnimationFrame(state.chatRenderFrame);
+    renderChatAnswer();
+    renderChatSources(data?.sources);
+    elements.chatAnswer.classList.remove("is-streaming");
+    elements.chatAnswerStatus.textContent = "Complete";
+    elements.chatAnswerStatus.classList.remove("is-streaming");
+    elements.chatCopyButton.hidden = !state.chatAnswerText;
+    state.chatTurnComplete = true;
+    setThinking("", false);
+  } else if (eventName === "error") {
+    throw new Error(message || "The assistant could not complete this request.");
+  }
+}
+
+function parseSseFrame(frame) {
+  let eventName = "message";
+  const dataLines = [];
+  for (const line of frame.replaceAll("\r", "").split("\n")) {
+    if (line.startsWith("event:")) eventName = line.slice(6).trim();
+    if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
+  }
+  if (!dataLines.length) return;
+  const data = JSON.parse(dataLines.join("\n"));
+  handleChatEvent(eventName, data);
+}
+
+async function submitChat(question) {
+  const cleanQuestion = String(question || "").trim();
+  if (!cleanQuestion) return;
+  try {
+    await ensureChatSession();
+  } catch (error) {
+    showGlobalError(`Chat session could not be created: ${error.message}`);
+    return;
+  }
+  if (state.chatController) state.chatController.abort();
+  const controller = new AbortController();
+  state.chatController = controller;
+  archiveCompletedTurn();
+  prepareChatResponse(cleanQuestion);
+
+  const submitButton = elements.chatForm.querySelector('button[type="submit"]');
+  submitButton.disabled = true;
+  elements.chatSubmitLabel.textContent = "Working";
+
+  try {
+    let response;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      response = await fetch("/api/chat/stream", {
+        method: "POST",
+        headers: { "Accept": "text/event-stream", "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: state.chatSessionId,
+          message: cleanQuestion,
+        }),
+        signal: controller.signal,
+      });
+      if (response.status !== 404 || attempt > 0) break;
+      await createChatSession({ clearUi: true });
+      prepareChatResponse(cleanQuestion);
+    }
+    if (!response.ok || !response.body) {
+      let message = `Chat request failed (${response.status})`;
+      try {
+        const body = await response.json();
+        message = body.detail || message;
+      } catch (_error) {
+        // Retain the status-based error for non-JSON responses.
+      }
+      throw new Error(message);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+      const frames = buffer.replaceAll("\r\n", "\n").split("\n\n");
+      buffer = frames.pop() || "";
+      frames.filter((frame) => frame.trim()).forEach(parseSseFrame);
+      if (done) break;
+    }
+    if (buffer.trim()) parseSseFrame(buffer);
+  } catch (error) {
+    if (error.name === "AbortError") return;
+    elements.chatAnswer.classList.remove("is-streaming");
+    elements.chatAnswerStatus.textContent = "Failed";
+    elements.chatAnswerStatus.classList.remove("is-streaming");
+    state.chatAnswerText = `The assistant could not complete this request.\n\n${error.message}`;
+    state.chatTurnComplete = false;
+    renderChatAnswer();
+    appendChatActivity("error", "Error", error.message);
+    setThinking("", false);
+  } finally {
+    if (state.chatController === controller) {
+      state.chatController = null;
+      submitButton.disabled = false;
+      elements.chatSubmitLabel.textContent = "Send";
+    }
+  }
+}
+
 async function loadStores() {
   const data = await fetchJson("/api/dashboard/stores");
   const fragment = document.createDocumentFragment();
@@ -142,18 +632,18 @@ function renderFinance(data) {
   const metricCards = [
     {
       ...metrics.refund_adjusted_revenue,
-      context: "已扣除本月完成退款",
+      context: "Completed refunds deducted for this month",
     },
     {
       ...metrics.estimated_gross_profit,
-      context: "基于已匹配商品成本",
+      context: "Based on matched product costs",
     },
     {
       ...metrics.estimated_profit,
       context:
         data.scope.type === "company"
-          ? "扣除经营费用与分摊推广预算"
-          : "扣除该店经营费用",
+          ? "After operating expenses and allocated campaign spend"
+          : "After this store's operating expenses",
       highlight: true,
     },
   ];
@@ -174,11 +664,11 @@ function renderFinance(data) {
     .join("");
 
   elements.financePeriod.textContent = `${formatMonth(data.period.month)}${
-    data.period.is_complete ? " · 完整月" : " · 数据未完整"
+    data.period.is_complete ? " · Complete month" : " · Partial data"
   }`;
   elements.salesDataThrough.textContent = data.period.sales_data_through;
   elements.scopeCaption.textContent = `${data.scope.label} · ${
-    data.period.is_complete ? "完整自然月" : "部分月份"
+    data.period.is_complete ? "Complete calendar month" : "Partial month"
   }`;
 
   if (!state.month) {
@@ -191,7 +681,7 @@ function renderFinance(data) {
 
 function renderFinanceChart(points) {
   if (!Array.isArray(points) || points.length === 0) {
-    renderEmpty(elements.financeChart, "该范围暂无趋势数据");
+    renderEmpty(elements.financeChart, "No trend data is available for this scope");
     return;
   }
 
@@ -237,7 +727,7 @@ function renderFinanceChart(points) {
     .map((item, index) => {
       const label = index % 2 === 0 || index === points.length - 1;
       if (!label) return "";
-      return `<text x="${x(index)}" y="${height - 9}" text-anchor="middle" fill="#66706a" font-size="9">${escapeHtml(item.month.slice(5))}月</text>`;
+      return `<text x="${x(index)}" y="${height - 9}" text-anchor="middle" fill="#66706a" font-size="9">${escapeHtml(item.month.slice(5))}</text>`;
     })
     .join("");
 
@@ -255,21 +745,21 @@ function renderFinanceChart(points) {
   const description = points
     .map(
       (item) =>
-        `${item.month} 营收 ${formatMoney(item.refund_adjusted_revenue)}，毛利润 ${formatMoney(item.estimated_gross_profit)}`,
+        `${item.month}: revenue ${formatMoney(item.refund_adjusted_revenue)}, gross profit ${formatMoney(item.estimated_gross_profit)}`,
     )
     .join("；");
 
   elements.financeChart.className = "line-chart";
   elements.financeChart.innerHTML = `
     <svg viewBox="0 0 ${width} ${height}" role="img" aria-labelledby="finance-chart-title finance-chart-desc">
-      <title id="finance-chart-title">最近十二个月财务趋势</title>
+      <title id="finance-chart-title">Twelve-month financial trend</title>
       <desc id="finance-chart-desc">${escapeHtml(description)}</desc>
       ${grid}
       <line x1="${margin.left}" y1="${y(0)}" x2="${width - margin.right}" y2="${y(0)}" stroke="#aeb7b0" stroke-width="1" />
       <path d="${pathFor("refund_adjusted_revenue")}" fill="none" stroke="#167d5a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
       <path d="${pathFor("estimated_gross_profit")}" fill="none" stroke="#c7812c" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
-      ${circles("refund_adjusted_revenue", "#167d5a", "退款后营收")}
-      ${circles("estimated_gross_profit", "#c7812c", "估算毛利润")}
+      ${circles("refund_adjusted_revenue", "#167d5a", "refund-adjusted revenue")}
+      ${circles("estimated_gross_profit", "#c7812c", "estimated gross profit")}
       ${xLabels}
     </svg>
   `;
@@ -282,13 +772,13 @@ function renderActionCenter(data) {
   elements.inventorySummary.className = "action-summary";
   elements.inventorySummary.innerHTML = `
     <strong>${numberFormatter.format(inventory.critical_count)}</strong>
-    <span>项严重告急</span>
+    <span>critical items</span>
     <strong>${numberFormatter.format(inventory.additional_reorder_count)}</strong>
-    <span>项需要补货</span>
+    <span>items need replenishment</span>
   `;
 
   if (inventory.top_items.length === 0) {
-    renderEmpty(elements.inventoryList, "当前范围没有库存告急项");
+    renderEmpty(elements.inventoryList, "No urgent inventory items in this scope");
   } else {
     elements.inventoryList.className = "compact-list";
     elements.inventoryList.innerHTML = inventory.top_items
@@ -298,11 +788,11 @@ function renderActionCenter(data) {
             <i class="severity-dot ${escapeHtml(item.severity)}" aria-hidden="true"></i>
             <div>
               <span class="row-title">${escapeHtml(item.product_name)}</span>
-              <span class="row-subtitle">${escapeHtml(item.store_location)} · ${escapeHtml({ critical: "严重", high: "高风险", warning: "预警" }[item.severity] || item.severity)}</span>
+              <span class="row-subtitle">${escapeHtml(item.store_location)} · ${escapeHtml({ critical: "Critical", high: "High", warning: "Warning" }[item.severity] || item.severity)}</span>
             </div>
             <span class="stock-value">
               <strong>${numberFormatter.format(item.stock_quantity)}</strong>
-              补货线 ${numberFormatter.format(item.reorder_level)}
+              Reorder level ${numberFormatter.format(item.reorder_level)}
             </span>
           </article>
         `,
@@ -312,10 +802,10 @@ function renderActionCenter(data) {
 
   elements.ticketCount.textContent = `${numberFormatter.format(
     tickets.unresolved_high_priority_count,
-  )} 条未解决`;
+  )} unresolved`;
 
   if (tickets.oldest.length === 0) {
-    renderEmpty(elements.ticketList, "当前没有未解决的高优先级工单");
+    renderEmpty(elements.ticketList, "No unresolved high-priority tickets");
   } else {
     elements.ticketList.className = "ticket-list";
     elements.ticketList.innerHTML = tickets.oldest
@@ -324,7 +814,7 @@ function renderActionCenter(data) {
           <article class="ticket-row">
             <span class="age-box">
               <strong>${numberFormatter.format(ticket.open_days)}</strong>
-              <small>天未解决</small>
+              <small>days open</small>
             </span>
             <div>
               <span class="row-title">${escapeHtml(ticket.notes || ticket.issue_category)}</span>
@@ -338,28 +828,28 @@ function renderActionCenter(data) {
 }
 
 const productTabLabels = {
-  best_sellers: "按净销量排名 · 所选月份",
-  top_rated: "按平均评分排名 · 全公司全周期评价",
-  high_return_rate: "按所选月销售订单的完成退货率排名",
-  lowest_rated: "按平均评分排名 · 全公司全周期评价",
+  best_sellers: "Ranked by net units · selected month",
+  top_rated: "Ranked by average rating · company-wide lifetime reviews",
+  high_return_rate: "Ranked by completed-return rate for the selected sales cohort",
+  lowest_rated: "Ranked by average rating · company-wide lifetime reviews",
 };
 
 function productMetrics(tab, item) {
   if (tab === "best_sellers") {
     return [
-      [`${numberFormatter.format(item.net_units)} 件`, "净销量"],
-      [formatMoney(item.refund_adjusted_revenue), "退款后营收"],
+      [`${numberFormatter.format(item.net_units)} units`, "Net units"],
+      [formatMoney(item.refund_adjusted_revenue), "Refund-adjusted revenue"],
     ];
   }
   if (tab === "high_return_rate") {
     return [
-      [`${Number(item.return_rate_percent).toFixed(1)}%`, "完成退货率"],
-      [`${item.returned_units} / ${item.sold_units} 件`, "退货 / 销售"],
+      [`${Number(item.return_rate_percent).toFixed(1)}%`, "Completed-return rate"],
+      [`${item.returned_units} / ${item.sold_units} units`, "Returned / sold"],
     ];
   }
   return [
-    [`★ ${Number(item.average_rating).toFixed(2)}`, "平均评分"],
-    [`${numberFormatter.format(item.review_count)} 条`, "有效评价"],
+    [`★ ${Number(item.average_rating).toFixed(2)}`, "Average rating"],
+    [`${numberFormatter.format(item.review_count)} reviews`, "Eligible reviews"],
   ];
 }
 
@@ -379,7 +869,7 @@ function renderProductTab() {
   });
 
   if (items.length === 0) {
-    renderEmpty(elements.productList, "该榜单暂无足够数据");
+    renderEmpty(elements.productList, "Not enough data for this ranking");
     return;
   }
 
@@ -414,10 +904,10 @@ function renderProductTab() {
 function renderMarketing(data) {
   elements.campaignCount.textContent = `${numberFormatter.format(
     data.active_campaign_count,
-  )} 个活动`;
+  )} campaigns`;
 
   if (!data.campaigns.length) {
-    renderEmpty(elements.campaignList, "所选月份没有进行中的推广活动");
+    renderEmpty(elements.campaignList, "No active campaigns overlap the selected month");
     return;
   }
 
@@ -429,9 +919,9 @@ function renderMarketing(data) {
         <article class="campaign-row">
           <div>
             <span class="row-title">${escapeHtml(campaign.campaign_name)}</span>
-            <span class="row-subtitle">${escapeHtml(campaign.campaign_type)} · 预算 ${escapeHtml(formatMoney(campaign.budget))}</span>
+            <span class="row-subtitle">${escapeHtml(campaign.campaign_type)} · Budget ${escapeHtml(formatMoney(campaign.budget))}</span>
           </div>
-          <span aria-label="转化率 ${escapeHtml(campaign.conversion_rate)}%">
+          <span aria-label="Conversion rate ${escapeHtml(campaign.conversion_rate)}%">
             ${escapeHtml(Number(campaign.conversion_rate).toFixed(1))}%
           </span>
           <span class="${roi >= 0 ? "roi-positive" : "roi-negative"}" aria-label="ROI ${escapeHtml(roi)}%">
@@ -450,12 +940,12 @@ function panelError(panel, message) {
     elements.scopeCaption.textContent = "—";
     elements.financeMetrics.innerHTML = "";
     renderEmpty(elements.financeMetrics, message);
-    renderEmpty(elements.financeChart, "趋势图暂时无法读取");
+    renderEmpty(elements.financeChart, "The trend chart is temporarily unavailable");
   } else if (panel === "action") {
     elements.ticketCount.textContent = "—";
     renderEmpty(elements.inventorySummary, message);
-    renderEmpty(elements.inventoryList, "库存数据暂时无法读取");
-    renderEmpty(elements.ticketList, "工单数据暂时无法读取");
+    renderEmpty(elements.inventoryList, "Inventory data is temporarily unavailable");
+    renderEmpty(elements.ticketList, "Ticket data is temporarily unavailable");
   } else if (panel === "products") {
     state.productData = null;
     renderEmpty(elements.productList, message);
@@ -481,7 +971,7 @@ async function loadDashboard() {
   clearGlobalError();
   elements.refreshButton.classList.add("is-loading");
   elements.refreshButton.disabled = true;
-  setConnectionStatus("loading", "正在生成经营分析");
+  setConnectionStatus("loading", "Refreshing data");
   state.runId = null;
 
   try {
@@ -506,22 +996,26 @@ async function loadDashboard() {
     if (isStale()) return;
 
     responseAccepted = true;
+
     renderFinance(data.result.finance);
     renderActionCenter(data.result.action_center);
     renderProducts(data.result.products);
     renderMarketing(data.result.marketing);
-    setConnectionStatus("ok", "Supabase 已连接");
+
+    setConnectionStatus("ok", "Supabase connected");
   } catch (error) {
     if (!responseAccepted && isStale()) return;
     if (signal.aborted || state.requestController.signal !== signal) return;
 
     const message = error instanceof Error ? error.message : String(error);
-    setConnectionStatus("error", "经营分析生成失败");
-    showGlobalError(`经营分析生成失败：${message}`);
-    panelError("finance", "财务数据暂时无法读取");
-    panelError("action", "行动数据暂时无法读取");
-    panelError("products", "商品榜单暂时无法读取");
-    panelError("marketing", "营销数据暂时无法读取");
+
+    setConnectionStatus("error", "Business analysis failed");
+    showGlobalError(`Business analysis failed: ${message}`);
+
+    panelError("finance", "Financial data is temporarily unavailable");
+    panelError("action", "Action data is temporarily unavailable");
+    panelError("products", "Product rankings are temporarily unavailable");
+    panelError("marketing", "Campaign data is temporarily unavailable");
   } finally {
     if (
       responseAccepted ||
@@ -539,32 +1033,6 @@ function scheduleDashboardLoad() {
     state.filterTimer = null;
     loadDashboard();
   }, 300);
-}
-
-async function submitChat(message) {
-  const cleanMessage = message.trim();
-  if (!cleanMessage) return;
-
-  elements.chatResponse.hidden = false;
-  elements.chatResponse.textContent = "正在准备回答…";
-  const submitButton = elements.chatForm.querySelector("button");
-  submitButton.disabled = true;
-
-  try {
-    const data = await fetchJson("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: cleanMessage }),
-    });
-    elements.chatResponse.innerHTML = `
-      <strong>${escapeHtml(cleanMessage)}</strong><br />
-      ${escapeHtml(data.answer)}
-    `;
-  } catch (error) {
-    elements.chatResponse.textContent = `聊天接口暂时不可用：${error.message}`;
-  } finally {
-    submitButton.disabled = false;
-  }
 }
 
 elements.productTabs.addEventListener("click", (event) => {
@@ -586,25 +1054,114 @@ elements.monthFilter.addEventListener("change", () => {
 
 elements.refreshButton.addEventListener("click", loadDashboard);
 
-document.querySelectorAll(".prompt-chip").forEach((button) => {
-  button.addEventListener("click", () => {
-    elements.chatInput.value = button.textContent.trim();
-    submitChat(elements.chatInput.value);
+elements.knowledgeDropZone.addEventListener("click", () => {
+  elements.knowledgeFileInput.click();
+});
+
+elements.knowledgeDropZone.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    elements.knowledgeFileInput.click();
+  }
+});
+
+elements.knowledgeFileInput.addEventListener("change", () => {
+  acceptDroppedFiles(elements.knowledgeFileInput.files);
+});
+
+for (const eventName of ["dragenter", "dragover"]) {
+  elements.knowledgeDropZone.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    elements.knowledgeDropZone.classList.add("is-dragging");
   });
+}
+
+for (const eventName of ["dragleave", "drop"]) {
+  elements.knowledgeDropZone.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    elements.knowledgeDropZone.classList.remove("is-dragging");
+  });
+}
+
+elements.knowledgeDropZone.addEventListener("drop", (event) => {
+  acceptDroppedFiles(event.dataTransfer.files);
+});
+
+elements.knowledgeDropZone.addEventListener("paste", (event) => {
+  const files = event.clipboardData?.files;
+  if (files?.length) {
+    event.preventDefault();
+    acceptDroppedFiles(files);
+  }
+});
+
+document.addEventListener("paste", (event) => {
+  if (event.defaultPrevented) return;
+  const files = event.clipboardData?.files;
+  if (files?.length) {
+    event.preventDefault();
+    acceptDroppedFiles(files);
+  }
+});
+
+elements.knowledgeFileList.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-delete-file-id]");
+  if (button) deleteKnowledgeFile(button.dataset.deleteFileId);
+});
+
+elements.reviewSyncButton.addEventListener("click", syncCustomerReviews);
+elements.newChatButton.addEventListener("click", startNewChat);
+
+elements.chatInput.addEventListener("input", resizeChatInput);
+elements.chatInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    elements.chatForm.requestSubmit();
+  }
 });
 
 elements.chatForm.addEventListener("submit", (event) => {
   event.preventDefault();
-  submitChat(elements.chatInput.value);
+  const question = elements.chatInput.value;
+  if (!question.trim()) return;
+  elements.chatInput.value = "";
+  resizeChatInput();
+  submitChat(question);
+});
+
+document.querySelectorAll(".prompt-chip").forEach((button) => {
+  button.addEventListener("click", () => {
+    elements.chatInput.value = button.textContent.trim();
+    resizeChatInput();
+    elements.chatForm.requestSubmit();
+  });
+});
+
+elements.chatCopyButton.addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(state.chatAnswerText);
+    elements.chatCopyButton.textContent = "Copied";
+    window.setTimeout(() => {
+      elements.chatCopyButton.textContent = "Copy";
+    }, 1400);
+  } catch (_error) {
+    elements.chatCopyButton.textContent = "Copy failed";
+  }
 });
 
 async function initialise() {
   try {
+    await createChatSession({ clearUi: true });
+  } catch (error) {
+    showGlobalError(`Chat session initialization failed: ${error.message}`);
+  }
+  loadKnowledgeFiles();
+  try {
     await loadStores();
     await loadDashboard();
   } catch (error) {
-    setConnectionStatus("error", "数据库连接失败");
-    showGlobalError(`Dashboard 初始化失败：${error.message}`);
+    setConnectionStatus("error", "Database connection failed");
+    showGlobalError(`Dashboard initialization failed: ${error.message}`);
     elements.refreshButton.classList.remove("is-loading");
     elements.refreshButton.disabled = false;
   }

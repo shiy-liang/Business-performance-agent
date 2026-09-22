@@ -142,7 +142,7 @@ def prepare_action_center(store_id: str | None) -> dict[str, object]:
             "inventory_scope": {
                 "type": "company",
                 "store_id": None,
-                "label": "全部门店",
+                "label": "All stores",
             },
             "store_id": None,
         }
@@ -277,7 +277,7 @@ def analyze_prepared_action_center(
             "support_tickets": {
                 "scope": {
                     "type": "company",
-                    "label": "全公司",
+                    "label": "Company-wide",
                     "store_filter_available": False,
                 },
                 "data_through": ticket_data_through,

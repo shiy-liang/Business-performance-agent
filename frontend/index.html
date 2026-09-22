@@ -1,20 +1,21 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="Business Performance Agent — 面向中小企业老板的一站式经营驾驶舱"
+      content="Business Performance Agent — one operating view for growing retailers"
     />
     <title>Business Performance Agent</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v=__ASSET_VERSION__" />
+    <link rel="stylesheet" href="/static/vendor/chat-renderer.css?v=__ASSET_VERSION__" />
   </head>
   <body>
     <div class="app-shell">
       <header class="topbar">
-        <a class="brand" href="/" aria-label="Business Performance Agent 首页">
+        <a class="brand" href="/" aria-label="Business Performance Agent home">
           <span class="brand-mark" aria-hidden="true">
             <svg viewBox="0 0 42 42" role="img">
               <path d="M8 27.5 18.2 8h8.1l-4.7 10.1H34L20.2 34l2.2-11H8Z" />
@@ -27,18 +28,18 @@
         </a>
 
         <div class="topbar-actions">
-          <span id="connection-status" class="live-pill"><i></i> 数据库连接中</span>
+          <span id="connection-status" class="live-pill"><i></i> Connecting to database</span>
           <label class="filter-control">
-            <span>经营月份</span>
-            <input id="month-filter" type="month" aria-label="选择经营月份" />
+            <span>Operating month</span>
+            <input id="month-filter" type="month" aria-label="Select operating month" />
           </label>
           <label class="filter-control store-control">
-            <span>经营范围</span>
-            <select id="store-filter" aria-label="选择门店">
-              <option value="">全部门店</option>
+            <span>Business scope</span>
+            <select id="store-filter" aria-label="Select store">
+              <option value="">All stores</option>
             </select>
           </label>
-          <button id="refresh-button" class="icon-button" type="button" title="刷新数据">
+          <button id="refresh-button" class="icon-button" type="button" title="Refresh data">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M20 11a8.1 8.1 0 1 0-2.3 5.7M20 5v6h-6" />
             </svg>
@@ -49,16 +50,16 @@
       <main>
         <section class="page-heading">
           <div>
-            <p class="eyebrow">经营总览</p>
-            <h1>今天先处理什么，一眼就知道。</h1>
+            <p class="eyebrow">Business overview</p>
+            <h1>See what needs attention first.</h1>
             <p class="heading-copy">
-              把销售、成本、库存、客服与推广结果放到同一张经营地图里。
+              Bring sales, costs, inventory, service, and campaigns into one operating view.
             </p>
           </div>
           <div class="as-of-card">
-            <span>销售数据更新至</span>
+            <span>Sales data through</span>
             <strong id="sales-data-through">—</strong>
-            <small id="scope-caption">全部门店 · 最近完整月</small>
+            <small id="scope-caption">All stores · latest complete month</small>
           </div>
         </section>
 
@@ -69,9 +70,9 @@
             <div class="panel-header">
               <div>
                 <p class="panel-kicker">01 · Financial pulse</p>
-                <h2 id="finance-title">财务脉搏</h2>
+                <h2 id="finance-title">Financial pulse</h2>
               </div>
-              <span id="finance-period" class="soft-badge">读取中</span>
+              <span id="finance-period" class="soft-badge">Loading</span>
             </div>
 
             <div id="finance-metrics" class="metric-grid" aria-live="polite">
@@ -83,25 +84,25 @@
             <div class="chart-block">
               <div class="chart-heading">
                 <div>
-                  <strong>最近 12 个月趋势</strong>
-                  <span>退款后营收与估算毛利润</span>
+                  <strong>Last 12 months</strong>
+                  <span>Refund-adjusted revenue and estimated gross profit</span>
                 </div>
-                <div class="chart-legend" aria-label="图例">
-                  <span><i class="revenue-dot"></i>营收</span>
-                  <span><i class="profit-dot"></i>毛利润</span>
+                <div class="chart-legend" aria-label="Chart legend">
+                  <span><i class="revenue-dot"></i>Revenue</span>
+                  <span><i class="profit-dot"></i>Gross profit</span>
                 </div>
               </div>
               <div
                 id="finance-chart"
                 class="line-chart chart-loading"
-                aria-label="最近十二个月退款后营收与估算毛利润趋势"
+                aria-label="Twelve-month refund-adjusted revenue and estimated gross profit trend"
               >
-                <span>正在计算趋势…</span>
+                <span>Calculating trend…</span>
               </div>
             </div>
 
             <p class="data-note">
-              利润基于模拟商品成本估算；公司汇总包含 Online 与未分配门店的交易。
+              Profit uses synthetic product costs; company totals include online and unassigned transactions.
             </p>
           </section>
 
@@ -109,113 +110,221 @@
             <div class="panel-header">
               <div>
                 <p class="panel-kicker">02 · Action center</p>
-                <h2 id="action-title">紧急行动中心</h2>
+                <h2 id="action-title">Urgent action center</h2>
               </div>
-              <span class="alert-badge">需要关注</span>
+              <span class="alert-badge">Needs attention</span>
             </div>
 
             <div id="inventory-summary" class="action-summary skeleton-line"></div>
-            <div id="inventory-list" class="compact-list loading-copy">正在读取库存…</div>
+            <div id="inventory-list" class="compact-list loading-copy">Loading inventory…</div>
 
             <div class="section-divider"></div>
 
             <div class="subsection-heading">
               <div>
-                <strong>滞留最久的高优工单</strong>
-                <span>仅显示前 3 条</span>
+                <strong>Oldest high-priority tickets</strong>
+                <span>Top 3 only</span>
               </div>
               <span id="ticket-count" class="count-chip">—</span>
             </div>
-            <div id="ticket-list" class="ticket-list loading-copy">正在读取工单…</div>
+            <div id="ticket-list" class="ticket-list loading-copy">Loading tickets…</div>
             <p class="data-note compact">
-              工单无门店字段；未解决天数按提交日期计算。
+              Tickets have no store field; open age is measured from submission date.
             </p>
           </section>
 
           <section class="panel assistant-panel" aria-labelledby="assistant-title">
-            <div class="assistant-copy">
-              <span class="assistant-orb" aria-hidden="true">
-                <svg viewBox="0 0 48 48">
-                  <path d="M24 7v7M24 34v7M7 24h7M34 24h7M12 12l5 5M31 31l5 5M36 12l-5 5M17 31l-5 5" />
-                  <circle cx="24" cy="24" r="7" />
-                </svg>
-              </span>
-              <div>
-                <p class="panel-kicker">03 · Ask your business</p>
-                <h2 id="assistant-title">直接问你的经营数据</h2>
-                <p>选择一个常见问题，或用自己的方式提问。</p>
+            <div class="assistant-header">
+              <div class="assistant-copy">
+                <span class="assistant-orb" aria-hidden="true">
+                  <svg viewBox="0 0 48 48">
+                    <path d="M24 7v7M24 34v7M7 24h7M34 24h7M12 12l5 5M31 31l5 5M36 12l-5 5M17 31l-5 5" />
+                    <circle cx="24" cy="24" r="7" />
+                  </svg>
+                </span>
+                <div>
+                  <p class="panel-kicker">03 · Ask your business</p>
+                  <h2 id="assistant-title">Ask your business directly</h2>
+                  <p>Get a structured answer with an auditable activity trail and cited evidence.</p>
+                </div>
+              </div>
+              <div class="assistant-header-actions">
+                <p class="assistant-status">
+                  <i></i> Supervisor online
+                </p>
+                <button id="new-chat-button" class="new-chat-button" type="button">
+                  New Chat
+                </button>
               </div>
             </div>
 
-            <div class="prompt-grid" aria-label="推荐问题">
-              <button type="button" class="prompt-chip">上个月营收和利润怎么样？</button>
-              <button type="button" class="prompt-chip">哪些商品需要立即补货？</button>
-              <button type="button" class="prompt-chip">哪个推广活动回报最高？</button>
-              <button type="button" class="prompt-chip">客户最近主要投诉什么？</button>
+            <div class="prompt-grid" aria-label="Suggested questions">
+              <button type="button" class="prompt-chip">How did revenue and profit perform last month?</button>
+              <button type="button" class="prompt-chip">Which products need immediate replenishment?</button>
+              <button type="button" class="prompt-chip">Which campaign delivered the highest return?</button>
+              <button type="button" class="prompt-chip">What are customers complaining about recently?</button>
             </div>
 
-            <div id="chat-response" class="chat-response" aria-live="polite" hidden></div>
+            <div id="chat-history" class="chat-history" aria-label="Conversation history"></div>
+
+            <div id="chat-response" class="chat-response" aria-live="polite" hidden>
+              <div class="chat-question-row">
+                <span class="message-avatar user-avatar" aria-hidden="true">You</span>
+                <div>
+                  <span class="message-label">Your question</span>
+                  <div id="chat-question" class="chat-question"></div>
+                </div>
+              </div>
+
+              <div class="chat-result-grid">
+                <details class="chat-trace" open>
+                  <summary>
+                    <span class="trace-title">Activity</span>
+                    <span class="trace-hint">Skills, tools and status</span>
+                  </summary>
+                  <div class="trace-content">
+                    <div id="chat-progress" class="chat-progress"></div>
+                    <div id="chat-thinking" class="chat-thinking" role="status">
+                      <span class="thinking-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                      <span id="chat-thinking-label">Understanding your question</span>
+                    </div>
+                  </div>
+                </details>
+
+                <article class="chat-answer-card" aria-labelledby="chat-answer-title">
+                  <header class="chat-answer-header">
+                    <div>
+                      <span class="answer-mark" aria-hidden="true">AI</span>
+                      <div>
+                        <span class="message-label">Business Supervisor</span>
+                        <strong id="chat-answer-title">Answer</strong>
+                      </div>
+                    </div>
+                    <div class="answer-actions">
+                      <span id="chat-answer-status" class="answer-status">Preparing</span>
+                      <button id="chat-copy-button" class="copy-answer-button" type="button" hidden>
+                        Copy
+                      </button>
+                    </div>
+                  </header>
+                  <div id="chat-answer" class="chat-answer"></div>
+                  <section id="chat-sources" class="chat-sources" aria-label="References" hidden></section>
+                </article>
+              </div>
+            </div>
+
             <form id="chat-form" class="chat-form">
-              <input
+              <textarea
                 id="chat-input"
-                type="text"
+                rows="1"
+                maxlength="2000"
                 autocomplete="off"
-                placeholder="例如：为什么这个月利润下降？"
-                aria-label="向经营助手提问"
-              />
-              <button type="submit">
-                <span>发送</span>
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="m5 12 14-7-4 14-3-6-7-1Z" />
-                </svg>
-              </button>
+                placeholder="Ask about performance, risks, customers, or business rules…"
+                aria-label="Ask the business assistant"
+              ></textarea>
+              <div class="chat-compose-actions">
+                <span>Enter to send · Shift + Enter for a new line</span>
+                <button type="submit">
+                  <span id="chat-submit-label">Send</span>
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="m5 12 14-7-4 14-3-6-7-1Z" />
+                  </svg>
+                </button>
+              </div>
             </form>
-            <p class="assistant-status">
-              <i></i> 对话界面已就绪 · pgvector 知识库接入后开放完整问答
-            </p>
           </section>
 
           <section class="panel product-panel" aria-labelledby="product-title">
             <div class="panel-header product-header">
               <div>
                 <p class="panel-kicker">04 · Product performance</p>
-                <h2 id="product-title">商品表现</h2>
+                <h2 id="product-title">Product performance</h2>
               </div>
-              <div id="product-tabs" class="tabs" role="group" aria-label="商品榜单类型">
-                <button class="tab active" data-tab="best_sellers" type="button" aria-pressed="true">畅销</button>
-                <button class="tab" data-tab="top_rated" type="button" aria-pressed="false">好评</button>
-                <button class="tab" data-tab="high_return_rate" type="button" aria-pressed="false">高退货</button>
-                <button class="tab" data-tab="lowest_rated" type="button" aria-pressed="false">低评分</button>
+              <div id="product-tabs" class="tabs" role="group" aria-label="Product ranking type">
+                <button class="tab active" data-tab="best_sellers" type="button" aria-pressed="true">Best sellers</button>
+                <button class="tab" data-tab="top_rated" type="button" aria-pressed="false">Top rated</button>
+                <button class="tab" data-tab="high_return_rate" type="button" aria-pressed="false">High returns</button>
+                <button class="tab" data-tab="lowest_rated" type="button" aria-pressed="false">Low rated</button>
               </div>
             </div>
-            <div id="product-list" class="rank-list loading-copy">正在分析商品…</div>
+            <div id="product-list" class="rank-list loading-copy">Analyzing products…</div>
           </section>
 
           <section class="panel marketing-panel" aria-labelledby="marketing-title">
             <div class="panel-header">
               <div>
                 <p class="panel-kicker">05 · Campaign performance</p>
-                <h2 id="marketing-title">营销表现</h2>
+                <h2 id="marketing-title">Campaign performance</h2>
               </div>
               <span id="campaign-count" class="soft-badge">—</span>
             </div>
             <div class="campaign-label-row">
-              <span>活动</span><span>转化</span><span>ROI</span>
+              <span>Campaign</span><span>Conversion</span><span>ROI</span>
             </div>
-            <div id="campaign-list" class="campaign-list loading-copy">正在读取推广活动…</div>
+            <div id="campaign-list" class="campaign-list loading-copy">Loading campaigns…</div>
             <p class="data-note">
-              营销无门店字段，始终为全公司；展示与所选月重叠的活动，指标为活动全周期数据。
+              Campaigns have no store field. Metrics cover each campaign lifecycle, while the month controls inclusion.
             </p>
+          </section>
+
+          <section class="panel knowledge-panel" aria-labelledby="knowledge-title">
+            <div class="panel-header knowledge-header">
+              <div>
+                <p class="panel-kicker">06 · Knowledge sources</p>
+                <h2 id="knowledge-title">RAG Knowledge Files</h2>
+              </div>
+              <div class="knowledge-header-actions">
+                <button id="review-sync-button" class="review-sync-button" type="button">
+                  Sync customer reviews
+                </button>
+                <span id="knowledge-file-count" class="soft-badge">Loading</span>
+              </div>
+            </div>
+
+            <div id="review-sync-status" class="upload-status" role="status" hidden></div>
+
+            <div class="knowledge-layout">
+              <div
+                id="knowledge-drop-zone"
+                class="knowledge-drop-zone"
+                role="button"
+                tabindex="0"
+                aria-controls="knowledge-file-input"
+                aria-label="Select, drop, or paste a knowledge file"
+              >
+                <input
+                  id="knowledge-file-input"
+                  type="file"
+                  hidden
+                />
+                <span class="upload-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4" />
+                  </svg>
+                </span>
+                <strong>Drop a file here</strong>
+                <span>Click to browse, or copy and paste a file</span>
+                <small id="knowledge-upload-policy">Loading upload policy…</small>
+              </div>
+
+              <div class="knowledge-library">
+                <div id="knowledge-upload-status" class="upload-status" role="status" hidden></div>
+                <div id="knowledge-file-list" class="knowledge-file-list loading-copy">
+                  Loading knowledge files…
+                </div>
+              </div>
+            </div>
           </section>
         </div>
       </main>
 
       <footer>
         <span>Business Performance Agent</span>
-        <span>成本、库存、费用、退款与营销归因为模拟数据</span>
+        <span>Costs, inventory, expenses, refunds, and campaign attribution include synthetic data</span>
       </footer>
     </div>
 
-    <script src="/static/app.js" defer></script>
+    <script src="/static/vendor/chat-renderer.js?v=__ASSET_VERSION__" defer></script>
+    <script src="/static/app.js?v=__ASSET_VERSION__" defer></script>
   </body>
 </html>

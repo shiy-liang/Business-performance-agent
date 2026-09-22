@@ -208,7 +208,7 @@ def analyze_prepared_marketing_performance(
         response = {
             "scope": {
                 "type": "company",
-                "label": "全公司",
+                "label": "Company-wide",
                 "store_filter_available": False,
             },
             "period": {
