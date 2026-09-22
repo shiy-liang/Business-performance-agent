@@ -4,16 +4,19 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from decimal import Decimal
+from uuid import UUID
 
 import psycopg
 from fastapi import APIRouter, HTTPException, Query
 from psycopg.rows import dict_row
 
 from backend.database import connect
-
+from backend.runtime import (
+    RunNotFoundError,
+    record_run_event,
+)
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
-
 
 SUMMARY_SQL = """
 WITH parameters AS (
@@ -198,6 +201,36 @@ def _money(value: Decimal | int | None) -> float:
     return float(round(value or Decimal("0"), 2))
 
 
+def _record_finance_failure_if_started(
+    run_id: UUID | None,
+    finance_analysis_started: bool,
+    selected_month: date | None,
+    store_id: str | None,
+    exc: Exception,
+) -> None:
+    """Record a Finance failure without masking the original exception."""
+
+    if not finance_analysis_started or run_id is None:
+        return
+    if selected_month is None:
+        return
+
+    error_message = str(exc).strip() or exc.__class__.__name__
+    try:
+        record_run_event(
+            run_id,
+            "finance_analysis_failed",
+            "Finance analysis failed",
+            {
+                "error": error_message,
+                "month": selected_month.strftime("%Y-%m"),
+                "store_id": store_id,
+            },
+        )
+    except (RunNotFoundError, RuntimeError, psycopg.Error):
+        pass
+
+
 @router.get("/stores")
 def list_dashboard_stores() -> dict[str, object]:
     """Return the choices used by the dashboard's store filter."""
@@ -231,19 +264,22 @@ def list_dashboard_stores() -> dict[str, object]:
     }
 
 
-@router.get("/financial-pulse")
-def financial_pulse(
-    month: str | None = Query(
-        default=None,
-        pattern=r"^\d{4}-(0[1-9]|1[0-2])$",
-        description="Calendar month in YYYY-MM format; defaults to the latest complete month.",
-    ),
-    store_id: str | None = Query(
-        default=None,
-        description="Omit for the whole company, including Online and unassigned sales.",
-    ),
+def build_financial_pulse(
+    month: str | None,
+    store_id: str | None,
+    run_id: UUID | None,
 ) -> dict[str, object]:
-    """Return the three finance cards and the twelve-month chart."""
+    """Build the Financial Pulse result from prepared Finance context."""
+
+    prepared = prepare_financial_pulse(month=month, store_id=store_id)
+    return analyze_prepared_financial_pulse(prepared=prepared, run_id=run_id)
+
+
+def prepare_financial_pulse(
+    month: str | None,
+    store_id: str | None,
+) -> dict[str, object]:
+    """Validate Finance inputs and prepare the context needed for analysis."""
 
     try:
         with connect() as connection:
@@ -296,11 +332,62 @@ def financial_pulse(
                             f"{first_data_month:%Y-%m} to {last_data_month:%Y-%m}"
                         ),
                     )
+
                 period_end = _next_month(selected_month)
                 is_complete = selected_month < last_data_month or (
                     selected_month == last_data_month
                     and coverage["last_date"] == period_end - timedelta(days=1)
                 )
+                first_trend_month = selected_month
+                for _ in range(11):
+                    first_trend_month = _previous_month(first_trend_month)
+    except HTTPException:
+        raise
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except psycopg.Error as exc:
+        raise HTTPException(status_code=503, detail="Database query failed") from exc
+
+    return {
+        "scope": scope,
+        "coverage": dict(coverage),
+        "selected_month": selected_month,
+        "period_end": period_end,
+        "is_default": month is None,
+        "is_complete": is_complete,
+        "first_trend_month": first_trend_month,
+        "store_id": store_id,
+    }
+
+
+def analyze_prepared_financial_pulse(
+    prepared: dict[str, object],
+    run_id: UUID | None,
+) -> dict[str, object]:
+    """Execute Finance SQL and Runtime events using prepared Finance context."""
+
+    finance_analysis_started = False
+    scope = prepared["scope"]
+    coverage = prepared["coverage"]
+    selected_month = prepared["selected_month"]
+    period_end = prepared["period_end"]
+    first_trend_month = prepared["first_trend_month"]
+    store_id = prepared["store_id"]
+
+    try:
+        with connect() as connection:
+            with connection.cursor(row_factory=dict_row) as cursor:
+                if run_id is not None:
+                    record_run_event(
+                        run_id,
+                        "finance_analysis_started",
+                        "Finance analysis started",
+                        {
+                            "month": selected_month.strftime("%Y-%m"),
+                            "store_id": store_id,
+                        },
+                    )
+                    finance_analysis_started = True
 
                 cursor.execute(
                     SUMMARY_SQL,
@@ -311,10 +398,6 @@ def financial_pulse(
                     },
                 )
                 summary = cursor.fetchone()
-
-                first_trend_month = selected_month
-                for _ in range(11):
-                    first_trend_month = _previous_month(first_trend_month)
 
                 cursor.execute(
                     TREND_SQL,
@@ -336,41 +419,89 @@ def financial_pulse(
                     }
                     for row in cursor.fetchall()
                 ]
+
+        profit_label = (
+            "Estimated operating profit"
+            if store_id is None
+            else "Estimated store contribution profit"
+        )
+        response = {
+            "scope": scope,
+            "period": {
+                "month": selected_month.strftime("%Y-%m"),
+                "start_date": selected_month.isoformat(),
+                "end_date": (period_end - timedelta(days=1)).isoformat(),
+                "is_default": prepared["is_default"],
+                "is_complete": prepared["is_complete"],
+                "sales_data_through": coverage["last_date"].isoformat(),
+            },
+            "metrics": {
+                "refund_adjusted_revenue": {
+                    "label": "Refund-adjusted revenue",
+                    "value": _money(summary["refund_adjusted_revenue"]),
+                },
+                "estimated_gross_profit": {
+                    "label": "Estimated gross profit",
+                    "value": _money(summary["estimated_gross_profit"]),
+                },
+                "estimated_profit": {
+                    "label": profit_label,
+                    "value": _money(summary["estimated_profit"]),
+                },
+            },
+            "trend": trend,
+        }
+
+        if run_id is not None:
+            record_run_event(
+                run_id,
+                "finance_analysis_completed",
+                "Finance analysis completed",
+                {
+                    "month": selected_month.strftime("%Y-%m"),
+                    "store_id": store_id,
+                },
+            )
     except HTTPException:
         raise
+    except RunNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RuntimeError as exc:
+        _record_finance_failure_if_started(
+            run_id, finance_analysis_started, selected_month, store_id, exc
+        )
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except psycopg.Error as exc:
+        _record_finance_failure_if_started(
+            run_id, finance_analysis_started, selected_month, store_id, exc
+        )
         raise HTTPException(status_code=503, detail="Database query failed") from exc
+    except Exception as exc:
+        _record_finance_failure_if_started(
+            run_id, finance_analysis_started, selected_month, store_id, exc
+        )
+        raise
 
-    profit_label = (
-        "Estimated operating profit"
-        if store_id is None
-        else "Estimated store contribution profit"
+    return response
+
+
+@router.get("/financial-pulse")
+def financial_pulse(
+    month: str | None = Query(
+        default=None,
+        pattern=r"^\d{4}-(0[1-9]|1[0-2])$",
+        description="Calendar month in YYYY-MM format; defaults to the latest complete month.",
+    ),
+    store_id: str | None = Query(
+        default=None,
+        description="Omit for the whole company, including Online and unassigned sales.",
+    ),
+    run_id: UUID | None = None,
+) -> dict[str, object]:
+    """Return the three finance cards and the twelve-month chart."""
+
+    return build_financial_pulse(
+        month=month,
+        store_id=store_id,
+        run_id=run_id,
     )
-    return {
-        "scope": scope,
-        "period": {
-            "month": selected_month.strftime("%Y-%m"),
-            "start_date": selected_month.isoformat(),
-            "end_date": (period_end - timedelta(days=1)).isoformat(),
-            "is_default": month is None,
-            "is_complete": is_complete,
-            "sales_data_through": coverage["last_date"].isoformat(),
-        },
-        "metrics": {
-            "refund_adjusted_revenue": {
-                "label": "Refund-adjusted revenue",
-                "value": _money(summary["refund_adjusted_revenue"]),
-            },
-            "estimated_gross_profit": {
-                "label": "Estimated gross profit",
-                "value": _money(summary["estimated_gross_profit"]),
-            },
-            "estimated_profit": {
-                "label": profit_label,
-                "value": _money(summary["estimated_profit"]),
-            },
-        },
-        "trend": trend,
-    }

@@ -5,6 +5,7 @@ const state = {
   storeId: "",
   activeProductTab: "best_sellers",
   productData: null,
+  runId: null,
   requestController: null,
   filterTimer: null,
   knowledgeAllowedExtensions: [],
@@ -934,16 +935,22 @@ function renderMarketing(data) {
 
 function panelError(panel, message) {
   if (panel === "finance") {
+    elements.financePeriod.textContent = "—";
+    elements.salesDataThrough.textContent = "—";
+    elements.scopeCaption.textContent = "—";
     elements.financeMetrics.innerHTML = "";
     renderEmpty(elements.financeMetrics, message);
     renderEmpty(elements.financeChart, "The trend chart is temporarily unavailable");
   } else if (panel === "action") {
+    elements.ticketCount.textContent = "—";
     renderEmpty(elements.inventorySummary, message);
     renderEmpty(elements.inventoryList, "Inventory data is temporarily unavailable");
     renderEmpty(elements.ticketList, "Ticket data is temporarily unavailable");
   } else if (panel === "products") {
+    state.productData = null;
     renderEmpty(elements.productList, message);
   } else if (panel === "marketing") {
+    elements.campaignCount.textContent = "—";
     renderEmpty(elements.campaignList, message);
   }
 }
@@ -954,55 +961,70 @@ async function loadDashboard() {
   const { signal } = state.requestController;
   const requestedMonth = state.month;
   const requestedStore = state.storeId;
+  const isStale = () =>
+    signal.aborted ||
+    requestedMonth !== state.month ||
+    requestedStore !== state.storeId ||
+    state.requestController.signal !== signal;
+  let responseAccepted = false;
 
   clearGlobalError();
   elements.refreshButton.classList.add("is-loading");
   elements.refreshButton.disabled = true;
   setConnectionStatus("loading", "Refreshing data");
+  state.runId = null;
 
-  const requests = [
-    fetchJson(endpoint("/api/dashboard/financial-pulse", { month: true, store: true }), { signal }),
-    fetchJson(endpoint("/api/dashboard/action-center", { store: true }), { signal }),
-    fetchJson(endpoint("/api/dashboard/product-performance", { month: true, store: true }), { signal }),
-    fetchJson(endpoint("/api/dashboard/marketing-performance", { month: true }), { signal }),
-  ];
+  try {
+    const createdRun = await fetchJson("/api/runs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ run_type: "business_performance" }),
+      signal,
+    });
+    if (isStale()) return;
 
-  const [finance, action, products, marketing] = await Promise.allSettled(requests);
-  if (signal.aborted || requestedMonth !== state.month || requestedStore !== state.storeId) {
-    return;
-  }
+    state.runId = createdRun.run_id;
+    const data = await fetchJson(`/api/runs/${state.runId}/execute`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        month: state.month || null,
+        store_id: state.storeId || null,
+      }),
+      signal,
+    });
+    if (isStale()) return;
 
-  const failures = [];
-  if (finance.status === "fulfilled") renderFinance(finance.value);
-  else {
-    failures.push(finance.reason.message);
-    panelError("finance", "Financial data is temporarily unavailable");
-  }
-  if (action.status === "fulfilled") renderActionCenter(action.value);
-  else {
-    failures.push(action.reason.message);
-    panelError("action", "Action data is temporarily unavailable");
-  }
-  if (products.status === "fulfilled") renderProducts(products.value);
-  else {
-    failures.push(products.reason.message);
-    panelError("products", "Product rankings are temporarily unavailable");
-  }
-  if (marketing.status === "fulfilled") renderMarketing(marketing.value);
-  else {
-    failures.push(marketing.reason.message);
-    panelError("marketing", "Campaign data is temporarily unavailable");
-  }
+    responseAccepted = true;
 
-  if (failures.length) {
-    setConnectionStatus("error", "Some data failed to load");
-    showGlobalError(`Some dashboard sections failed: ${[...new Set(failures)].join("; ")}`);
-  } else {
+    renderFinance(data.result.finance);
+    renderActionCenter(data.result.action_center);
+    renderProducts(data.result.products);
+    renderMarketing(data.result.marketing);
+
     setConnectionStatus("ok", "Supabase connected");
-  }
+  } catch (error) {
+    if (!responseAccepted && isStale()) return;
+    if (signal.aborted || state.requestController.signal !== signal) return;
 
-  elements.refreshButton.classList.remove("is-loading");
-  elements.refreshButton.disabled = false;
+    const message = error instanceof Error ? error.message : String(error);
+
+    setConnectionStatus("error", "Business analysis failed");
+    showGlobalError(`Business analysis failed: ${message}`);
+
+    panelError("finance", "Financial data is temporarily unavailable");
+    panelError("action", "Action data is temporarily unavailable");
+    panelError("products", "Product rankings are temporarily unavailable");
+    panelError("marketing", "Campaign data is temporarily unavailable");
+  } finally {
+    if (
+      responseAccepted ||
+      (!isStale() && state.requestController.signal === signal)
+    ) {
+      elements.refreshButton.classList.remove("is-loading");
+      elements.refreshButton.disabled = false;
+    }
+  }
 }
 
 function scheduleDashboardLoad() {

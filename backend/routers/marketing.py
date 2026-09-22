@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from decimal import Decimal
+from uuid import UUID
 
 import psycopg
 from fastapi import APIRouter, HTTPException, Query
 from psycopg.rows import dict_row
 
 from backend.database import connect
+from backend.runtime import RunNotFoundError, record_run_event
 
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -68,18 +70,46 @@ def _number(value: Decimal | int | None) -> float:
     return float(round(value or Decimal("0"), 2))
 
 
-@router.get("/marketing-performance")
-def marketing_performance(
-    month: str | None = Query(
-        default=None,
-        pattern=r"^\d{4}-(0[1-9]|1[0-2])$",
-        description=(
-            "Calendar month in YYYY-MM format; defaults to the latest complete "
-            "transaction month."
-        ),
-    ),
+def _record_marketing_failure_if_started(
+    run_id: UUID | None,
+    marketing_analysis_started: bool,
+    selected_month: date | None,
+    exc: Exception,
+) -> None:
+    """Record a Marketing failure without masking the original exception."""
+
+    if not marketing_analysis_started or run_id is None:
+        return
+    if selected_month is None:
+        return
+
+    error_message = str(exc).strip() or exc.__class__.__name__
+    try:
+        record_run_event(
+            run_id,
+            "marketing_analysis_failed",
+            "Marketing analysis failed",
+            {
+                "month": selected_month.strftime("%Y-%m"),
+                "error": error_message,
+            },
+        )
+    except (RunNotFoundError, RuntimeError, psycopg.Error):
+        pass
+
+
+def build_marketing_performance(
+    month: str | None,
+    run_id: UUID | None,
 ) -> dict[str, object]:
-    """Return the five highest reported-ROI campaigns overlapping a month."""
+    """Build Marketing Performance from prepared Marketing context."""
+
+    prepared = prepare_marketing_performance(month=month)
+    return analyze_prepared_marketing_performance(prepared=prepared, run_id=run_id)
+
+
+def prepare_marketing_performance(month: str | None) -> dict[str, object]:
+    """Validate Marketing inputs and prepare the context needed for analysis."""
 
     try:
         with connect() as connection:
@@ -113,15 +143,6 @@ def marketing_performance(
                     selected_month == last_data_month
                     and coverage["last_date"] == period_end - timedelta(days=1)
                 )
-
-                cursor.execute(
-                    TOP_CAMPAIGNS_SQL,
-                    {
-                        "period_start": selected_month,
-                        "period_end": period_end,
-                    },
-                )
-                rows = cursor.fetchall()
     except HTTPException:
         raise
     except RuntimeError as exc:
@@ -129,52 +150,141 @@ def marketing_performance(
     except psycopg.Error as exc:
         raise HTTPException(status_code=503, detail="Database query failed") from exc
 
-    campaigns = [
-        {
-            "campaign_id": row["campaign_id"],
-            "campaign_name": row["campaign_name"],
-            "campaign_type": row["campaign_type"],
-            "start_date": row["start_date"].isoformat(),
-            "end_date": row["end_date"].isoformat(),
-            "budget": _number(row["budget"]),
-            "conversions": row["conversions"],
-            "conversion_rate": _number(row["conversion_rate"]),
-            "roi": _number(row["roi"]),
-        }
-        for row in rows
-    ]
-
     return {
-        "scope": {
-            "type": "company",
-            "label": "Company-wide",
-            "store_filter_available": False,
-        },
-        "period": {
-            "month": selected_month.strftime("%Y-%m"),
-            "start_date": selected_month.isoformat(),
-            "end_date": (period_end - timedelta(days=1)).isoformat(),
-            "is_default": month is None,
-            "is_complete": is_complete,
-            "transaction_data_through": coverage["last_date"].isoformat(),
-        },
-        "basis": {
-            "selection": "campaign dates overlap the selected calendar month",
-            "ranking": "reported roi descending",
-            "limit": 5,
-            "metrics_period": "campaign_lifecycle",
-            "metrics_note": (
-                "Budget, conversions, conversion rate, and reported ROI describe "
-                "each campaign's full lifecycle; the selected month only determines "
-                "which campaigns are included."
-            ),
-            "attribution": {
-                "is_synthetic": True,
-                "note": "Campaign attribution data is synthetic and does not prove causality.",
-            },
-        },
-        "active_campaign_count": (
-            rows[0]["active_campaign_count"] if rows else 0
-        ),
-        "campaigns": campaigns,
+        "coverage": dict(coverage),
+        "selected_month": selected_month,
+        "period_end": period_end,
+        "is_default": month is None,
+        "is_complete": is_complete,
     }
+
+
+def analyze_prepared_marketing_performance(
+    prepared: dict[str, object],
+    run_id: UUID | None,
+) -> dict[str, object]:
+    """Execute Marketing SQL and Runtime events using prepared Marketing context."""
+
+    marketing_analysis_started = False
+    coverage = prepared["coverage"]
+    selected_month = prepared["selected_month"]
+    period_end = prepared["period_end"]
+
+    try:
+        with connect() as connection, connection.cursor(row_factory=dict_row) as cursor:
+            if run_id is not None:
+                record_run_event(
+                    run_id,
+                    "marketing_analysis_started",
+                    "Marketing analysis started",
+                    {"month": selected_month.strftime("%Y-%m")},
+                )
+                marketing_analysis_started = True
+
+            cursor.execute(
+                TOP_CAMPAIGNS_SQL,
+                {
+                    "period_start": selected_month,
+                    "period_end": period_end,
+                },
+            )
+            rows = cursor.fetchall()
+
+        campaigns = [
+            {
+                "campaign_id": row["campaign_id"],
+                "campaign_name": row["campaign_name"],
+                "campaign_type": row["campaign_type"],
+                "start_date": row["start_date"].isoformat(),
+                "end_date": row["end_date"].isoformat(),
+                "budget": _number(row["budget"]),
+                "conversions": row["conversions"],
+                "conversion_rate": _number(row["conversion_rate"]),
+                "roi": _number(row["roi"]),
+            }
+            for row in rows
+        ]
+
+        response = {
+            "scope": {
+                "type": "company",
+                "label": "Company-wide",
+                "store_filter_available": False,
+            },
+            "period": {
+                "month": selected_month.strftime("%Y-%m"),
+                "start_date": selected_month.isoformat(),
+                "end_date": (period_end - timedelta(days=1)).isoformat(),
+                "is_default": prepared["is_default"],
+                "is_complete": prepared["is_complete"],
+                "transaction_data_through": coverage["last_date"].isoformat(),
+            },
+            "basis": {
+                "selection": "campaign dates overlap the selected calendar month",
+                "ranking": "reported roi descending",
+                "limit": 5,
+                "metrics_period": "campaign_lifecycle",
+                "metrics_note": (
+                    "Budget, conversions, conversion rate, and reported ROI describe "
+                    "each campaign's full lifecycle; the selected month only determines "
+                    "which campaigns are included."
+                ),
+                "attribution": {
+                    "is_synthetic": True,
+                    "note": "Campaign attribution data is synthetic and does not prove causality.",
+                },
+            },
+            "active_campaign_count": (
+                rows[0]["active_campaign_count"] if rows else 0
+            ),
+            "campaigns": campaigns,
+        }
+
+        if run_id is not None:
+            record_run_event(
+                run_id,
+                "marketing_analysis_completed",
+                "Marketing analysis completed",
+                {
+                    "month": selected_month.strftime("%Y-%m"),
+                    "campaign_count": len(campaigns),
+                },
+            )
+    except HTTPException:
+        raise
+    except RunNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        _record_marketing_failure_if_started(
+            run_id, marketing_analysis_started, selected_month, exc
+        )
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except psycopg.Error as exc:
+        _record_marketing_failure_if_started(
+            run_id, marketing_analysis_started, selected_month, exc
+        )
+        raise HTTPException(status_code=503, detail="Database query failed") from exc
+    except Exception as exc:
+        _record_marketing_failure_if_started(
+            run_id, marketing_analysis_started, selected_month, exc
+        )
+        raise
+
+    return response
+
+
+@router.get("/marketing-performance")
+def marketing_performance(
+    month: str | None = Query(
+        default=None,
+        pattern=r"^\d{4}-(0[1-9]|1[0-2])$",
+        description=(
+            "Calendar month in YYYY-MM format; defaults to the latest complete "
+            "transaction month."
+        ),
+    ),
+    run_id: UUID | None = None,
+) -> dict[str, object]:
+    """Return the five highest reported-ROI campaigns overlapping a month."""
+
+    return build_marketing_performance(month=month, run_id=run_id)

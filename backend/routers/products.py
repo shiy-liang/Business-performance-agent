@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from decimal import Decimal
+from uuid import UUID
 
 import psycopg
 from fastapi import APIRouter, HTTPException, Query
 from psycopg.rows import dict_row
 
 from backend.database import connect
+from backend.runtime import RunNotFoundError, record_run_event
 
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -144,22 +146,52 @@ def _rating_item(row: dict[str, object]) -> dict[str, object]:
     }
 
 
-@router.get("/product-performance")
-def product_performance(
-    month: str | None = Query(
-        default=None,
-        pattern=r"^\d{4}-(0[1-9]|1[0-2])$",
-        description="Calendar month in YYYY-MM format; defaults to the latest complete month.",
-    ),
-    store_id: str | None = Query(
-        default=None,
-        description="Omit for the whole company, including Online and unassigned sales.",
-    ),
-) -> dict[str, object]:
-    """Return four Top-5 product rankings for the dashboard."""
+def _record_products_failure_if_started(
+    run_id: UUID | None,
+    products_analysis_started: bool,
+    selected_month: date | None,
+    store_id: str | None,
+    exc: Exception,
+) -> None:
+    """Record a Products failure without masking the original exception."""
 
-    minimum_reviews = 5
-    minimum_units_for_return_rate = 5
+    if not products_analysis_started or run_id is None:
+        return
+    if selected_month is None:
+        return
+
+    error_message = str(exc).strip() or exc.__class__.__name__
+    try:
+        record_run_event(
+            run_id,
+            "products_analysis_failed",
+            "Products analysis failed",
+            {
+                "month": selected_month.strftime("%Y-%m"),
+                "store_id": store_id,
+                "error": error_message,
+            },
+        )
+    except (RunNotFoundError, RuntimeError, psycopg.Error):
+        pass
+
+
+def build_product_performance(
+    month: str | None,
+    store_id: str | None,
+    run_id: UUID | None,
+) -> dict[str, object]:
+    """Build Product Performance from prepared Products context."""
+
+    prepared = prepare_product_performance(month=month, store_id=store_id)
+    return analyze_prepared_product_performance(prepared=prepared, run_id=run_id)
+
+
+def prepare_product_performance(
+    month: str | None,
+    store_id: str | None,
+) -> dict[str, object]:
+    """Validate Products inputs and prepare the context needed for analysis."""
 
     try:
         with connect() as connection:
@@ -220,22 +252,6 @@ def product_performance(
                     selected_month == last_data_month
                     and coverage["last_date"] == period_end - timedelta(days=1)
                 )
-
-                cursor.execute(
-                    MONTHLY_PRODUCT_SQL,
-                    {
-                        "period_start": selected_month,
-                        "period_end": period_end,
-                        "store_id": store_id,
-                    },
-                )
-                monthly_rows = [dict(row) for row in cursor.fetchall()]
-
-                cursor.execute(
-                    LIFETIME_RATINGS_SQL,
-                    {"minimum_reviews": minimum_reviews},
-                )
-                rating_rows = [dict(row) for row in cursor.fetchall()]
     except HTTPException:
         raise
     except RuntimeError as exc:
@@ -243,115 +259,226 @@ def product_performance(
     except psycopg.Error as exc:
         raise HTTPException(status_code=503, detail="Database query failed") from exc
 
-    best_rows = sorted(
-        (row for row in monthly_rows if row["sold_units"] > 0),
-        key=lambda row: (
-            row["net_units"],
-            row["refund_adjusted_revenue"],
-            row["sold_units"],
-            row["product_name"],
-        ),
-        reverse=True,
-    )[:5]
-    best_sellers = [
-        {
-            "product_id": row["product_id"],
-            "product_name": row["product_name"],
-            "product_category": row["product_category"],
-            "sold_units": row["sold_units"],
-            "returned_units": row["returned_units"],
-            "net_units": row["net_units"],
-            "refund_adjusted_revenue": _money(row["refund_adjusted_revenue"]),
-            "estimated_gross_profit": _money(row["estimated_gross_profit"]),
-        }
-        for row in best_rows
-    ]
-
-    return_rows = sorted(
-        (
-            row
-            for row in monthly_rows
-            if row["sold_units"] >= minimum_units_for_return_rate
-            and row["returned_units"] > 0
-        ),
-        key=lambda row: (
-            row["return_rate"],
-            row["returned_units"],
-            row["sold_units"],
-            row["product_name"],
-        ),
-        reverse=True,
-    )[:5]
-    high_return_rate = [
-        {
-            "product_id": row["product_id"],
-            "product_name": row["product_name"],
-            "product_category": row["product_category"],
-            "return_rate_percent": _rate(row["return_rate"]),
-            "sold_units": row["sold_units"],
-            "returned_units": row["returned_units"],
-            "refund_adjusted_revenue": _money(row["refund_adjusted_revenue"]),
-        }
-        for row in return_rows
-    ]
-
-    top_rated_rows = sorted(
-        rating_rows,
-        key=lambda row: (
-            row["average_rating"],
-            row["review_count"],
-            row["product_name"],
-        ),
-        reverse=True,
-    )[:5]
-    lowest_rated_rows = sorted(
-        rating_rows,
-        key=lambda row: (
-            row["average_rating"],
-            -row["review_count"],
-            row["product_name"],
-        ),
-    )[:5]
-
     return {
         "scope": scope,
-        "period": {
-            "month": selected_month.strftime("%Y-%m"),
-            "start_date": selected_month.isoformat(),
-            "end_date": (period_end - timedelta(days=1)).isoformat(),
-            "is_default": month is None,
-            "is_complete": is_complete,
-            "sales_data_through": coverage["last_date"].isoformat(),
-            "returns_data_through": (
-                coverage["returns_data_through"].isoformat()
-                if coverage["returns_data_through"]
-                else None
-            ),
-        },
-        "basis": {
-            "best_sellers": {
-                "ranking": "net_units",
-                "definition": "units sold in the selected month minus completed returned units linked to those same transactions",
-            },
-            "ratings": {
-                "period": "all_time",
-                "minimum_reviews": minimum_reviews,
-                "store_filter_applied": False,
-                "note": "Reviews have no store_id, so ratings are company-wide product ratings.",
-            },
-            "high_return_rate": {
-                "definition": "completed returned units linked to the selected month's sales divided by units sold in that cohort",
-                "minimum_sold_units": minimum_units_for_return_rate,
-                "store_filter_applied": True,
-            },
-            "profit": {
-                "is_estimate": True,
-                "unit_cost_is_synthetic": True,
-                "returned_goods_cost_is_reversed": False,
-            },
-        },
-        "best_sellers": best_sellers,
-        "top_rated": [_rating_item(row) for row in top_rated_rows],
-        "high_return_rate": high_return_rate,
-        "lowest_rated": [_rating_item(row) for row in lowest_rated_rows],
+        "coverage": dict(coverage),
+        "selected_month": selected_month,
+        "period_end": period_end,
+        "is_default": month is None,
+        "is_complete": is_complete,
+        "store_id": store_id,
     }
+
+
+def analyze_prepared_product_performance(
+    prepared: dict[str, object],
+    run_id: UUID | None,
+) -> dict[str, object]:
+    """Execute Products SQL and Runtime events using prepared Products context."""
+
+    minimum_reviews = 5
+    minimum_units_for_return_rate = 5
+    products_analysis_started = False
+    scope = prepared["scope"]
+    coverage = prepared["coverage"]
+    selected_month = prepared["selected_month"]
+    period_end = prepared["period_end"]
+    store_id = prepared["store_id"]
+
+    try:
+        with connect() as connection, connection.cursor(row_factory=dict_row) as cursor:
+            if run_id is not None:
+                record_run_event(
+                    run_id,
+                    "products_analysis_started",
+                    "Products analysis started",
+                    {
+                        "month": selected_month.strftime("%Y-%m"),
+                        "store_id": store_id,
+                    },
+                )
+                products_analysis_started = True
+
+            cursor.execute(
+                MONTHLY_PRODUCT_SQL,
+                {
+                    "period_start": selected_month,
+                    "period_end": period_end,
+                    "store_id": store_id,
+                },
+            )
+            monthly_rows = [dict(row) for row in cursor.fetchall()]
+
+            cursor.execute(
+                LIFETIME_RATINGS_SQL,
+                {"minimum_reviews": minimum_reviews},
+            )
+            rating_rows = [dict(row) for row in cursor.fetchall()]
+
+        best_rows = sorted(
+            (row for row in monthly_rows if row["sold_units"] > 0),
+            key=lambda row: (
+                row["net_units"],
+                row["refund_adjusted_revenue"],
+                row["sold_units"],
+                row["product_name"],
+            ),
+            reverse=True,
+        )[:5]
+        best_sellers = [
+            {
+                "product_id": row["product_id"],
+                "product_name": row["product_name"],
+                "product_category": row["product_category"],
+                "sold_units": row["sold_units"],
+                "returned_units": row["returned_units"],
+                "net_units": row["net_units"],
+                "refund_adjusted_revenue": _money(row["refund_adjusted_revenue"]),
+                "estimated_gross_profit": _money(row["estimated_gross_profit"]),
+            }
+            for row in best_rows
+        ]
+
+        return_rows = sorted(
+            (
+                row
+                for row in monthly_rows
+                if row["sold_units"] >= minimum_units_for_return_rate
+                and row["returned_units"] > 0
+            ),
+            key=lambda row: (
+                row["return_rate"],
+                row["returned_units"],
+                row["sold_units"],
+                row["product_name"],
+            ),
+            reverse=True,
+        )[:5]
+        high_return_rate = [
+            {
+                "product_id": row["product_id"],
+                "product_name": row["product_name"],
+                "product_category": row["product_category"],
+                "return_rate_percent": _rate(row["return_rate"]),
+                "sold_units": row["sold_units"],
+                "returned_units": row["returned_units"],
+                "refund_adjusted_revenue": _money(row["refund_adjusted_revenue"]),
+            }
+            for row in return_rows
+        ]
+
+        top_rated_rows = sorted(
+            rating_rows,
+            key=lambda row: (
+                row["average_rating"],
+                row["review_count"],
+                row["product_name"],
+            ),
+            reverse=True,
+        )[:5]
+        lowest_rated_rows = sorted(
+            rating_rows,
+            key=lambda row: (
+                row["average_rating"],
+                -row["review_count"],
+                row["product_name"],
+            ),
+        )[:5]
+
+        response = {
+            "scope": scope,
+            "period": {
+                "month": selected_month.strftime("%Y-%m"),
+                "start_date": selected_month.isoformat(),
+                "end_date": (period_end - timedelta(days=1)).isoformat(),
+                "is_default": prepared["is_default"],
+                "is_complete": prepared["is_complete"],
+                "sales_data_through": coverage["last_date"].isoformat(),
+                "returns_data_through": (
+                    coverage["returns_data_through"].isoformat()
+                    if coverage["returns_data_through"]
+                    else None
+                ),
+            },
+            "basis": {
+                "best_sellers": {
+                    "ranking": "net_units",
+                    "definition": "units sold in the selected month minus completed returned units linked to those same transactions",
+                },
+                "ratings": {
+                    "period": "all_time",
+                    "minimum_reviews": minimum_reviews,
+                    "store_filter_applied": False,
+                    "note": "Reviews have no store_id, so ratings are company-wide product ratings.",
+                },
+                "high_return_rate": {
+                    "definition": "completed returned units linked to the selected month's sales divided by units sold in that cohort",
+                    "minimum_sold_units": minimum_units_for_return_rate,
+                    "store_filter_applied": True,
+                },
+                "profit": {
+                    "is_estimate": True,
+                    "unit_cost_is_synthetic": True,
+                    "returned_goods_cost_is_reversed": False,
+                },
+            },
+            "best_sellers": best_sellers,
+            "top_rated": [_rating_item(row) for row in top_rated_rows],
+            "high_return_rate": high_return_rate,
+            "lowest_rated": [_rating_item(row) for row in lowest_rated_rows],
+        }
+
+        if run_id is not None:
+            record_run_event(
+                run_id,
+                "products_analysis_completed",
+                "Products analysis completed",
+                {
+                    "month": selected_month.strftime("%Y-%m"),
+                    "store_id": store_id,
+                    "product_count": len(monthly_rows),
+                },
+            )
+    except HTTPException:
+        raise
+    except RunNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        _record_products_failure_if_started(
+            run_id, products_analysis_started, selected_month, store_id, exc
+        )
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except psycopg.Error as exc:
+        _record_products_failure_if_started(
+            run_id, products_analysis_started, selected_month, store_id, exc
+        )
+        raise HTTPException(status_code=503, detail="Database query failed") from exc
+    except Exception as exc:
+        _record_products_failure_if_started(
+            run_id, products_analysis_started, selected_month, store_id, exc
+        )
+        raise
+
+    return response
+
+
+@router.get("/product-performance")
+def product_performance(
+    month: str | None = Query(
+        default=None,
+        pattern=r"^\d{4}-(0[1-9]|1[0-2])$",
+        description="Calendar month in YYYY-MM format; defaults to the latest complete month.",
+    ),
+    store_id: str | None = Query(
+        default=None,
+        description="Omit for the whole company, including Online and unassigned sales.",
+    ),
+    run_id: UUID | None = None,
+) -> dict[str, object]:
+    """Return four Top-5 product rankings for the dashboard."""
+
+    return build_product_performance(
+        month=month,
+        store_id=store_id,
+        run_id=run_id,
+    )

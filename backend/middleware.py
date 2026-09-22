@@ -46,4 +46,3 @@ def register_logging_middleware(app: FastAPI) -> None:
             return response
         finally:
             logger.reset_context(context_token)
-
