@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from uuid import UUID
 
 import psycopg
 from fastapi import APIRouter, HTTPException, Query
 from psycopg.rows import dict_row
 
 from backend.database import connect
+from backend.runtime import RunNotFoundError, record_run_event
 
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -96,107 +98,69 @@ def _ratio(value: Decimal | int | None) -> float:
     return float(round(value or Decimal("0"), 4))
 
 
-@router.get("/action-center")
-def action_center(
-    store_id: str | None = Query(
-        default=None,
-        description="Omit for company-wide inventory; tickets are always company-wide.",
-    ),
+def _record_action_center_failure_if_started(
+    run_id: UUID | None,
+    action_center_analysis_started: bool,
+    store_id: str | None,
+    exc: Exception,
+) -> None:
+    """Record an Action Center failure without masking the original exception."""
+
+    if not action_center_analysis_started or run_id is None:
+        return
+
+    error_message = str(exc).strip() or exc.__class__.__name__
+    try:
+        record_run_event(
+            run_id,
+            "action_center_analysis_failed",
+            "Action Center analysis failed",
+            {
+                "store_id": store_id,
+                "error": error_message,
+            },
+        )
+    except (RunNotFoundError, RuntimeError, psycopg.Error):
+        pass
+
+
+def build_action_center(
+    store_id: str | None,
+    run_id: UUID | None,
 ) -> dict[str, object]:
-    """Return severe stock alerts and the oldest unresolved priority tickets."""
+    """Build Action Center from prepared Action Center context."""
+
+    prepared = prepare_action_center(store_id=store_id)
+    return analyze_prepared_action_center(prepared=prepared, run_id=run_id)
+
+
+def prepare_action_center(store_id: str | None) -> dict[str, object]:
+    """Validate the optional inventory store scope before analysis."""
+
+    if store_id is None:
+        return {
+            "inventory_scope": {
+                "type": "company",
+                "store_id": None,
+                "label": "全部门店",
+            },
+            "store_id": None,
+        }
 
     try:
         with connect() as connection:
             with connection.cursor(row_factory=dict_row) as cursor:
-                if store_id is None:
-                    inventory_scope = {
-                        "type": "company",
-                        "store_id": None,
-                        "label": "全部门店",
-                    }
-                else:
-                    cursor.execute(
-                        """
-                        SELECT store_id, store_location, store_type
-                        FROM stores
-                        WHERE store_id = %s
-                        """,
-                        (store_id,),
-                    )
-                    store = cursor.fetchone()
-                    if store is None:
-                        raise HTTPException(status_code=404, detail="Store not found")
-                    inventory_scope = {
-                        "type": "store",
-                        "store_id": store["store_id"],
-                        "label": store["store_location"],
-                        "store_type": store["store_type"],
-                    }
-
                 cursor.execute(
                     """
-                    SELECT
-                        MAX(snapshot_date) AS snapshot_date,
-                        COALESCE(BOOL_OR(is_synthetic), FALSE) AS is_synthetic
-                    FROM inventory
-                    WHERE (%(store_id)s::text IS NULL OR store_id = %(store_id)s::text)
+                    SELECT store_id, store_location, store_type
+                    FROM stores
+                    WHERE store_id = %s
                     """,
-                    {"store_id": store_id},
+                    (store_id,),
                 )
-                inventory_metadata = cursor.fetchone()
-
-                cursor.execute(INVENTORY_ALERTS_SQL, {"store_id": store_id})
-                inventory_rows = cursor.fetchall()
-                critical_count = sum(
-                    row["severity"] == "critical" for row in inventory_rows
-                )
-                top_inventory = [
-                    {
-                        "inventory_id": row["inventory_id"],
-                        "product_id": row["product_id"],
-                        "product_name": row["product_name"],
-                        "product_category": row["product_category"],
-                        "store_id": row["store_id"],
-                        "store_location": row["store_location"],
-                        "stock_quantity": row["stock_quantity"],
-                        "reorder_level": row["reorder_level"],
-                        "stock_ratio": _ratio(row["stock_ratio"]),
-                        "severity": row["severity"],
-                    }
-                    for row in inventory_rows[:5]
-                ]
-                inventory_snapshot = (
-                    inventory_metadata["snapshot_date"].isoformat()
-                    if inventory_metadata and inventory_metadata["snapshot_date"]
-                    else None
-                )
-                inventory_is_synthetic = bool(
-                    inventory_metadata and inventory_metadata["is_synthetic"]
-                )
-
-                cursor.execute(OLDEST_TICKETS_SQL)
-                ticket_rows = cursor.fetchall()
-                oldest_tickets = [
-                    {
-                        "ticket_id": row["ticket_id"],
-                        "issue_category": row["issue_category"],
-                        "submission_date": row["submission_date"].isoformat(),
-                        "resolution_status": row["resolution_status"],
-                        "open_days": row["open_days"],
-                        "notes": row["notes"],
-                    }
-                    for row in ticket_rows
-                ]
-                unresolved_ticket_count = (
-                    ticket_rows[0]["unresolved_high_priority_count"]
-                    if ticket_rows
-                    else 0
-                )
-                ticket_data_through = (
-                    ticket_rows[0]["data_through"].isoformat()
-                    if ticket_rows and ticket_rows[0]["data_through"]
-                    else None
-                )
+                store = cursor.fetchone()
+                if store is None:
+                    raise HTTPException(status_code=404, detail="Store not found")
     except HTTPException:
         raise
     except RuntimeError as exc:
@@ -205,23 +169,162 @@ def action_center(
         raise HTTPException(status_code=503, detail="Database query failed") from exc
 
     return {
-        "inventory": {
-            "scope": inventory_scope,
-            "snapshot_date": inventory_snapshot,
-            "is_synthetic": inventory_is_synthetic,
-            "critical_count": critical_count,
-            "additional_reorder_count": len(inventory_rows) - critical_count,
-            "top_items": top_inventory,
+        "inventory_scope": {
+            "type": "store",
+            "store_id": store["store_id"],
+            "label": store["store_location"],
+            "store_type": store["store_type"],
         },
-        "support_tickets": {
-            "scope": {
-                "type": "company",
-                "label": "全公司",
-                "store_filter_available": False,
-            },
-            "data_through": ticket_data_through,
-            "unresolved_high_priority_count": unresolved_ticket_count,
-            "age_basis": "submission_date",
-            "oldest": oldest_tickets,
-        },
+        "store_id": store_id,
     }
+
+
+def analyze_prepared_action_center(
+    prepared: dict[str, object],
+    run_id: UUID | None,
+) -> dict[str, object]:
+    """Execute Action Center analysis and Runtime events from prepared context."""
+
+    action_center_analysis_started = False
+    inventory_scope = prepared["inventory_scope"]
+    store_id = prepared["store_id"]
+
+    try:
+        with connect() as connection, connection.cursor(row_factory=dict_row) as cursor:
+            if run_id is not None:
+                record_run_event(
+                    run_id,
+                    "action_center_analysis_started",
+                    "Action Center analysis started",
+                    {"store_id": store_id},
+                )
+                action_center_analysis_started = True
+
+            cursor.execute(
+                """
+                SELECT
+                    MAX(snapshot_date) AS snapshot_date,
+                    COALESCE(BOOL_OR(is_synthetic), FALSE) AS is_synthetic
+                FROM inventory
+                WHERE (%(store_id)s::text IS NULL OR store_id = %(store_id)s::text)
+                """,
+                {"store_id": store_id},
+            )
+            inventory_metadata = cursor.fetchone()
+
+            cursor.execute(INVENTORY_ALERTS_SQL, {"store_id": store_id})
+            inventory_rows = cursor.fetchall()
+            critical_count = sum(
+                row["severity"] == "critical" for row in inventory_rows
+            )
+            top_inventory = [
+                {
+                    "inventory_id": row["inventory_id"],
+                    "product_id": row["product_id"],
+                    "product_name": row["product_name"],
+                    "product_category": row["product_category"],
+                    "store_id": row["store_id"],
+                    "store_location": row["store_location"],
+                    "stock_quantity": row["stock_quantity"],
+                    "reorder_level": row["reorder_level"],
+                    "stock_ratio": _ratio(row["stock_ratio"]),
+                    "severity": row["severity"],
+                }
+                for row in inventory_rows[:5]
+            ]
+            inventory_snapshot = (
+                inventory_metadata["snapshot_date"].isoformat()
+                if inventory_metadata and inventory_metadata["snapshot_date"]
+                else None
+            )
+            inventory_is_synthetic = bool(
+                inventory_metadata and inventory_metadata["is_synthetic"]
+            )
+
+            cursor.execute(OLDEST_TICKETS_SQL)
+            ticket_rows = cursor.fetchall()
+            oldest_tickets = [
+                {
+                    "ticket_id": row["ticket_id"],
+                    "issue_category": row["issue_category"],
+                    "submission_date": row["submission_date"].isoformat(),
+                    "resolution_status": row["resolution_status"],
+                    "open_days": row["open_days"],
+                    "notes": row["notes"],
+                }
+                for row in ticket_rows
+            ]
+            unresolved_ticket_count = (
+                ticket_rows[0]["unresolved_high_priority_count"]
+                if ticket_rows
+                else 0
+            )
+            ticket_data_through = (
+                ticket_rows[0]["data_through"].isoformat()
+                if ticket_rows and ticket_rows[0]["data_through"]
+                else None
+            )
+
+        response = {
+            "inventory": {
+                "scope": inventory_scope,
+                "snapshot_date": inventory_snapshot,
+                "is_synthetic": inventory_is_synthetic,
+                "critical_count": critical_count,
+                "additional_reorder_count": len(inventory_rows) - critical_count,
+                "top_items": top_inventory,
+            },
+            "support_tickets": {
+                "scope": {
+                    "type": "company",
+                    "label": "全公司",
+                    "store_filter_available": False,
+                },
+                "data_through": ticket_data_through,
+                "unresolved_high_priority_count": unresolved_ticket_count,
+                "age_basis": "submission_date",
+                "oldest": oldest_tickets,
+            },
+        }
+
+        if run_id is not None:
+            record_run_event(
+                run_id,
+                "action_center_analysis_completed",
+                "Action Center analysis completed",
+                {"store_id": store_id},
+            )
+    except HTTPException:
+        raise
+    except RunNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        _record_action_center_failure_if_started(
+            run_id, action_center_analysis_started, store_id, exc
+        )
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except psycopg.Error as exc:
+        _record_action_center_failure_if_started(
+            run_id, action_center_analysis_started, store_id, exc
+        )
+        raise HTTPException(status_code=503, detail="Database query failed") from exc
+    except Exception as exc:
+        _record_action_center_failure_if_started(
+            run_id, action_center_analysis_started, store_id, exc
+        )
+        raise
+
+    return response
+
+
+@router.get("/action-center")
+def action_center(
+    store_id: str | None = Query(
+        default=None,
+        description="Omit for company-wide inventory; tickets are always company-wide.",
+    ),
+    run_id: UUID | None = None,
+) -> dict[str, object]:
+    """Return severe stock alerts and the oldest unresolved priority tickets."""
+
+    return build_action_center(store_id=store_id, run_id=run_id)

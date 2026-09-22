@@ -219,21 +219,20 @@ analyze_prepared_financial_pulse
 
 由于 `prepare_financial_pulse()` 在 Analysis 前执行，Finance 前置 404 / 422 不会产生 `finance_analysis_failed` event。
 
-### 本地故障注入开关
+### 本地故障注入测试记录
 
-为本地 workflow failure-path 测试，`backend/routers/finance.py` 当前保留：
-
-```python
-FORCE_FINANCE_ANALYSIS_FAILURE = False
-```
-
-默认值为 `False`，不影响正常行为。仅在将其临时改为 `True`、并且 `finance_analysis_started` 已成功写入后，`SUMMARY_SQL` 前会抛出：
+Finance 开发阶段曾临时加入故障注入，用于验证以下 failure path：
 
 ```text
-RuntimeError("Forced finance analysis failure for test")
+finance_analysis_started
+    ↓
+finance_analysis_failed
+    ↓
+run_failed
 ```
 
-完成本地测试后应恢复为 `False`。
+该测试结束后，临时故障注入开关、条件判断和测试异常均已完整删除。当前正式源码中不存在
+`FORCE_FINANCE_ANALYSIS_FAILURE`，也不存在可通过开关触发 Finance analysis failure 的测试代码。
 
 ---
 
@@ -338,7 +337,7 @@ prepare_financial_pulse → 404 / 422
 - Finance Router 的 helper 委托、可选 `run_id` OpenAPI 参数与无 `run_id` 兼容路径；
 - Prepare / Analysis 分离检查：prepare 不含 Finance SQL 或 Finance event；
 - Finance 前置 404 / 422 位于 `finance_analysis_started` 之前，因此不产生 Finance failure event；
-- 临时故障注入顺序：`finance_analysis_started` 后触发异常，且 `SUMMARY_SQL` 不执行。
+- Finance 临时故障注入测试曾验证：在 `finance_analysis_started` 后触发异常时，`SUMMARY_SQL` 不执行；该测试代码现已删除。
 
 上述验证包括 Ruff、Python 编译、OpenAPI 结构检查及替身函数控制流检查；未在本轮文档更新中执行数据库 schema、导入或清库操作。
 

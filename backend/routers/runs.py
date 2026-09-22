@@ -11,6 +11,11 @@ from psycopg.rows import dict_row
 from pydantic import BaseModel, Field
 
 from backend.database import connect
+from backend.runtime import RunNotFoundError, RunStateError
+from backend.workflow import (
+    run_business_performance_workflow,
+    run_finance_workflow,
+)
 
 router = APIRouter(prefix="/api/runs", tags=["observability"])
 
@@ -77,6 +82,24 @@ class CreateRunRequest(BaseModel):
         extra = "forbid"
 
 
+class ExecuteRunRequest(BaseModel):
+    """Optional business parameters used by an executable run workflow."""
+
+    month: str | None = Field(
+        default=None,
+        pattern=r"^\d{4}-(0[1-9]|1[0-2])$",
+        description="Calendar month in YYYY-MM format.",
+        examples=["2025-02"],
+    )
+    store_id: str | None = Field(
+        default=None,
+        description="Optional store scope for workflows that support store filtering.",
+    )
+
+    class Config:
+        extra = "forbid"
+
+
 class RunResponse(BaseModel):
     """Persisted runtime-observability fields for one agent run."""
 
@@ -112,6 +135,15 @@ class RunEventResponse(BaseModel):
     )
 
 
+class ExecuteRunResponse(BaseModel):
+    """Completed workflow result for one executable run."""
+
+    run_id: UUID = Field(description="UUID of the executed run.")
+    run_type: str = Field(description="Persisted workflow type used for dispatch.")
+    status: str = Field(description="Final persisted run status.")
+    result: dict[str, object] = Field(description="Unmodified workflow result.")
+
+
 def _timestamp(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
 
@@ -137,6 +169,24 @@ def _event_response(row: dict[str, object]) -> RunEventResponse:
         created_at=_timestamp(row["created_at"]),
         payload=row["payload"],
     )
+
+
+def _get_run_or_404(run_id: UUID) -> RunResponse:
+    """Load one run or raise the API's standard 404 response."""
+
+    try:
+        with connect() as connection, connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(GET_RUN_SQL, {"run_id": run_id})
+            run = cursor.fetchone()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except psycopg.Error as exc:
+        raise HTTPException(status_code=503, detail="Database query failed") from exc
+
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    return _run_response(dict(run))
 
 
 @router.post(
@@ -188,19 +238,7 @@ def create_run(request: CreateRunRequest) -> RunResponse:
 def get_run(run_id: UUID) -> RunResponse:
     """Return one run by its UUID."""
 
-    try:
-        with connect() as connection, connection.cursor(row_factory=dict_row) as cursor:
-            cursor.execute(GET_RUN_SQL, {"run_id": run_id})
-            run = cursor.fetchone()
-    except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except psycopg.Error as exc:
-        raise HTTPException(status_code=503, detail="Database query failed") from exc
-
-    if run is None:
-        raise HTTPException(status_code=404, detail="Run not found")
-
-    return _run_response(dict(run))
+    return _get_run_or_404(run_id)
 
 
 @router.get(
@@ -232,3 +270,64 @@ def get_run_events(run_id: UUID) -> list[RunEventResponse]:
         raise HTTPException(status_code=503, detail="Database query failed") from exc
 
     return events
+
+
+@router.post(
+    "/{run_id}/execute",
+    response_model=ExecuteRunResponse,
+    summary="Execute a run workflow",
+    description=(
+        "Dispatches a pending `finance` or `business_performance` run to its "
+        "synchronous Python workflow."
+    ),
+    responses={
+        404: {"description": "Run not found"},
+        409: {"description": "Run is not pending"},
+        422: {"description": "Validation error or unsupported run type"},
+        503: {"description": "Database query failed"},
+    },
+)
+def execute_run(run_id: UUID, request: ExecuteRunRequest) -> ExecuteRunResponse:
+    """Execute one pending run using its persisted workflow type."""
+
+    run = _get_run_or_404(run_id)
+    if run.status == "running":
+        raise HTTPException(status_code=409, detail="Run is already running")
+    if run.status != "pending":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Run cannot transition from {run.status} to running",
+        )
+
+    try:
+        if run.run_type == "finance":
+            result = run_finance_workflow(
+                run_id=run_id,
+                month=request.month,
+                store_id=request.store_id,
+            )
+        elif run.run_type == "business_performance":
+            result = run_business_performance_workflow(
+                run_id=run_id,
+                month=request.month,
+                store_id=request.store_id,
+            )
+        else:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Unsupported run type: {run.run_type}",
+            )
+    except HTTPException:
+        raise
+    except RunNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RunStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    completed_run = _get_run_or_404(run_id)
+    return ExecuteRunResponse(
+        run_id=run_id,
+        run_type=run.run_type,
+        status=completed_run.status,
+        result=result,
+    )

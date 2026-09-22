@@ -5,6 +5,7 @@ const state = {
   storeId: "",
   activeProductTab: "best_sellers",
   productData: null,
+  runId: null,
   requestController: null,
   filterTimer: null,
 };
@@ -444,16 +445,22 @@ function renderMarketing(data) {
 
 function panelError(panel, message) {
   if (panel === "finance") {
+    elements.financePeriod.textContent = "—";
+    elements.salesDataThrough.textContent = "—";
+    elements.scopeCaption.textContent = "—";
     elements.financeMetrics.innerHTML = "";
     renderEmpty(elements.financeMetrics, message);
     renderEmpty(elements.financeChart, "趋势图暂时无法读取");
   } else if (panel === "action") {
+    elements.ticketCount.textContent = "—";
     renderEmpty(elements.inventorySummary, message);
     renderEmpty(elements.inventoryList, "库存数据暂时无法读取");
     renderEmpty(elements.ticketList, "工单数据暂时无法读取");
   } else if (panel === "products") {
+    state.productData = null;
     renderEmpty(elements.productList, message);
   } else if (panel === "marketing") {
+    elements.campaignCount.textContent = "—";
     renderEmpty(elements.campaignList, message);
   }
 }
@@ -464,55 +471,66 @@ async function loadDashboard() {
   const { signal } = state.requestController;
   const requestedMonth = state.month;
   const requestedStore = state.storeId;
+  const isStale = () =>
+    signal.aborted ||
+    requestedMonth !== state.month ||
+    requestedStore !== state.storeId ||
+    state.requestController.signal !== signal;
+  let responseAccepted = false;
 
   clearGlobalError();
   elements.refreshButton.classList.add("is-loading");
   elements.refreshButton.disabled = true;
-  setConnectionStatus("loading", "正在刷新数据");
+  setConnectionStatus("loading", "正在生成经营分析");
+  state.runId = null;
 
-  const requests = [
-    fetchJson(endpoint("/api/dashboard/financial-pulse", { month: true, store: true }), { signal }),
-    fetchJson(endpoint("/api/dashboard/action-center", { store: true }), { signal }),
-    fetchJson(endpoint("/api/dashboard/product-performance", { month: true, store: true }), { signal }),
-    fetchJson(endpoint("/api/dashboard/marketing-performance", { month: true }), { signal }),
-  ];
+  try {
+    const createdRun = await fetchJson("/api/runs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ run_type: "business_performance" }),
+      signal,
+    });
+    if (isStale()) return;
 
-  const [finance, action, products, marketing] = await Promise.allSettled(requests);
-  if (signal.aborted || requestedMonth !== state.month || requestedStore !== state.storeId) {
-    return;
-  }
+    state.runId = createdRun.run_id;
+    const data = await fetchJson(`/api/runs/${state.runId}/execute`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        month: state.month || null,
+        store_id: state.storeId || null,
+      }),
+      signal,
+    });
+    if (isStale()) return;
 
-  const failures = [];
-  if (finance.status === "fulfilled") renderFinance(finance.value);
-  else {
-    failures.push(finance.reason.message);
-    panelError("finance", "财务数据暂时无法读取");
-  }
-  if (action.status === "fulfilled") renderActionCenter(action.value);
-  else {
-    failures.push(action.reason.message);
-    panelError("action", "行动数据暂时无法读取");
-  }
-  if (products.status === "fulfilled") renderProducts(products.value);
-  else {
-    failures.push(products.reason.message);
-    panelError("products", "商品榜单暂时无法读取");
-  }
-  if (marketing.status === "fulfilled") renderMarketing(marketing.value);
-  else {
-    failures.push(marketing.reason.message);
-    panelError("marketing", "营销数据暂时无法读取");
-  }
-
-  if (failures.length) {
-    setConnectionStatus("error", "部分数据读取失败");
-    showGlobalError(`部分板块读取失败：${[...new Set(failures)].join("；")}`);
-  } else {
+    responseAccepted = true;
+    renderFinance(data.result.finance);
+    renderActionCenter(data.result.action_center);
+    renderProducts(data.result.products);
+    renderMarketing(data.result.marketing);
     setConnectionStatus("ok", "Supabase 已连接");
-  }
+  } catch (error) {
+    if (!responseAccepted && isStale()) return;
+    if (signal.aborted || state.requestController.signal !== signal) return;
 
-  elements.refreshButton.classList.remove("is-loading");
-  elements.refreshButton.disabled = false;
+    const message = error instanceof Error ? error.message : String(error);
+    setConnectionStatus("error", "经营分析生成失败");
+    showGlobalError(`经营分析生成失败：${message}`);
+    panelError("finance", "财务数据暂时无法读取");
+    panelError("action", "行动数据暂时无法读取");
+    panelError("products", "商品榜单暂时无法读取");
+    panelError("marketing", "营销数据暂时无法读取");
+  } finally {
+    if (
+      responseAccepted ||
+      (!isStale() && state.requestController.signal === signal)
+    ) {
+      elements.refreshButton.classList.remove("is-loading");
+      elements.refreshButton.disabled = false;
+    }
+  }
 }
 
 function scheduleDashboardLoad() {
