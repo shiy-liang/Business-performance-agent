@@ -1,0 +1,28 @@
+provider: aliyun_bailian
+api_key_env: DASHSCOPE_API_KEY
+workspace_id_env: DASHSCOPE_WORKSPACE_ID
+base_url: https://{workspace_id}.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
+
+chat_model:
+  model: qwen3.8-max
+  fallback_model: qwen3-max
+  temperature: null
+  reasoning_effort: medium
+  # Keep the same model while matching reasoning cost to each Agent phase.
+  # Routing is a constrained classification task; synthesis and SQL work need
+  # a small reasoning budget to preserve answer and query quality.
+  agent_reasoning_effort:
+    supervisor_routing: none
+    supervisor_synthesis: low
+    finance: low
+    operations: low
+  max_output_tokens: 4096
+  timeout_seconds: 120
+  max_retries: 1
+
+embedding_model:
+  model: qwen3.7-text-embedding
+  dimensions: 1024
+  batch_size: 20
+  timeout_seconds: 15
+  max_retries: 1
