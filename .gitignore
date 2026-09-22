@@ -14,9 +14,6 @@ data/synthetic/
 data/knowledge_files/
 Dev_doc/
 logs/
-*.yml
-config/*
-!config/rag.yml
 *apiKey*.csv
 tests/
 *.ini
