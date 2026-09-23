@@ -1,7 +1,8 @@
 """FastAPI entry point for the Business Performance Agent."""
 
-from pathlib import Path
+from contextlib import asynccontextmanager
 from hashlib import sha256
+from pathlib import Path
 
 import psycopg
 from fastapi import FastAPI, HTTPException
@@ -18,11 +19,21 @@ from backend.routers.knowledge_reviews import router as knowledge_reviews_router
 from backend.routers.marketing import router as marketing_router
 from backend.routers.products import router as products_router
 from backend.routers.sessions import router as sessions_router
+from rag.agent.bootstrap import initialize_agent_runtime
+
+
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    """Initialize reusable Agent graphs, clients, and tools before serving."""
+
+    application.state.agent_runtime = initialize_agent_runtime()
+    yield
 
 
 app = FastAPI(
     title="Business Performance Agent API",
     version="0.1.0",
+    lifespan=lifespan,
 )
 register_logging_middleware(app)
 

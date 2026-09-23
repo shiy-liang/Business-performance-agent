@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from functools import lru_cache
 
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
@@ -11,6 +12,7 @@ from model.config import PROJECT_ROOT, load_model_config
 from model.factory import ModelEnvironmentError
 
 
+@lru_cache(maxsize=5)
 def create_agent_model(*, reasoning_profile: str | None = None) -> ChatOpenAI:
     """Create a streaming ChatOpenAI client backed by the Responses API."""
     load_dotenv(PROJECT_ROOT / ".env")
@@ -43,6 +45,7 @@ def create_agent_model(*, reasoning_profile: str | None = None) -> ChatOpenAI:
     )
 
 
+@lru_cache(maxsize=2)
 def create_supervisor_model(*, phase: str = "routing") -> ChatOpenAI:
     """Create the model used by the user-facing supervisor."""
 
@@ -51,6 +54,7 @@ def create_supervisor_model(*, phase: str = "routing") -> ChatOpenAI:
     return create_agent_model(reasoning_profile=f"supervisor_{phase}")
 
 
+@lru_cache(maxsize=2)
 def create_specialist_model(agent_name: str) -> ChatOpenAI:
     """Create the model used by Finance and Operations specialists."""
 

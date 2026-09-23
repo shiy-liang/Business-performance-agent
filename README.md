@@ -171,11 +171,16 @@ failure rolls them back and removes the newly stored file.
 ## Supervisor and specialist agents
 
 The chat panel is connected to a three-agent LangGraph runtime under `rag/agent/`.
-The user-facing Supervisor routes structured questions to Finance or Operations,
-and those specialists generate PostgreSQL queries through agent-scoped tools. All
-models use `langchain-openai` with the OpenAI Responses API. Tool permissions are
+The user-facing Supervisor routes structured questions to Finance or Operations.
+High-frequency product-review questions use a dedicated deterministic retrieval
+workflow, while other specialist questions use governed PostgreSQL generation as
+a long-tail fallback. All models use `langchain-openai` with the OpenAI Responses API. Tool permissions are
 enforced centrally in `rag/agent/tools/registry.py`, and safe public progress is
 streamed through `/api/chat/stream`.
+
+FastAPI initializes the shared tool registry, Finance and Operations graphs,
+Supervisor graph, and their model clients during application startup. The same
+compiled graphs and clients are reused for every default chat request.
 
 The current tools are:
 
@@ -187,7 +192,12 @@ The current tools are:
 - `search_operations_schema`, `resolve_operations_entity`,
   `execute_operations_sql`: Operations-only equivalents.
 - `search_customer_reviews`: Operations-only semantic review retrieval with date,
-  product, category, and rating filters.
+  product, category, and rating filters; one product-filtered call by default and
+  at most three for distinct themes or an explicit comparison. Non-comparison
+  runs are locked to the first product.
+- `find_other_comment_product`, `find_other_comment_category`: Operations-only
+  fixed-query expansion tools. They exclude reviews already returned in the run,
+  return at most ten rows each, and share a two-call limit.
 
 Finance and Operations share a reusable specialist graph but have independent
 prompts, skills, table permissions, and tool instances. Their handlers register
@@ -209,11 +219,18 @@ a concrete validation message, allowing parser, policy, allowlist, alias, column
 and parameter failures to be distinguished without logging query results.
 
 Every specialist result passes a deterministic evidence check before the
-Supervisor may use it. The check requires a successful domain-matching SQL result,
-propagated citations, and no unsupported citations; review retrieval must also be
-cited when used. Validation outcomes are emitted as public `validation` events.
+Supervisor may use it. Generic workflows require a successful domain-matching SQL
+result. The dedicated product-review workflow instead requires a successful
+`search_customer_reviews` call, forbids mixing in generic SQL tools, and validates
+the returned review citations. Validation outcomes are emitted as public `validation` events.
 `AGENT_KNOWLEDGE_MIN_SIMILARITY` and `AGENT_REVIEW_MIN_SIMILARITY` suppress weak
 vector matches.
+
+Specialists return compact internal evidence summaries. Only the Supervisor emits
+the user-facing answer; Supervisor routing output is not streamed as answer text.
+Model lifecycle logs include `response_phase`, total duration, time to first token,
+post-first-token generation duration, and input/output token counts when supplied
+by the provider.
 
 When `AGENT_RUN_PERSISTENCE=true`, each Supervisor run and its non-token public
 events are written best-effort to `agent_runs` and `run_events`. Audit persistence

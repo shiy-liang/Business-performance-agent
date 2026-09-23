@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Any
 
 from langchain_core.messages import SystemMessage, ToolMessage
@@ -59,7 +60,7 @@ def build_supervisor_graph(
             )
             active_model = routing_model_with_tools
             run_name = "supervisor_routing_model"
-            tags = ["supervisor", "supervisor-routing", "public-answer"]
+            tags = ["supervisor", "supervisor-routing"]
         response = await active_model.ainvoke(
             [SystemMessage(content=system_prompt), *state["messages"]],
             config={
@@ -82,4 +83,11 @@ def build_supervisor_graph(
     return builder.compile(name="business-supervisor")
 
 
-__all__ = ["build_supervisor_graph"]
+@lru_cache(maxsize=1)
+def get_default_supervisor_graph():
+    """Return the process-wide Supervisor graph built during application startup."""
+
+    return build_supervisor_graph(tool_registry=default_tool_registry)
+
+
+__all__ = ["build_supervisor_graph", "get_default_supervisor_graph"]

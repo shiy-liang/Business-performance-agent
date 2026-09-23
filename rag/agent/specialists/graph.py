@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Any, Literal
 
 from langchain_core.messages import SystemMessage
@@ -23,7 +24,7 @@ def build_specialist_graph(
     model: Any | None = None,
     tool_registry: ToolRegistry | None = None,
 ):
-    """Compile a specialist that can call only its authorized SQL tools."""
+    """Compile a specialist that can call only its authorized domain tools."""
 
     active_registry = tool_registry or default_tool_registry
     tools = active_registry.tools_for(agent_name)
@@ -61,4 +62,15 @@ def build_specialist_graph(
     return builder.compile(name=f"{agent_name}-agent")
 
 
-__all__ = ["SpecialistName", "build_specialist_graph"]
+@lru_cache(maxsize=2)
+def get_default_specialist_graph(agent_name: SpecialistName):
+    """Return one process-wide specialist graph with a reused model client."""
+
+    return build_specialist_graph(agent_name, tool_registry=default_tool_registry)
+
+
+__all__ = [
+    "SpecialistName",
+    "build_specialist_graph",
+    "get_default_specialist_graph",
+]
