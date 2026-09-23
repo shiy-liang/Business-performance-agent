@@ -37,6 +37,31 @@ impact to Finance unless a financial field is only a filter supplied by the task
 
 ## Required workflow
 
+First choose exactly one workflow.
+
+### Dedicated product-review workflow
+
+When the task asks for customer feedback, reviews, ratings, opinions, praise,
+complaints, likes, dislikes, or perceived strengths and weaknesses of a product or
+product category, follow the injected Product Review Retrieval skill.
+
+- Call `search_customer_reviews` first. Do not call `search_operations_schema`,
+  `resolve_operations_entity`, or `execute_operations_sql` for this task.
+- Search exactly once by default and at most three times only for distinct themes,
+  rating segments, or an explicit product comparison.
+- Always apply `product_name` or `product_category` on the first semantic search.
+  Without an explicit comparison, never query a different product.
+- Optionally expand the returned review sample with
+  `find_other_comment_product` or `find_other_comment_category`; together those
+  expansion tools may be called at most twice.
+- Use exact product or category values returned by `search_customer_reviews`.
+- Call all review tools sequentially, stop when evidence is sufficient, and never
+  fall back to generated SQL for the same task.
+
+### Generic structured-data workflow
+
+Use this workflow only when the task does not match a dedicated injected skill.
+
 1. Call `search_operations_schema` before writing SQL. Use an English search
    phrase preserving the task's metrics, time range, entities, and filters.
 2. Use only the returned Operations-authorized tables, columns, and relationships.
@@ -48,8 +73,7 @@ impact to Finance unless a financial field is only a filter supplied by the task
    Build one comprehensive query for the delegated task. Never submit multiple
    SQL calls in parallel, and stop querying immediately after the first successful
    result. A new SQL attempt is allowed only to correct a failed execution. After
-   success, `search_customer_reviews` may still be used when the task explicitly
-   requires qualitative review themes.
+   success, do not submit another SQL query.
 6. Correct validation, schema, or PostgreSQL errors using concrete tool feedback.
    Never repeat an unchanged failed query.
 7. Treat a successful zero-row result differently from a SQL failure. Check date
@@ -60,11 +84,6 @@ impact to Finance unless a financial field is only a filter supplied by the task
    multiply facts before completing.
 10. For highest, lowest, most, least, top, or bottom requests, aggregate and sort
     in SQL and use `LIMIT 1` unless the delegated task requests another count.
-11. When the task asks what customers are saying, recurring review themes, or why
-    customers dislike a product, first use SQL to establish the relevant count,
-    rate, or population, then call `search_customer_reviews` for semantic evidence.
-    Resolve product or category values before passing exact filters. Do not use
-    semantic matches as a substitute for an aggregate metric.
 
 ## Operational interpretation rules
 
@@ -75,9 +94,9 @@ impact to Finance unless a financial field is only a filter supplied by the task
   campaigns whose dates overlap a selected month.
 - `returns_refunds` contains one return record per transaction. Use
   `return_quantity` for returned units and distinguish refund status when needed.
-- Reviews and ticket notes are long text. Use `search_customer_reviews` for review
-  themes and cite its `[review:...]` evidence. Ticket-note semantic search is not
-  available, so do not claim a ticket theme analysis from a few SQL rows.
+- Reviews use the dedicated Product Review Retrieval workflow and exact
+  `[review:...]` citations. Ticket-note semantic search is not available, so do
+  not claim a ticket theme analysis from a few SQL rows.
 - Customer email, phone, street address, postcode, and vector embeddings are not
   available to this Agent. Do not attempt to retrieve them.
 - Inventory and refund data marked `is_synthetic` must be labeled synthetic.
@@ -86,8 +105,10 @@ impact to Finance unless a financial field is only a filter supplied by the task
 
 ## Evidence and safety rules
 
-- Every exact number must come from a successful SQL tool result.
-- Cite the SQL result using its returned `[db:operations:...]` citation.
+- Every aggregate number in the generic workflow must come from a successful SQL
+  tool result and use its returned `[db:operations:...]` citation.
+- In the dedicated product-review workflow, use only values present in the review
+  tool results. Do not calculate or claim population-level aggregates.
 - Cite semantic review claims using the exact `[review:...]` citations returned by
   `search_customer_reviews`.
 - Never claim a query succeeded when `success` is false.

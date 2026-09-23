@@ -3,11 +3,24 @@
 from __future__ import annotations
 
 import re
-import re
 from typing import Any, Literal
 
 
 SpecialistName = Literal["finance", "operations"]
+REVIEW_TOOL_NAMES = frozenset(
+    {
+        "search_customer_reviews",
+        "find_other_comment_product",
+        "find_other_comment_category",
+    }
+)
+GENERIC_OPERATIONS_TOOL_NAMES = frozenset(
+    {
+        "search_operations_schema",
+        "resolve_operations_entity",
+        "execute_operations_sql",
+    }
+)
 
 
 def validate_specialist_evidence(
@@ -16,12 +29,7 @@ def validate_specialist_evidence(
     tool_payloads: list[dict[str, Any]],
     sources: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Validate that a specialist conclusion is backed by successful tools.
-
-    This intentionally validates evidence integrity rather than trying to judge
-    business truth with another language model. SQL correctness remains the
-    responsibility of the governed views, SQL policy, and metric tests.
-    """
+    """Validate that a specialist conclusion is backed by successful tools."""
 
     errors: list[str] = []
     warnings: list[str] = []
@@ -37,6 +45,7 @@ def validate_specialist_evidence(
         for payload in tool_payloads
         if payload.get("success") is False
         and payload.get("agent") == agent_name
+        and payload.get("tool") not in REVIEW_TOOL_NAMES
         and payload.get("error_type")
         not in {
             None,
@@ -45,16 +54,46 @@ def validate_specialist_evidence(
             "concurrent_query_blocked",
         }
     ]
-    failed_review_searches = [
+    review_payloads = [
         payload
         for payload in tool_payloads
-        if payload.get("tool") == "search_customer_reviews"
-        and payload.get("success") is False
+        if payload.get("tool") in REVIEW_TOOL_NAMES
     ]
+    successful_review_retrievals = [
+        payload for payload in review_payloads if payload.get("success") is True
+    ]
+    failed_review_searches = [
+        payload for payload in review_payloads if payload.get("success") is False
+    ]
+    uses_review_workflow = agent_name == "operations" and bool(review_payloads)
 
     if not answer.strip():
         errors.append("The specialist returned no final analysis.")
-    if not successful_queries:
+
+    if uses_review_workflow:
+        semantic_searches = [
+            payload
+            for payload in review_payloads
+            if payload.get("tool") == "search_customer_reviews"
+        ]
+        if review_payloads[0].get("tool") != "search_customer_reviews":
+            errors.append(
+                "The dedicated product-review workflow did not call semantic review search first."
+            )
+        if not any(payload.get("success") is True for payload in semantic_searches):
+            errors.append("No successful semantic customer-review search was returned.")
+        if not successful_review_retrievals:
+            errors.append("No successful customer-review evidence was returned.")
+        generic_operations_calls = [
+            payload
+            for payload in tool_payloads
+            if payload.get("tool") in GENERIC_OPERATIONS_TOOL_NAMES
+        ]
+        if successful_queries or generic_operations_calls:
+            errors.append(
+                "The dedicated product-review workflow mixed generic SQL tools with review tools."
+            )
+    elif not successful_queries:
         errors.append("No successful specialist SQL evidence was returned.")
 
     expected_prefix = f"[db:{agent_name}:"
@@ -93,17 +132,6 @@ def validate_specialist_evidence(
     if unsupported_citations:
         errors.append("The specialist conclusion contains a citation with no tool evidence.")
 
-    review_citations = {
-        citation for citation in source_citations if citation.startswith("[review:")
-    }
-    if review_citations and not any(citation in answer for citation in review_citations):
-        errors.append("Customer-review evidence was retrieved but not cited in the conclusion.")
-
-    answer_citations = set(re.findall(r"\[(?:db|review):[^\]\r\n]+\]", answer))
-    unsupported_citations = sorted(answer_citations - source_citations)
-    if unsupported_citations:
-        errors.append("The specialist conclusion contains a citation with no tool evidence.")
-
     if any(payload.get("truncated") for payload in successful_queries):
         warnings.append("At least one SQL result was truncated by the runtime limit.")
     if any(int(payload.get("row_count") or 0) == 0 for payload in successful_queries):
@@ -113,13 +141,14 @@ def validate_specialist_evidence(
             f"The specialist corrected {len(failed_queries)} failed SQL attempt(s) before completion."
         )
     if failed_review_searches:
-        warnings.append("Customer-review semantic evidence was unavailable.")
+        warnings.append("At least one customer-review retrieval was unavailable or blocked.")
 
     return {
         "valid": not errors,
         "errors": errors,
         "warnings": warnings,
         "successful_query_count": len(successful_queries),
+        "successful_review_tool_count": len(successful_review_retrievals),
         "evidence_count": len(source_citations),
     }
 

@@ -590,13 +590,19 @@ def _finish_attempt(config: RunnableConfig, *, success: bool) -> None:
 def build_sql_tools(agent_name: SqlAgentName) -> tuple[BaseTool, BaseTool, BaseTool]:
     """Build three tools whose domain permission cannot be changed by the model."""
 
+    schema_description = (
+        "Find operations-authorized business tables, columns, relationships, and "
+        "entity types before generating SQL for a generic structured-data task. "
+        "Do not call this for a dedicated non-SQL skill."
+        if agent_name == "operations"
+        else "Find finance-authorized business tables, columns, relationships, and "
+        "entity types before generating SQL. Call this first for every Finance task."
+    )
+
     @tool(
         f"search_{agent_name}_schema",
         args_schema=SchemaSearchInput,
-        description=(
-            f"Find {agent_name}-authorized business tables, columns, relationships, "
-            "and entity types before generating SQL. Call this first for every task."
-        ),
+        description=schema_description,
     )
     async def search_schema(query: str, top_k: int = 6) -> str:
         started_at = perf_counter()

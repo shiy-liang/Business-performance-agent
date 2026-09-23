@@ -16,6 +16,8 @@ from rag.agent.tools.finance import (
 )
 from rag.agent.tools.operations import (
     execute_operations_sql,
+    find_other_comment_category,
+    find_other_comment_product,
     resolve_operations_entity,
     search_customer_reviews,
     search_operations_schema,
@@ -86,6 +88,8 @@ default_tool_registry = ToolRegistry(
         ToolRegistration(resolve_operations_entity, frozenset({"operations"})),
         ToolRegistration(execute_operations_sql, frozenset({"operations"})),
         ToolRegistration(search_customer_reviews, frozenset({"operations"})),
+        ToolRegistration(find_other_comment_product, frozenset({"operations"})),
+        ToolRegistration(find_other_comment_category, frozenset({"operations"})),
     )
 )
 

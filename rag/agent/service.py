@@ -11,6 +11,7 @@ from langchain_core.messages import AnyMessage, HumanMessage
 
 from model.config import load_model_config
 from observability import logger
+from rag.agent.bootstrap import initialize_agent_runtime
 from rag.agent.graph import build_supervisor_graph
 from rag.agent.middleware import AgentLoggingCallback, PublicEventMiddleware
 from rag.agent.run_store import RunRecorder
@@ -38,8 +39,13 @@ async def stream_supervisor(
     )
     run_id = str(uuid4())
     started_at = perf_counter()
-    registry = tool_registry or default_tool_registry
-    active_graph = graph or build_supervisor_graph(tool_registry=registry)
+    if graph is None and tool_registry is None:
+        runtime = initialize_agent_runtime()
+        registry = runtime.tool_registry
+        active_graph = runtime.supervisor_graph
+    else:
+        registry = tool_registry or default_tool_registry
+        active_graph = graph or build_supervisor_graph(tool_registry=registry)
     middleware = PublicEventMiddleware(registry.all_tool_names())
     recorder = RunRecorder(run_id)
     context_token = logger.bind_context(run_id=run_id, agent_name="supervisor")

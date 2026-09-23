@@ -121,6 +121,9 @@ class PublicEventMiddleware:
         ):
             self._announced_specialists.add(name)
             label = "Finance" if name == "finance-agent" else "Operations"
+            skill_items = [f"{label} SQL Query", "SQL Safety"]
+            if label == "Operations":
+                skill_items.insert(0, "Product Review Retrieval")
             translated.extend(
                 [
                     {
@@ -133,8 +136,8 @@ class PublicEventMiddleware:
                     {
                         "event": "skills",
                         "data": {
-                            "items": [f"{label} SQL Query", "SQL Safety"],
-                            "message": f"{label} SQL Query and SQL Safety skills were applied.",
+                            "items": skill_items,
+                            "message": f"{', '.join(skill_items)} skills were applied.",
                         },
                     },
                 ]
@@ -189,6 +192,9 @@ class PublicEventMiddleware:
                                     "valid": valid,
                                     "successful_query_count": int(
                                         validation.get("successful_query_count") or 0
+                                    ),
+                                    "successful_review_tool_count": int(
+                                        validation.get("successful_review_tool_count") or 0
                                     ),
                                     "evidence_count": int(
                                         validation.get("evidence_count") or 0
@@ -264,9 +270,13 @@ class PublicEventMiddleware:
         self._model_turns[agent] = turn
         label = "Finance" if agent == "finance" else "Operations"
         if turn == 1:
-            return f"{label} is identifying the required measures and authorized schema."
+            if agent == "operations":
+                return "Operations is selecting a dedicated workflow or the governed SQL fallback."
+            return "Finance is identifying the required measures and authorized schema."
         if turn == 2:
-            return f"{label} is composing one governed read-only query."
+            if agent == "operations":
+                return "Operations is using the authorized evidence tools for the selected workflow."
+            return "Finance is composing one governed read-only query."
         if turn == 3:
             return f"{label} is checking returned evidence and preparing its finding."
         return f"{label} is correcting an evidence gap using validator feedback."
@@ -328,10 +338,14 @@ class PublicEventMiddleware:
                 "stage": "answering",
                 "message": "Knowledge evidence is ready for final synthesis.",
             }
-        if name == "search_customer_reviews":
+        if name in {
+            "search_customer_reviews",
+            "find_other_comment_product",
+            "find_other_comment_category",
+        }:
             return {
                 "stage": "evidence_validation",
-                "message": "Review evidence is ready; Operations is checking it against the SQL baseline.",
+                "message": "Review evidence is ready; Operations is checking the retrieved feedback.",
             }
         return {
             "stage": "working",
@@ -351,6 +365,8 @@ class PublicEventMiddleware:
             "resolve_operations_entity": "Operations is matching the requested entity to database values.",
             "execute_operations_sql": "Operations is validating and running a read-only SQL query.",
             "search_customer_reviews": "Operations is searching customer review themes with structured filters.",
+            "find_other_comment_product": "Operations is retrieving additional unseen reviews for the selected product.",
+            "find_other_comment_category": "Operations is retrieving additional unseen reviews for the selected category.",
         }
         return messages.get(name, f"Running {name}.")
 
@@ -361,7 +377,11 @@ class PublicEventMiddleware:
                 return f"{name} could not retrieve knowledge evidence."
             count = len(payload.get("matches") or [])
             return f"{name} returned {count} relevant knowledge chunks."
-        if name == "search_customer_reviews" and payload:
+        if name in {
+            "search_customer_reviews",
+            "find_other_comment_product",
+            "find_other_comment_category",
+        } and payload:
             if payload.get("success") is False:
                 return f"{name} could not retrieve customer-review evidence."
             count = len(payload.get("matches") or [])
@@ -389,7 +409,60 @@ class AgentLoggingCallback(AsyncCallbackHandler):
 
     def __init__(self) -> None:
         self._started_at: dict[UUID, float] = {}
+        self._first_token_at: dict[UUID, float] = {}
         self._models: dict[UUID, str] = {}
+        self._phases: dict[UUID, str] = {}
+
+    @staticmethod
+    def _response_phase(kwargs: dict[str, Any]) -> str:
+        tags = {str(tag) for tag in kwargs.get("tags") or []}
+        name = str(kwargs.get("name") or "")
+        if "supervisor-routing" in tags or name == "supervisor_routing_model":
+            return "supervisor_routing"
+        if "supervisor-synthesis" in tags or name == "supervisor_synthesis_model":
+            return "supervisor_synthesis"
+        if "finance" in tags or name == "finance_model":
+            return "finance_specialist"
+        if "operations" in tags or name == "operations_model":
+            return "operations_specialist"
+        return name or "unknown"
+
+    @staticmethod
+    def _usage_tokens(response: LLMResult) -> tuple[int | None, int | None]:
+        candidates: list[Any] = []
+        llm_output = response.llm_output or {}
+        candidates.extend(
+            [
+                llm_output.get("token_usage"),
+                llm_output.get("usage"),
+            ]
+        )
+        for generation_group in response.generations:
+            for generation in generation_group:
+                message = getattr(generation, "message", None)
+                if message is None:
+                    continue
+                candidates.append(getattr(message, "usage_metadata", None))
+                response_metadata = getattr(message, "response_metadata", None) or {}
+                if isinstance(response_metadata, dict):
+                    candidates.extend(
+                        [
+                            response_metadata.get("token_usage"),
+                            response_metadata.get("usage"),
+                        ]
+                    )
+        for usage in candidates:
+            if not isinstance(usage, dict):
+                continue
+            input_tokens = usage.get("prompt_tokens")
+            if input_tokens is None:
+                input_tokens = usage.get("input_tokens")
+            output_tokens = usage.get("completion_tokens")
+            if output_tokens is None:
+                output_tokens = usage.get("output_tokens")
+            if input_tokens is not None or output_tokens is not None:
+                return input_tokens, output_tokens
+        return None, None
 
     async def on_chat_model_start(
         self,
@@ -408,7 +481,38 @@ class AgentLoggingCallback(AsyncCallbackHandler):
         )
         self._started_at[run_id] = perf_counter()
         self._models[run_id] = model
-        logger.model_event(status="started", model=model, operation="responses")
+        phase = self._response_phase(kwargs)
+        self._phases[run_id] = phase
+        logger.model_event(
+            status="started",
+            model=model,
+            operation="responses",
+            response_phase=phase,
+        )
+
+    async def on_llm_new_token(
+        self,
+        token: str,
+        *,
+        run_id: UUID,
+        chunk: Any | None = None,
+        **kwargs: Any,
+    ) -> None:
+        if run_id in self._first_token_at:
+            return
+        chunk_content = getattr(chunk, "content", None)
+        if not token and not content_text(chunk_content):
+            return
+        first_token_at = perf_counter()
+        self._first_token_at[run_id] = first_token_at
+        started_at = self._started_at.get(run_id, first_token_at)
+        logger.model_event(
+            status="first_token",
+            model=self._models.get(run_id, "unknown"),
+            operation="responses",
+            duration_ms=round((first_token_at - started_at) * 1000, 2),
+            response_phase=self._phases.get(run_id, self._response_phase(kwargs)),
+        )
 
     async def on_llm_end(
         self,
@@ -418,15 +522,29 @@ class AgentLoggingCallback(AsyncCallbackHandler):
         **kwargs: Any,
     ) -> None:
         started_at = self._started_at.pop(run_id, perf_counter())
+        completed_at = perf_counter()
+        first_token_at = self._first_token_at.pop(run_id, None)
         model = self._models.pop(run_id, "unknown")
-        usage = (response.llm_output or {}).get("token_usage") or {}
+        phase = self._phases.pop(run_id, "unknown")
+        input_tokens, output_tokens = self._usage_tokens(response)
         logger.model_event(
             status="completed",
             model=model,
             operation="responses",
-            duration_ms=round((perf_counter() - started_at) * 1000, 2),
-            input_tokens=usage.get("prompt_tokens") or usage.get("input_tokens"),
-            output_tokens=usage.get("completion_tokens") or usage.get("output_tokens"),
+            duration_ms=round((completed_at - started_at) * 1000, 2),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            response_phase=phase,
+            time_to_first_token_ms=(
+                round((first_token_at - started_at) * 1000, 2)
+                if first_token_at is not None
+                else None
+            ),
+            generation_duration_ms=(
+                round((completed_at - first_token_at) * 1000, 2)
+                if first_token_at is not None
+                else None
+            ),
         )
 
     async def on_llm_error(
@@ -437,13 +555,21 @@ class AgentLoggingCallback(AsyncCallbackHandler):
         **kwargs: Any,
     ) -> None:
         started_at = self._started_at.pop(run_id, perf_counter())
+        first_token_at = self._first_token_at.pop(run_id, None)
         model = self._models.pop(run_id, "unknown")
+        phase = self._phases.pop(run_id, "unknown")
         logger.model_event(
             status="failed",
             model=model,
             operation="responses",
             duration_ms=round((perf_counter() - started_at) * 1000, 2),
             error_type=type(error).__name__,
+            response_phase=phase,
+            time_to_first_token_ms=(
+                round((first_token_at - started_at) * 1000, 2)
+                if first_token_at is not None
+                else None
+            ),
         )
 
 

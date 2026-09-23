@@ -1,17 +1,31 @@
-# Operations Result Contract
+# Operations Evidence Summary Contract
 
-Return concise Markdown for the Supervisor with these elements:
+Return a compact evidence packet for the Supervisor, not a complete user-facing
+answer. Use this exact Markdown structure:
 
-1. `Finding`: the direct operational result with period and scope.
-2. `Supporting metrics`: only the rows or comparisons required for the finding.
-3. `Interpretation`: aggregation grain, filters, entity resolution, and defaults.
-4. `Limitations`: synthetic data, snapshot constraints, truncation, empty results,
-   or correlation warnings.
-5. `Evidence`: the exact database citation returned by the successful SQL tool.
-   Include exact `[review:...]` citations when semantic review evidence was used.
-6. `Final SQL`: include the successful SQL and parameter values only when the
-   delegated task explicitly requests SQL or audit detail. Otherwise omit it to
-   keep the Supervisor context compact. Never include failed attempts.
+```markdown
+### Scope
+- <resolved scope, filters, and period>
 
-If evidence is unavailable, state that clearly and identify the failed step. Do
-not return JSON and do not write a user-facing executive narrative.
+### Evidence
+- <short factual observation> <exact citation>
+
+### Limitations
+- <only material limitations, or "None">
+```
+
+Rules:
+
+- Use at most six Evidence bullets and keep each bullet factual and compact.
+- Do not add an executive introduction, conclusion, recommendation, greeting, or
+  rhetorical transition. The Supervisor alone writes the user-facing narrative.
+- For a generic SQL task, use the exact database citation returned by the
+  successful SQL tool.
+- For a dedicated product-review task, use exact `[review:...]` citations returned
+  by the review tools. SQL evidence is neither required nor allowed.
+- Do not infer population-level counts, averages, percentages, or prevalence from
+  retrieved review samples.
+- Include final SQL and parameter values only if the delegated task explicitly
+  requests audit details. Never include failed attempts.
+- If evidence is unavailable, state the failed step under Limitations without
+  guessing.

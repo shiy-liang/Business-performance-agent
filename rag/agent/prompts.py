@@ -86,6 +86,15 @@ def load_specialist_components(agent_name: str) -> dict[str, str]:
         "response_contract": _read(PROMPT_ROOT / agent_name / "response_contract.md"),
         "sql_skill": _read(SKILL_ROOT / agent_name / "sql_query.md"),
         "sql_safety": _read(SKILL_ROOT / "common" / "sql_safety.md"),
+        **(
+            {
+                "product_review_retrieval": _read(
+                    SKILL_ROOT / "operations" / "product_review_retrieval.md"
+                )
+            }
+            if agent_name == "operations"
+            else {}
+        ),
     }
 
 
@@ -98,7 +107,10 @@ def build_specialist_prompt(
     """Compose a domain specialist prompt with injectable SQL instructions."""
 
     components = load_specialist_components(agent_name)
-    skills = "\n\n".join((components["sql_skill"], components["sql_safety"]))
+    skill_items = [components["sql_skill"], components["sql_safety"]]
+    if agent_name == "operations":
+        skill_items.insert(0, components["product_review_retrieval"])
+    skills = "\n\n".join(skill_items)
     return inject_template(
         components["system"],
         {

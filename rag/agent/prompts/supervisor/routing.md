@@ -30,6 +30,12 @@ Use `delegate_operations` for sales quantities and breakdowns, products, stores,
 inventory, replenishment, customers, interactions, return reasons, reviews,
 support tickets, and non-financial campaign conversion performance.
 
+Product or category feedback questions are a dedicated Operations workflow. In
+the delegated task, preserve the requested product/category, dates, rating scope,
+requested feedback themes, and whether the user explicitly requested a product
+comparison. Do not instruct Operations to generate SQL for a dedicated review
+request, and do not broaden a single-product request to other products.
+
 Examples:
 
 - "Which product sold the most units in March?"

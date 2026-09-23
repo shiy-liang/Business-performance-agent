@@ -11,7 +11,11 @@ from langchain_core.runnables import RunnableConfig
 
 from observability import logger
 from rag.agent.middleware import content_text
-from rag.agent.specialists.graph import SpecialistName, build_specialist_graph
+from rag.agent.specialists.graph import (
+    SpecialistName,
+    build_specialist_graph,
+    get_default_specialist_graph,
+)
 from rag.agent.tools.registry import ToolRegistry, default_tool_registry
 from rag.agent.validation import validate_specialist_evidence
 
@@ -26,6 +30,9 @@ def _collect_tool_payloads(messages: list[Any]) -> list[dict[str, Any]]:
         except json.JSONDecodeError:
             continue
         if isinstance(payload, dict):
+            tool_name = getattr(message, "name", None)
+            if isinstance(tool_name, str) and tool_name:
+                payload.setdefault("tool", tool_name)
             payloads.append(payload)
     return payloads
 
@@ -63,10 +70,12 @@ async def run_specialist_agent(
 
     started_at = perf_counter()
     registry = tool_registry or default_tool_registry
-    active_graph = graph or build_specialist_graph(
-        agent_name,
-        tool_registry=registry,
-    )
+    if graph is not None:
+        active_graph = graph
+    elif tool_registry is None or registry is default_tool_registry:
+        active_graph = get_default_specialist_graph(agent_name)
+    else:
+        active_graph = build_specialist_graph(agent_name, tool_registry=registry)
     child_config: RunnableConfig = dict(config or {})
     child_config["run_name"] = f"{agent_name}-agent"
     child_config["recursion_limit"] = 16
@@ -79,6 +88,16 @@ async def run_specialist_agent(
                 "attempts": 0,
                 "in_flight": False,
                 "succeeded": False,
+            },
+            "review_runtime_state": {
+                "semantic_calls": 0,
+                "semantic_in_flight": False,
+                "other_comment_calls": 0,
+                "other_comment_in_flight": False,
+                "review_ids": [],
+                "primary_product_name": None,
+                "primary_product_category": None,
+                "comparison_mode": False,
             },
         }
     )
