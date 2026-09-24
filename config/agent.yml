@@ -1,0 +1,4 @@
+operations:
+  # Maximum number of dedicated skill workflows that one delegated task may load.
+  # The generic sql_query fallback is mutually exclusive with dedicated workflows.
+  max_workflows_per_task: 3

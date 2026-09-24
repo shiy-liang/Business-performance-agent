@@ -587,6 +587,58 @@ def _finish_attempt(config: RunnableConfig, *, success: bool) -> None:
         runtime_state["succeeded"] = True
 
 
+def _dedicated_operations_workflows(config: RunnableConfig) -> tuple[str, ...]:
+    """Read dedicated selections without coupling the shared runtime to the loader."""
+
+    configurable = config.get("configurable")
+    if not isinstance(configurable, dict):
+        return ()
+    state = configurable.get("workflow_runtime_state")
+    if not isinstance(state, dict):
+        return ()
+    selected = state.get("selected_skills")
+    if not isinstance(selected, list):
+        return ()
+    return tuple(str(name) for name in selected if str(name) != "sql_query")
+
+
+def _generic_workflow_block(
+    agent_name: SqlAgentName,
+    config: RunnableConfig,
+    tool_name: str,
+) -> str | None:
+    if agent_name != "operations":
+        return None
+    dedicated = _dedicated_operations_workflows(config)
+    if not dedicated:
+        configurable = config.get("configurable")
+        if not isinstance(configurable, dict):
+            configurable = {}
+            config["configurable"] = configurable
+        state = configurable.get("workflow_runtime_state")
+        if not isinstance(state, dict):
+            state = {"selected_skills": [], "loaded": False}
+            configurable["workflow_runtime_state"] = state
+        state["generic_workflow_started"] = True
+        return None
+    return json.dumps(
+        {
+            "success": False,
+            "agent": "operations",
+            "tool": tool_name,
+            "error_type": "dedicated_workflow_selected",
+            "error": (
+                "Generic Operations SQL tools are disabled because dedicated "
+                "workflows were selected for this task."
+            ),
+            "selected_skills": list(dedicated),
+            "retryable": False,
+            "sources": [],
+        },
+        ensure_ascii=False,
+    )
+
+
 def build_sql_tools(agent_name: SqlAgentName) -> tuple[BaseTool, BaseTool, BaseTool]:
     """Build three tools whose domain permission cannot be changed by the model."""
 
@@ -604,9 +656,16 @@ def build_sql_tools(agent_name: SqlAgentName) -> tuple[BaseTool, BaseTool, BaseT
         args_schema=SchemaSearchInput,
         description=schema_description,
     )
-    async def search_schema(query: str, top_k: int = 6) -> str:
+    async def search_schema(
+        query: str,
+        config: RunnableConfig,
+        top_k: int = 6,
+    ) -> str:
         started_at = perf_counter()
         tool_name = f"search_{agent_name}_schema"
+        blocked = _generic_workflow_block(agent_name, config, tool_name)
+        if blocked is not None:
+            return blocked
         logger.tool_event(status="started", tool_name=tool_name, query_length=len(query))
         result = search_schema_catalog(agent_name, query, top_k)
         logger.tool_event(
@@ -629,10 +688,14 @@ def build_sql_tools(agent_name: SqlAgentName) -> tuple[BaseTool, BaseTool, BaseT
     async def resolve_entity(
         entity_type: str,
         user_term: str,
+        config: RunnableConfig,
         limit: int = 8,
     ) -> str:
         started_at = perf_counter()
         tool_name = f"resolve_{agent_name}_entity"
+        blocked = _generic_workflow_block(agent_name, config, tool_name)
+        if blocked is not None:
+            return blocked
         logger.tool_event(
             status="started",
             tool_name=tool_name,
@@ -684,6 +747,9 @@ def build_sql_tools(agent_name: SqlAgentName) -> tuple[BaseTool, BaseTool, BaseT
     ) -> str:
         started_at = perf_counter()
         tool_name = f"execute_{agent_name}_sql"
+        blocked = _generic_workflow_block(agent_name, config, tool_name)
+        if blocked is not None:
+            return blocked
         claim_status, attempt = _claim_attempt(config)
         if claim_status != "permitted":
             if claim_status == "already_succeeded":

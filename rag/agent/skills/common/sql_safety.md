@@ -11,16 +11,18 @@ that dedicated skill and do not run the mandatory SQL sequence below.
 
 ## Mandatory sequence
 
-1. Retrieve the agent-scoped schema.
-2. Resolve uncertain entity values when required.
-3. Generate one explicit-column `SELECT` statement.
-4. Submit the query to the agent-scoped execution tool.
+1. If a product name is fuzzy, non-standard, or cross-language, resolve it with
+   `find_real_name` and use only returned exact database values.
+2. Retrieve the agent-scoped schema.
+3. Resolve other uncertain entity values when required.
+4. Generate one explicit-column `SELECT` statement.
+5. Submit the query to the agent-scoped execution tool.
    Submit exactly one SQL call at a time. Never issue parallel alternatives.
-5. Distinguish validation errors, SQL errors, empty results, and successful data.
-6. Correct only from concrete schema or error evidence, with no more than three
+6. Distinguish validation errors, SQL errors, empty results, and successful data.
+7. Correct only from concrete schema or error evidence, with no more than three
    execution attempts.
-7. Return only the final successful query and its database citation.
-8. Stop SQL execution after the first successful query. Additional attempts exist
+8. Return only the final successful query and its database citation.
+9. Stop SQL execution after the first successful query. Additional attempts exist
    only to correct a failed query, not to collect optional extra breakdowns.
 
 ## Query rules

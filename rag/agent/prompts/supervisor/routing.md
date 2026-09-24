@@ -36,6 +36,26 @@ requested feedback themes, and whether the user explicitly requested a product
 comparison. Do not instruct Operations to generate SQL for a dedicated review
 request, and do not broaden a single-product request to other products.
 
+Questions about the proportion of product-interest events that became purchases
+are also a dedicated Operations workflow. Preserve the user's product wording and
+comparison scope in the delegated task. Do not instruct Operations to generate
+SQL for this metric.
+
+Questions about the proportion of product views that became wishlist or cart
+events are a dedicated Operations workflow as well. Preserve the product wording
+and comparison scope, and do not request generated SQL for this metric.
+
+Lowest-like-rate product rankings are a dedicated Operations workflow using
+`check_less_like`. Lowest-purchase-rate product rankings may be delegated to
+Operations or Finance according to the surrounding question, and use
+`check_less_purchase`. Do not instruct either specialist to generate SQL for
+these Bottom-10 rankings.
+
+Top product interaction-duration rankings are a dedicated Operations workflow
+using `check_most_interact`. Preserve that the ranking combines total and average
+duration and excludes products with fewer than 20 interaction rows. Do not ask
+Operations to generate SQL for this ranking.
+
 Examples:
 
 - "Which product sold the most units in March?"

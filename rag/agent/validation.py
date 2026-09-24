@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from typing import Any, Literal
 
+from rag.agent.workflows import load_operations_workflow_config
+
 
 SpecialistName = Literal["finance", "operations"]
 REVIEW_TOOL_NAMES = frozenset(
@@ -21,6 +23,23 @@ GENERIC_OPERATIONS_TOOL_NAMES = frozenset(
         "execute_operations_sql",
     }
 )
+ARTIFACT_ONLY_TOOL_NAMES = frozenset(
+    {
+        "check_less_like",
+        "check_less_purchase",
+        "check_most_interact",
+    }
+)
+DEDICATED_OPERATIONS_TOOL_TO_WORKFLOW = {
+    "search_customer_reviews": "product_review_retrieval",
+    "find_other_comment_product": "product_review_retrieval",
+    "find_other_comment_category": "product_review_retrieval",
+    "check_purchase_rate": "product_purchase_rate",
+    "check_like_rate": "product_like_rate",
+    "check_less_like": "product_bottom_rates",
+    "check_less_purchase": "product_bottom_rates",
+    "check_most_interact": "product_interaction_duration",
+}
 
 
 def validate_specialist_evidence(
@@ -66,6 +85,29 @@ def validate_specialist_evidence(
         payload for payload in review_payloads if payload.get("success") is False
     ]
     uses_review_workflow = agent_name == "operations" and bool(review_payloads)
+    generic_operations_calls = [
+        payload
+        for payload in tool_payloads
+        if payload.get("tool") in GENERIC_OPERATIONS_TOOL_NAMES
+    ]
+    dedicated_operations_calls = [
+        payload
+        for payload in tool_payloads
+        if payload.get("tool") in DEDICATED_OPERATIONS_TOOL_TO_WORKFLOW
+    ]
+    workflow_names = {
+        DEDICATED_OPERATIONS_TOOL_TO_WORKFLOW[str(payload.get("tool"))]
+        for payload in dedicated_operations_calls
+    }
+    for payload in tool_payloads:
+        if (
+            payload.get("tool") == "load_operations_skills"
+            and payload.get("success") is True
+            and isinstance(payload.get("selected_skills"), list)
+        ):
+            workflow_names.update(str(name) for name in payload["selected_skills"])
+    if generic_operations_calls:
+        workflow_names.add("sql_query")
 
     if not answer.strip():
         errors.append("The specialist returned no final analysis.")
@@ -81,20 +123,26 @@ def validate_specialist_evidence(
                 "The dedicated product-review workflow did not call semantic review search first."
             )
         if not any(payload.get("success") is True for payload in semantic_searches):
-            errors.append("No successful semantic customer-review search was returned.")
-        if not successful_review_retrievals:
-            errors.append("No successful customer-review evidence was returned.")
-        generic_operations_calls = [
-            payload
-            for payload in tool_payloads
-            if payload.get("tool") in GENERIC_OPERATIONS_TOOL_NAMES
-        ]
-        if successful_queries or generic_operations_calls:
+            if successful_queries:
+                warnings.append(
+                    "No successful customer-review evidence was returned; other "
+                    "workflow evidence remains available."
+                )
+            else:
+                errors.append("No successful semantic customer-review search was returned.")
+    if "sql_query" in workflow_names and len(workflow_names) > 1:
+        errors.append(
+            "Dedicated Operations workflows cannot be mixed with the generic SQL fallback."
+        )
+    if agent_name == "operations":
+        maximum = load_operations_workflow_config().max_workflows_per_task
+        if len(workflow_names) > maximum:
             errors.append(
-                "The dedicated product-review workflow mixed generic SQL tools with review tools."
+                f"Operations used {len(workflow_names)} workflows, exceeding the "
+                f"configured maximum of {maximum}."
             )
-    elif not successful_queries:
-        errors.append("No successful specialist SQL evidence was returned.")
+    if not successful_queries and not successful_review_retrievals:
+        errors.append("No successful specialist evidence was returned.")
 
     expected_prefix = f"[db:{agent_name}:"
     source_citations = {
@@ -117,7 +165,14 @@ def validate_specialist_evidence(
     if missing_sources:
         errors.append("Successful SQL evidence was not propagated to the source list.")
 
-    uncited = sorted(citation for citation in successful_citations if citation not in answer)
+    citations_required_in_answer = {
+        str(payload["citation"])
+        for payload in successful_queries
+        if payload.get("tool") not in ARTIFACT_ONLY_TOOL_NAMES
+    }
+    uncited = sorted(
+        citation for citation in citations_required_in_answer if citation not in answer
+    )
     if uncited:
         errors.append("The specialist conclusion omitted its database citation.")
 
@@ -149,6 +204,8 @@ def validate_specialist_evidence(
         "warnings": warnings,
         "successful_query_count": len(successful_queries),
         "successful_review_tool_count": len(successful_review_retrievals),
+        "workflow_count": len(workflow_names),
+        "workflows": sorted(workflow_names),
         "evidence_count": len(source_citations),
     }
 
