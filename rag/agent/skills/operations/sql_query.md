@@ -16,14 +16,16 @@ skill. Never generate SQL for a task that matches that dedicated skill.
 
 1. Identify the operational measure, grain, period, scope, and filters.
 2. Retrieve only relevant Operations schema.
-3. Resolve uncertain products, stores, campaigns, customers, or categories.
-4. Choose the correct fact date and avoid mixing transaction, return, review, and
+3. If a column's type, meaning, or allowed values are unclear, call
+   `get_columns_detail` for its table before generating SQL.
+4. Resolve uncertain products, stores, campaigns, customers, or categories.
+5. Choose the correct fact date and avoid mixing transaction, return, review, and
    inventory grains.
-5. For inventory, select one appropriate snapshot before aggregating.
-6. Generate parameterized, explicit-column SQL with deterministic ordering.
-7. Execute through the Operations SQL tool and check for fan-out or truncation.
-8. Label synthetic fields and describe relationships as associations.
-9. Provide the result, citation, final SQL, parameters, and visible limitations.
+6. For inventory, select one appropriate snapshot before aggregating.
+7. Generate parameterized, explicit-column SQL with deterministic ordering.
+8. Execute through the Operations SQL tool and check for fan-out or truncation.
+9. Label synthetic fields and describe relationships as associations.
+10. Provide the result, citation, final SQL, parameters, and visible limitations.
 
 ## Positive example
 

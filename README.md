@@ -125,7 +125,7 @@ python database/update_expenses.py
 | `GET` | `/api/knowledge/files` | List registered knowledge-base source files |
 | `GET` | `/api/knowledge/files/{file_id}/download` | Download a managed source file |
 | `DELETE` | `/api/knowledge/files/{file_id}` | Delete a source file, its record, and its vector chunks |
-| `POST` | `/api/knowledge/reviews/sync` | Embed customer reviews whose embedding value is null |
+| `POST` | `/api/knowledge/reviews/sync` | Embed customer reviews and support tickets whose embedding value is null |
 
 The month-based endpoints accept `month=YYYY-MM`. Finance, inventory and product
 sales also accept `store_id`; campaign and support-ticket source data do not have
@@ -141,7 +141,8 @@ persisted and disappear whenever the FastAPI process restarts.
 
 `database/schema.sql` creates the PostgreSQL schema and pgvector extension.
 Uploaded file chunks are indexed in `unstructured_knowledge_chunks`, while the
-review sync endpoint populates row-level embeddings in `customer_reviews`.
+review sync endpoint populates row-level embeddings in `customer_reviews` and
+`support_tickets`.
 
 Product costs, inventory, expenses, returns/refunds and campaign attribution are
 synthetic prototype data. Financial metrics that depend on them are labelled as
@@ -202,6 +203,10 @@ The current tools are:
 - `find_other_comment_product`, `find_other_comment_category`: Operations-only
   fixed-query expansion tools. They exclude reviews already returned in the run,
   return at most ten rows each, and share a two-call limit.
+- `check_concrete_problem`: Operations-only semantic retrieval over concrete
+  descriptions in `support_tickets.notes`, with optional submission-date,
+  category, priority, and resolution-status filters. It is limited to one call
+  per Operations run and returns at most ten ticket examples.
 - `check_purchase_rate`: Operations-only fixed-query tool for the ratio of
   `purchase` events to combined `checkout`, `wishlist_add`, and `add_to_cart`
   events for one canonical product name.
@@ -239,9 +244,11 @@ Every specialist result passes a deterministic evidence check before the
 Supervisor may use it. Generic workflows require a successful domain-matching SQL
 result. The dedicated product-review workflow instead requires a successful
 `search_customer_reviews` call, forbids mixing in generic SQL tools, and validates
-the returned review citations. Validation outcomes are emitted as public `validation` events.
-`AGENT_KNOWLEDGE_MIN_SIMILARITY` and `AGENT_REVIEW_MIN_SIMILARITY` suppress weak
-vector matches.
+the returned review citations. The dedicated support-ticket problem workflow
+accepts `check_concrete_problem` evidence and validates `[ticket:...]` citations.
+Validation outcomes are emitted as public `validation` events.
+`AGENT_KNOWLEDGE_MIN_SIMILARITY`, `AGENT_REVIEW_MIN_SIMILARITY`, and
+`AGENT_TICKET_MIN_SIMILARITY` suppress weak vector matches.
 
 Specialists return compact internal evidence summaries. Only the Supervisor emits
 the user-facing answer; Supervisor routing output is not streamed as answer text.

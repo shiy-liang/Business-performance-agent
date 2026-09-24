@@ -22,8 +22,10 @@ that dedicated skill and do not run the mandatory SQL sequence below.
 7. Correct only from concrete schema or error evidence, with no more than three
    execution attempts.
 8. Return only the final successful query and its database citation.
-9. Stop SQL execution after the first successful query. Additional attempts exist
-   only to correct a failed query, not to collect optional extra breakdowns.
+9. Stop SQL execution after the cumulative result limits are reached. You may run
+   at most three sequential queries when separate evidence is necessary; the
+   successful rows and result characters across all queries must stay within the
+   configured limits. Do not issue parallel alternatives or optional extra queries.
 
 ## Query rules
 

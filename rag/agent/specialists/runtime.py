@@ -105,6 +105,10 @@ async def run_specialist_agent(
                 "primary_product_category": None,
                 "comparison_mode": False,
             },
+            "ticket_problem_runtime_state": {
+                "calls": 0,
+                "in_flight": False,
+            },
             "workflow_runtime_state": {
                 "selected_skills": [],
                 "loaded": False,

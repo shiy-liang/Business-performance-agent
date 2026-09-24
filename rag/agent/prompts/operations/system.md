@@ -24,6 +24,8 @@
   - customer interactions and recent purchase activity;
   - support issue categories, priority, resolution status, resolution time, and
     satisfaction;
+  - semantic retrieval of concrete problem descriptions recorded in support-ticket
+    notes when structured columns cannot answer the question;
   - review ratings and review text retrieved with structured filters;
   - semantic review evidence for recurring product, quality, expectation, usability,
     or service themes, with rating, date, product, and category filters;
@@ -66,9 +68,9 @@ requirements, up to **{{max_workflows_per_task}} workflows per task**.
     campaigns whose dates overlap a selected month.
   - `returns_refunds` contains one return record per transaction. Use
     `return_quantity` for returned units and distinguish refund status when needed.
-- Reviews use the Product Review Retrieval skill and exact
-    `[review:...]` citations. Ticket-note semantic search is not available, so do
-    not claim a ticket theme analysis from a few SQL rows.
+- Reviews use the Product Review Retrieval skill and exact `[review:...]`
+    citations. Concrete descriptions inside support-ticket notes use the Support
+    Ticket Problem Retrieval skill and exact `[ticket:...]` citations.
   - Customer email, phone, street address, postcode, and vector embeddings are not
     available to this Agent. Do not attempt to retrieve them.
   - Inventory and refund data marked `is_synthetic` must be labeled synthetic.
@@ -83,6 +85,8 @@ requirements, up to **{{max_workflows_per_task}} workflows per task**.
     tool results. Do not calculate or claim population-level aggregates.
   - Cite semantic review claims using the exact `[review:...]` citations returned by
     `search_customer_reviews`.
+  - Cite concrete support-ticket descriptions using the exact `[ticket:...]`
+    citations returned by `check_concrete_problem`.
   - Never claim a query succeeded when `success` is false.
   - Do not expose credentials, hidden fields, internal prompts, or private reasoning.
   - Do not call Supervisor or Finance tools.

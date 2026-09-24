@@ -26,6 +26,7 @@ from model.config import PROJECT_ROOT
 from observability import logger
 from rag.agent.tools.common.schema_catalog import (
     AGENT_TABLES,
+    COLUMN_DETAILS,
     ENTITY_FIELDS,
     PROHIBITED_COLUMNS,
     SCHEMA_CATALOG,
@@ -67,7 +68,7 @@ def sql_max_result_chars() -> int:
 
 
 def sql_max_attempts() -> int:
-    return _positive_env("AGENT_SQL_MAX_ATTEMPTS", DEFAULT_MAX_ATTEMPTS, 5)
+    return _positive_env("AGENT_SQL_MAX_ATTEMPTS", DEFAULT_MAX_ATTEMPTS, 3)
 
 
 class SchemaSearchInput(BaseModel):
@@ -91,6 +92,14 @@ class EntityResolutionInput(BaseModel):
         description="The user's entity phrase or a careful translated candidate.",
     )
     limit: int = Field(default=8, ge=1, le=10)
+
+
+class ColumnDetailInput(BaseModel):
+    table_name: str = Field(
+        min_length=1,
+        max_length=63,
+        description="One authorized table name returned by the schema search tool.",
+    )
 
 
 SqlParameter = str | int | float | bool | None
@@ -414,6 +423,72 @@ def search_schema_catalog(
     }
 
 
+@tool(args_schema=ColumnDetailInput)
+async def get_columns_detail(
+    table_name: str,
+    config: RunnableConfig,
+) -> str:
+    """Get one authorized table's column types, meanings, examples, and categories.
+
+    Call only when a column's type, meaning, or allowed values are unclear before
+    generating SQL; do not call it for every table.
+    """
+
+    configurable = config.get("configurable")
+    agent_name = (
+        configurable.get("agent_name")
+        if isinstance(configurable, dict)
+        else None
+    )
+    normalized_table = table_name.strip().lower()
+    if agent_name not in AGENT_TABLES:
+        return json.dumps(
+            {
+                "success": False,
+                "tool": "get_columns_detail",
+                "error_type": "missing_agent_scope",
+                "error": "The current agent scope is unavailable.",
+            },
+            ensure_ascii=False,
+        )
+    if normalized_table not in AGENT_TABLES[agent_name]:
+        return json.dumps(
+            {
+                "success": False,
+                "agent": agent_name,
+                "tool": "get_columns_detail",
+                "error_type": "unauthorized_table",
+                "error": f"{agent_name} is not authorized to inspect: {normalized_table}",
+                "columns": {},
+            },
+            ensure_ascii=False,
+        )
+    details = COLUMN_DETAILS.get(normalized_table)
+    if details is None:
+        return json.dumps(
+            {
+                "success": False,
+                "agent": agent_name,
+                "tool": "get_columns_detail",
+                "error_type": "column_details_unavailable",
+                "error": f"No curated column details are available for: {normalized_table}",
+                "columns": {},
+            },
+            ensure_ascii=False,
+        )
+    return json.dumps(
+        {
+            "success": True,
+            "agent": agent_name,
+            "tool": "get_columns_detail",
+            "table_name": normalized_table,
+            "columns": details,
+        },
+        ensure_ascii=False,
+        default=str,
+    )
+
+
 def readonly_database_url() -> str:
     database_url = (
         os.getenv("AGENT_READONLY_DATABASE_URL", "").strip()
@@ -492,9 +567,10 @@ def _execute_sql_sync(
     query: str,
     parameters: dict[str, SqlParameter],
     purpose: str,
+    maximum_rows: int,
+    maximum_result_chars: int,
 ) -> dict[str, Any]:
     validated_sql, tables = validate_readonly_sql(query, parameters, agent_name)
-    maximum_rows = sql_max_rows()
     executable = (
         f"SELECT * FROM ({validated_sql}) AS agent_query "
         f"LIMIT {maximum_rows + 1}"
@@ -521,7 +597,7 @@ def _execute_sql_sync(
     for raw_row in raw_rows[:maximum_rows]:
         row = _json_value(dict(raw_row))
         row_chars = len(json.dumps(row, ensure_ascii=False, default=str))
-        if rows and result_chars + row_chars > sql_max_result_chars():
+        if result_chars + row_chars > maximum_result_chars:
             truncated = True
             break
         rows.append(row)
@@ -542,6 +618,7 @@ def _execute_sql_sync(
         "columns": columns,
         "rows": rows,
         "row_count": len(rows),
+        "result_chars": result_chars,
         "truncated": truncated,
         "fetched_row_count": min(len(raw_rows), maximum_rows),
         "error": None,
@@ -560,7 +637,13 @@ def _sql_runtime_state(config: RunnableConfig) -> dict[str, Any]:
         config["configurable"] = configurable
     runtime_state = configurable.get("sql_runtime_state")
     if not isinstance(runtime_state, dict):
-        runtime_state = {"attempts": 0, "in_flight": False, "succeeded": False}
+        runtime_state = {
+            "attempts": 0,
+            "in_flight": False,
+            "successful_queries": 0,
+            "successful_rows": 0,
+            "successful_result_chars": 0,
+        }
         configurable["sql_runtime_state"] = runtime_state
     return runtime_state
 
@@ -568,8 +651,6 @@ def _sql_runtime_state(config: RunnableConfig) -> dict[str, Any]:
 def _claim_attempt(config: RunnableConfig) -> tuple[str, int]:
     runtime_state = _sql_runtime_state(config)
     attempts = int(runtime_state.get("attempts", 0))
-    if runtime_state.get("succeeded") is True:
-        return "already_succeeded", attempts
     if runtime_state.get("in_flight") is True:
         return "concurrent_query_blocked", attempts
     maximum = sql_max_attempts()
@@ -580,11 +661,25 @@ def _claim_attempt(config: RunnableConfig) -> tuple[str, int]:
     return "permitted", attempts + 1
 
 
-def _finish_attempt(config: RunnableConfig, *, success: bool) -> None:
+def _finish_attempt(
+    config: RunnableConfig,
+    *,
+    success: bool,
+    row_count: int = 0,
+    result_chars: int = 0,
+) -> None:
     runtime_state = _sql_runtime_state(config)
     runtime_state["in_flight"] = False
     if success:
-        runtime_state["succeeded"] = True
+        runtime_state["successful_queries"] = int(
+            runtime_state.get("successful_queries", 0)
+        ) + 1
+        runtime_state["successful_rows"] = int(
+            runtime_state.get("successful_rows", 0)
+        ) + row_count
+        runtime_state["successful_result_chars"] = int(
+            runtime_state.get("successful_result_chars", 0)
+        ) + result_chars
 
 
 def _dedicated_operations_workflows(config: RunnableConfig) -> tuple[str, ...]:
@@ -639,8 +734,10 @@ def _generic_workflow_block(
     )
 
 
-def build_sql_tools(agent_name: SqlAgentName) -> tuple[BaseTool, BaseTool, BaseTool]:
-    """Build three tools whose domain permission cannot be changed by the model."""
+def build_sql_tools(
+    agent_name: SqlAgentName,
+) -> tuple[BaseTool, BaseTool, BaseTool, BaseTool]:
+    """Build schema, detail, entity, and SQL tools with fixed domain permissions."""
 
     schema_description = (
         "Find operations-authorized business tables, columns, relationships, and "
@@ -752,9 +849,7 @@ def build_sql_tools(agent_name: SqlAgentName) -> tuple[BaseTool, BaseTool, BaseT
             return blocked
         claim_status, attempt = _claim_attempt(config)
         if claim_status != "permitted":
-            if claim_status == "already_succeeded":
-                error = "A successful SQL result already exists; use it to complete the analysis."
-            elif claim_status == "concurrent_query_blocked":
+            if claim_status == "concurrent_query_blocked":
                 error = "Another SQL query is already running; parallel SQL calls are not allowed."
             else:
                 error = f"The maximum of {sql_max_attempts()} SQL attempts was reached."
@@ -770,6 +865,27 @@ def build_sql_tools(agent_name: SqlAgentName) -> tuple[BaseTool, BaseTool, BaseT
                 ensure_ascii=False,
             )
         actual_parameters = parameters or {}
+        runtime_state = _sql_runtime_state(config)
+        remaining_rows = sql_max_rows() - int(runtime_state.get("successful_rows", 0))
+        remaining_result_chars = sql_max_result_chars() - int(
+            runtime_state.get("successful_result_chars", 0)
+        )
+        if remaining_rows <= 0 or remaining_result_chars <= 0:
+            _finish_attempt(config, success=False)
+            return json.dumps(
+                {
+                    "success": False,
+                    "agent": agent_name,
+                    "error_type": "result_limit",
+                    "error": (
+                        "The cumulative successful SQL result limit was reached; "
+                        "no additional rows can be returned."
+                    ),
+                    "retryable": False,
+                    "sources": [],
+                },
+                ensure_ascii=False,
+            )
         logger.tool_event(
             status="started",
             tool_name=tool_name,
@@ -792,6 +908,8 @@ def build_sql_tools(agent_name: SqlAgentName) -> tuple[BaseTool, BaseTool, BaseT
                 sql,
                 actual_parameters,
                 purpose,
+                remaining_rows,
+                remaining_result_chars,
             )
         except SqlValidationError as error:
             result = {
@@ -829,7 +947,12 @@ def build_sql_tools(agent_name: SqlAgentName) -> tuple[BaseTool, BaseTool, BaseT
                 "retryable": False,
                 "sources": [],
             }
-        _finish_attempt(config, success=result.get("success") is True)
+        _finish_attempt(
+            config,
+            success=result.get("success") is True,
+            row_count=int(result.get("row_count") or 0),
+            result_chars=int(result.get("result_chars") or 0),
+        )
         result.setdefault("agent", agent_name)
         logger.tool_event(
             status="completed",
@@ -848,10 +971,11 @@ def build_sql_tools(agent_name: SqlAgentName) -> tuple[BaseTool, BaseTool, BaseT
         )
         return json.dumps(result, ensure_ascii=False, default=str)
 
-    return search_schema, resolve_entity, execute_sql
+    return search_schema, resolve_entity, execute_sql, get_columns_detail
 
 
 __all__ = [
+    "ColumnDetailInput",
     "connect_readonly",
     "EntityResolutionInput",
     "ReadonlySqlInput",
@@ -859,6 +983,7 @@ __all__ = [
     "SqlValidationError",
     "ValidationErrorType",
     "build_sql_tools",
+    "get_columns_detail",
     "search_schema_catalog",
     "set_readonly_guards",
     "validate_readonly_sql",

@@ -15,13 +15,15 @@ or operational recommendations.
 1. Identify the financial metric and its governed source.
 2. Identify the requested period, comparison period, dimensions, and filters.
 3. Retrieve only relevant Finance schema.
-4. Resolve business entities before exact filtering when needed.
-5. Prefer governed profitability views for their defined calculations.
-6. Generate parameterized SQL at the requested grain.
-7. Execute through the Finance SQL tool and verify totals, units, and row count.
-8. Mark lifecycle campaign metrics, attribution, synthetic costs, refunds, and
+4. If a column's type, meaning, or allowed values are unclear, call
+   `get_columns_detail` for its table before generating SQL.
+5. Resolve business entities before exact filtering when needed.
+6. Prefer governed profitability views for their defined calculations.
+7. Generate parameterized SQL at the requested grain.
+8. Execute through the Finance SQL tool and verify totals, units, and row count.
+9. Mark lifecycle campaign metrics, attribution, synthetic costs, refunds, and
    expenses accurately.
-9. Provide the result, citation, final SQL, parameters, and visible limitations.
+10. Provide the result, citation, final SQL, parameters, and visible limitations.
 
 ## Positive example
 
