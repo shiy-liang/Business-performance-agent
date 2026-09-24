@@ -56,6 +56,14 @@ using `check_most_interact`. Preserve that the ranking combines total and averag
 duration and excludes products with fewer than 20 interaction rows. Do not ask
 Operations to generate SQL for this ranking.
 
+Questions that require the concrete narrative inside support-ticket notes, such
+as what payment failures users described or what happened in specific incidents,
+use the dedicated Support Ticket Problem Retrieval workflow. Preserve the issue
+wording and explicit dates or status filters. Do not ask Operations to generate
+SQL for semantic interpretation of ticket notes. Structured ticket counts,
+priorities, statuses, resolution times, and satisfaction metrics remain ordinary
+structured-data questions.
+
 Examples:
 
 - "Which product sold the most units in March?"

@@ -199,6 +199,9 @@ class PublicEventMiddleware:
                                     "successful_review_tool_count": int(
                                         validation.get("successful_review_tool_count") or 0
                                     ),
+                                    "successful_ticket_tool_count": int(
+                                        validation.get("successful_ticket_tool_count") or 0
+                                    ),
                                     "workflow_count": int(
                                         validation.get("workflow_count") or 0
                                     ),
@@ -390,6 +393,11 @@ class PublicEventMiddleware:
                 "stage": "evidence_validation",
                 "message": "The interaction-duration product ranking is ready for validation.",
             }
+        if name == "check_concrete_problem":
+            return {
+                "stage": "evidence_validation",
+                "message": "Concrete support-ticket evidence is ready for validation.",
+            }
         if name in {
             "search_customer_reviews",
             "find_other_comment_product",
@@ -417,6 +425,7 @@ class PublicEventMiddleware:
             "check_less_like": "Reading the ten lowest like-rate products from the metrics view.",
             "check_less_purchase": "Reading the ten lowest purchase-rate products from the metrics view.",
             "check_most_interact": "Ranking products by total and average interaction duration.",
+            "check_concrete_problem": "Operations is searching concrete descriptions in support-ticket notes.",
             "search_finance_schema": "Finance is selecting authorized tables and columns.",
             "resolve_finance_entity": "Finance is matching the requested entity to database values.",
             "execute_finance_sql": "Finance is validating and running a read-only SQL query.",
@@ -446,6 +455,10 @@ class PublicEventMiddleware:
             return f"{name} returned {len(payload.get('items') or [])} ranked products with metric values."
         if name == "check_most_interact" and payload is not None:
             return f"{name} returned {len(payload.get('items') or [])} ranked products with interaction metrics."
+        if name == "check_concrete_problem" and payload is not None:
+            if payload.get("success") is False:
+                return f"{name} could not retrieve concrete support-ticket evidence."
+            return f"{name} returned {len(payload.get('matches') or [])} relevant support tickets."
         if name == "search_knowledge" and payload:
             if payload.get("success") is False:
                 return f"{name} could not retrieve knowledge evidence."

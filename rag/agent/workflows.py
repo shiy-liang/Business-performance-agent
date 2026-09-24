@@ -34,6 +34,11 @@ class SkillDefinition:
 
 OPERATIONS_SKILLS: tuple[SkillDefinition, ...] = (
     SkillDefinition(
+        "support_ticket_problem_retrieval",
+        "Support Ticket Problem Retrieval",
+        SKILL_ROOT / "operations" / "support_ticket_problem_retrieval.md",
+    ),
+    SkillDefinition(
         "product_review_retrieval",
         "Product Review Retrieval",
         SKILL_ROOT / "operations" / "product_review_retrieval.md",

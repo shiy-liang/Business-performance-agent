@@ -11,12 +11,14 @@ from rag.agent.state import AgentName
 from rag.agent.tools.common.knowledge import search_knowledge
 from rag.agent.tools.common.product_metrics import check_less_like, check_less_purchase
 from rag.agent.tools.common.products import find_real_name
+from rag.agent.tools.common.sql_runtime import get_columns_detail
 from rag.agent.tools.finance import (
     execute_finance_sql,
     resolve_finance_entity,
     search_finance_schema,
 )
 from rag.agent.tools.operations import (
+    check_concrete_problem,
     check_like_rate,
     check_most_interact,
     check_purchase_rate,
@@ -92,6 +94,7 @@ default_tool_registry = ToolRegistry(
         ToolRegistration(search_finance_schema, frozenset({"finance"})),
         ToolRegistration(resolve_finance_entity, frozenset({"finance"})),
         ToolRegistration(execute_finance_sql, frozenset({"finance"})),
+        ToolRegistration(get_columns_detail, frozenset({"finance", "operations"})),
         ToolRegistration(search_operations_schema, frozenset({"operations"})),
         ToolRegistration(resolve_operations_entity, frozenset({"operations"})),
         ToolRegistration(execute_operations_sql, frozenset({"operations"})),
@@ -100,6 +103,7 @@ default_tool_registry = ToolRegistry(
         ToolRegistration(check_most_interact, frozenset({"operations"})),
         ToolRegistration(check_purchase_rate, frozenset({"operations"})),
         ToolRegistration(load_operations_skills, frozenset({"operations"})),
+        ToolRegistration(check_concrete_problem, frozenset({"operations"})),
         ToolRegistration(search_customer_reviews, frozenset({"operations"})),
         ToolRegistration(find_other_comment_product, frozenset({"operations"})),
         ToolRegistration(find_other_comment_category, frozenset({"operations"})),

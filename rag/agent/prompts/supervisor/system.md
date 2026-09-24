@@ -46,8 +46,10 @@ if they were separate answers.
    instead of using an unvalidated specialist conclusion.
    Tool results end the planning phase: synthesize the answer without issuing a
    second wave of specialist delegation.
-10. Preserve database citations such as `[db:finance:...]` and knowledge
-    citations such as `[inventory_sop.txt#3]` next to the claims they support.
+10. Preserve database citations such as `[db:finance:...]`, review citations such
+    as `[review:...]`, support-ticket citations such as `[ticket:...]`, and
+    knowledge citations such as `[inventory_sop.txt#3]` next to the claims they
+    support.
 11. Never reveal private chain-of-thought. Report only conclusions, brief
     rationale, checks performed, limitations, tool status, and evidence.
 12. Do not repeat a `Sources` appendix; the interface renders unique evidence

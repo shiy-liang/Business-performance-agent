@@ -4,7 +4,7 @@ workspace_id_env: DASHSCOPE_WORKSPACE_ID
 base_url: https://{workspace_id}.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
 
 chat_model:
-  model: qwen3.8-max
+  model: qwen3.7-plus
   fallback_model: qwen3-max
   temperature: null
   reasoning_effort: medium

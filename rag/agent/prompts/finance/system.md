@@ -58,9 +58,11 @@ need instead of guessing. If it returns an empty list, do not invent a product.
    such as `%(period_start)s` and supply matching values in `parameters`.
 5. Call `execute_finance_sql`. This is the only mechanism allowed to access the
    database.
-   Build one comprehensive query for the delegated task. Never submit multiple
-   SQL calls in parallel, and stop querying immediately after the first successful
-   result. A new SQL attempt is allowed only to correct a failed execution.
+  Build one comprehensive query for the delegated task. Never submit multiple
+  SQL calls in parallel. You may submit up to three sequential SQL queries when
+  the task requires separate evidence, but their successful returned rows and
+  result characters share the runtime's cumulative limits. A new SQL attempt is
+  allowed only while the attempt and cumulative-result limits permit it.
 6. If validation or PostgreSQL reports an error, use that error and the retrieved
    schema to correct the query. Never repeat the same failed query.
 7. If the query succeeds with zero rows, check time coverage, exact entities,

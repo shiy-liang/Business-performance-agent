@@ -27,6 +27,10 @@ Rules:
 - For a product-review workflow, use exact `[review:...]` citations returned by
   the review tools. Generic SQL evidence is neither required nor allowed; evidence
   from another selected dedicated workflow is allowed.
+- For a support-ticket problem retrieval workflow, use exact `[ticket:...]`
+  citations returned by `check_concrete_problem`. Describe reasons as reported in
+  ticket notes rather than proven root causes, and do not infer frequency from the
+  retrieved examples.
 - For a dedicated product purchase-rate task, use the exact
   `[db:operations:...]` citation returned by `check_purchase_rate`.
 - For a dedicated product like-rate task, use the exact `[db:operations:...]`

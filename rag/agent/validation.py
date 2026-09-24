@@ -16,6 +16,7 @@ REVIEW_TOOL_NAMES = frozenset(
         "find_other_comment_category",
     }
 )
+TICKET_PROBLEM_TOOL_NAMES = frozenset({"check_concrete_problem"})
 GENERIC_OPERATIONS_TOOL_NAMES = frozenset(
     {
         "search_operations_schema",
@@ -31,6 +32,7 @@ ARTIFACT_ONLY_TOOL_NAMES = frozenset(
     }
 )
 DEDICATED_OPERATIONS_TOOL_TO_WORKFLOW = {
+    "check_concrete_problem": "support_ticket_problem_retrieval",
     "search_customer_reviews": "product_review_retrieval",
     "find_other_comment_product": "product_review_retrieval",
     "find_other_comment_category": "product_review_retrieval",
@@ -65,6 +67,7 @@ def validate_specialist_evidence(
         if payload.get("success") is False
         and payload.get("agent") == agent_name
         and payload.get("tool") not in REVIEW_TOOL_NAMES
+        and payload.get("tool") not in TICKET_PROBLEM_TOOL_NAMES
         and payload.get("error_type")
         not in {
             None,
@@ -83,6 +86,21 @@ def validate_specialist_evidence(
     ]
     failed_review_searches = [
         payload for payload in review_payloads if payload.get("success") is False
+    ]
+    ticket_problem_payloads = [
+        payload
+        for payload in tool_payloads
+        if payload.get("tool") in TICKET_PROBLEM_TOOL_NAMES
+    ]
+    successful_ticket_problem_retrievals = [
+        payload
+        for payload in ticket_problem_payloads
+        if payload.get("success") is True
+    ]
+    failed_ticket_problem_retrievals = [
+        payload
+        for payload in ticket_problem_payloads
+        if payload.get("success") is False
     ]
     uses_review_workflow = agent_name == "operations" and bool(review_payloads)
     generic_operations_calls = [
@@ -141,7 +159,11 @@ def validate_specialist_evidence(
                 f"Operations used {len(workflow_names)} workflows, exceeding the "
                 f"configured maximum of {maximum}."
             )
-    if not successful_queries and not successful_review_retrievals:
+    if (
+        not successful_queries
+        and not successful_review_retrievals
+        and not successful_ticket_problem_retrievals
+    ):
         errors.append("No successful specialist evidence was returned.")
 
     expected_prefix = f"[db:{agent_name}:"
@@ -182,7 +204,17 @@ def validate_specialist_evidence(
     if review_citations and not any(citation in answer for citation in review_citations):
         errors.append("Customer-review evidence was retrieved but not cited in the conclusion.")
 
-    answer_citations = set(re.findall(r"\[(?:db|review):[^\]\r\n]+\]", answer))
+    ticket_citations = {
+        citation for citation in source_citations if citation.startswith("[ticket:")
+    }
+    if ticket_citations and not any(citation in answer for citation in ticket_citations):
+        errors.append(
+            "Support-ticket problem evidence was retrieved but not cited in the conclusion."
+        )
+
+    answer_citations = set(
+        re.findall(r"\[(?:db|review|ticket):[^\]\r\n]+\]", answer)
+    )
     unsupported_citations = sorted(answer_citations - source_citations)
     if unsupported_citations:
         errors.append("The specialist conclusion contains a citation with no tool evidence.")
@@ -197,6 +229,10 @@ def validate_specialist_evidence(
         )
     if failed_review_searches:
         warnings.append("At least one customer-review retrieval was unavailable or blocked.")
+    if failed_ticket_problem_retrievals:
+        warnings.append(
+            "At least one concrete support-ticket retrieval was unavailable or blocked."
+        )
 
     return {
         "valid": not errors,
@@ -204,6 +240,7 @@ def validate_specialist_evidence(
         "warnings": warnings,
         "successful_query_count": len(successful_queries),
         "successful_review_tool_count": len(successful_review_retrievals),
+        "successful_ticket_tool_count": len(successful_ticket_problem_retrievals),
         "workflow_count": len(workflow_names),
         "workflows": sorted(workflow_names),
         "evidence_count": len(source_citations),
