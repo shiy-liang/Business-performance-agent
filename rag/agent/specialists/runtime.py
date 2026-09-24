@@ -23,11 +23,17 @@ from rag.agent.validation import validate_specialist_evidence
 def _collect_tool_payloads(messages: list[Any]) -> list[dict[str, Any]]:
     payloads: list[dict[str, Any]] = []
     for message in messages:
-        if not isinstance(message, ToolMessage) or not isinstance(message.content, str):
+        if not isinstance(message, ToolMessage):
             continue
-        try:
-            payload = json.loads(message.content)
-        except json.JSONDecodeError:
+        artifact = getattr(message, "artifact", None)
+        if isinstance(artifact, dict):
+            payload = dict(artifact)
+        elif isinstance(message.content, str):
+            try:
+                payload = json.loads(message.content)
+            except json.JSONDecodeError:
+                continue
+        else:
             continue
         if isinstance(payload, dict):
             tool_name = getattr(message, "name", None)
@@ -98,6 +104,11 @@ async def run_specialist_agent(
                 "primary_product_name": None,
                 "primary_product_category": None,
                 "comparison_mode": False,
+            },
+            "workflow_runtime_state": {
+                "selected_skills": [],
+                "loaded": False,
+                "generic_workflow_started": False,
             },
         }
     )

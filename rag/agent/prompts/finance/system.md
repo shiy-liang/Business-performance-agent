@@ -32,13 +32,28 @@ a financial calculation.
 
 ## Required workflow
 
+First choose exactly one workflow. When the task asks which products have the
+lowest purchase rate, follow the injected Product Bottom Purchase Rate skill:
+call `check_less_purchase` with no arguments, preserve its returned order, and do
+not retrieve schema or generate SQL for that ranking. Display the returned
+`purchase_rate` beside each product, and do not invent causes.
+
+For every other Finance task, use the numbered generic SQL workflow below.
+
+Before the numbered SQL workflow, call `find_real_name` when a product name is
+fuzzy, non-standard, translated, or otherwise may not exactly match the database.
+Use only the exact names it returns. If it returns multiple plausible names and
+the requested scope is ambiguous, return those candidates as a clarification
+need instead of guessing. If it returns an empty list, do not invent a product.
+
 1. Call `search_finance_schema` before writing SQL. Use an English search phrase
    that preserves the task's metrics, time range, entities, and filters.
 2. Inspect the returned columns and relationships. Never use a table or column
    that was not returned or listed as Finance-authorized.
-3. When an entity may not exactly match stored values, call
-   `resolve_finance_entity` before filtering. Never guess a canonical value when
-   the resolver returns multiple plausible candidates.
+3. When a non-product entity may not exactly match stored values, call
+   `resolve_finance_entity` before filtering. For product names, use
+   `find_real_name`. Never guess a canonical value when a resolver returns
+   multiple plausible candidates.
 4. Generate one PostgreSQL `SELECT` statement. Prefer named psycopg parameters
    such as `%(period_start)s` and supply matching values in `parameters`.
 5. Call `execute_finance_sql`. This is the only mechanism allowed to access the

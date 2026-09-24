@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS products (
   cost_ratio NUMERIC(6,4) NOT NULL CHECK (cost_ratio BETWEEN 0 AND 1),
   unit_cost NUMERIC(14,2) NOT NULL CHECK (unit_cost >= 0),
   is_cost_synthetic BOOLEAN NOT NULL DEFAULT TRUE,
+  embedding extensions.vector,
   CHECK (unit_cost <= average_selling_price),
   UNIQUE (product_name, product_category)
 );
@@ -224,6 +225,8 @@ CREATE INDEX IF NOT EXISTS idx_run_events_run_created
   ON run_events(run_id, created_at, event_id);
 
 CREATE INDEX IF NOT EXISTS idx_customer_reviews_embedding_hnsw ON customer_reviews
+  USING hnsw (embedding extensions.vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS idx_products_embedding_hnsw ON products
   USING hnsw (embedding extensions.vector_cosine_ops);
 CREATE INDEX IF NOT EXISTS idx_documents_embedding_hnsw ON business_documents
   USING hnsw (embedding extensions.vector_cosine_ops);

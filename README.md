@@ -187,6 +187,10 @@ The current tools are:
 - `search_knowledge`: semantic pgvector retrieval with file and chunk citations.
 - `delegate_finance`: runs the Finance specialist graph.
 - `delegate_operations`: runs the Operations specialist graph.
+- `find_real_name`: shared by Finance and Operations; maps a fuzzy or
+  cross-language product phrase to ranked exact `public.products.product_name`
+  values using a fixed Top-5 pgvector query, a 0.70 minimum similarity, and a
+  0.20 absolute adjacent-score gap cutoff.
 - `search_finance_schema`, `resolve_finance_entity`, `execute_finance_sql`:
   Finance-only schema, entity, and read-only SQL capabilities.
 - `search_operations_schema`, `resolve_operations_entity`,
@@ -198,6 +202,19 @@ The current tools are:
 - `find_other_comment_product`, `find_other_comment_category`: Operations-only
   fixed-query expansion tools. They exclude reviews already returned in the run,
   return at most ten rows each, and share a two-call limit.
+- `check_purchase_rate`: Operations-only fixed-query tool for the ratio of
+  `purchase` events to combined `checkout`, `wishlist_add`, and `add_to_cart`
+  events for one canonical product name.
+- `check_like_rate`: Operations-only fixed-query tool for the ratio of combined
+  `wishlist_add` and `add_to_cart` events to `product_view` events for one
+  canonical product name.
+- `check_less_like`: Operations-only fixed-view Tool returning up to ten products
+  with their precomputed `like_rate`, ordered ascending.
+- `check_less_purchase`: shared by Operations and Finance; returns up to ten
+  products with their precomputed `purchase_rate`, ordered ascending.
+- `check_most_interact`: Operations-only fixed-query Tool returning up to ten
+  products with total duration, average duration, interaction count, and ranking
+  fields, with a minimum sample of 20 interaction rows per product.
 
 Finance and Operations share a reusable specialist graph but have independent
 prompts, skills, table permissions, and tool instances. Their handlers register

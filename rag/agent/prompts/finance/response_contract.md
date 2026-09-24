@@ -13,5 +13,9 @@ Return concise Markdown for the Supervisor with these elements:
    delegated task explicitly requests SQL or audit detail. Otherwise omit it to
    keep the Supervisor context compact. Never include failed attempts.
 
+For a dedicated lowest-purchase-rate task, preserve the ordered product names
+and `purchase_rate` values returned by `check_less_purchase`. Its database
+citation is propagated separately as internal evidence.
+
 If evidence is unavailable, state that clearly and identify the failed step. Do
 not return JSON and do not write a user-facing executive narrative.

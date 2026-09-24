@@ -9,15 +9,21 @@ from langchain_core.tools import BaseTool
 
 from rag.agent.state import AgentName
 from rag.agent.tools.common.knowledge import search_knowledge
+from rag.agent.tools.common.product_metrics import check_less_like, check_less_purchase
+from rag.agent.tools.common.products import find_real_name
 from rag.agent.tools.finance import (
     execute_finance_sql,
     resolve_finance_entity,
     search_finance_schema,
 )
 from rag.agent.tools.operations import (
+    check_like_rate,
+    check_most_interact,
+    check_purchase_rate,
     execute_operations_sql,
     find_other_comment_category,
     find_other_comment_product,
+    load_operations_skills,
     resolve_operations_entity,
     search_customer_reviews,
     search_operations_schema,
@@ -81,12 +87,19 @@ default_tool_registry = ToolRegistry(
         ToolRegistration(search_knowledge, frozenset({"supervisor"})),
         ToolRegistration(delegate_finance, frozenset({"supervisor"})),
         ToolRegistration(delegate_operations, frozenset({"supervisor"})),
+        ToolRegistration(find_real_name, frozenset({"finance", "operations"})),
+        ToolRegistration(check_less_purchase, frozenset({"finance", "operations"})),
         ToolRegistration(search_finance_schema, frozenset({"finance"})),
         ToolRegistration(resolve_finance_entity, frozenset({"finance"})),
         ToolRegistration(execute_finance_sql, frozenset({"finance"})),
         ToolRegistration(search_operations_schema, frozenset({"operations"})),
         ToolRegistration(resolve_operations_entity, frozenset({"operations"})),
         ToolRegistration(execute_operations_sql, frozenset({"operations"})),
+        ToolRegistration(check_less_like, frozenset({"operations"})),
+        ToolRegistration(check_like_rate, frozenset({"operations"})),
+        ToolRegistration(check_most_interact, frozenset({"operations"})),
+        ToolRegistration(check_purchase_rate, frozenset({"operations"})),
+        ToolRegistration(load_operations_skills, frozenset({"operations"})),
         ToolRegistration(search_customer_reviews, frozenset({"operations"})),
         ToolRegistration(find_other_comment_product, frozenset({"operations"})),
         ToolRegistration(find_other_comment_category, frozenset({"operations"})),
