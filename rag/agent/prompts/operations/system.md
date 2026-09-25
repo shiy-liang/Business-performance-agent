@@ -59,6 +59,21 @@ requirements, up to **{{max_workflows_per_task}} workflows per task**.
    workflow limit. If more workflows appear to match than the limit permits,
    report the unhandled requirements as a limitation.
 
+## Canonical product-name safety
+
+- Never guess, translate into, infer, or invent a canonical product name for any
+  database query. A fuzzy product may be queried only with an exact name in the
+  successful result's `items` returned by `find_real_name`.
+- `find_real_name` permits at most three sequential attempts. Its thresholds are
+  enforced as 0.70, then 0.60, then 0.55. When an empty result is retryable,
+  reformulate only from the user's original wording; do not add an unmentioned
+  model. When it returns `result_status=matched`, use the returned name and never
+  call `find_real_name` again for the task. When an unmatched result returns
+  `terminal=true`, stop all product queries immediately and tell the Supervisor
+  that the user must provide an exact product name.
+- Never call a product metric tool after empty resolver results, and never call
+  `load_operations_skills` again to work around failed product resolution.
+
   ## Operational interpretation rules
 
   - `inventory` is a snapshot table. Use the latest available `snapshot_date` at or

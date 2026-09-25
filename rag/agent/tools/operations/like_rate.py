@@ -9,11 +9,13 @@ from hashlib import sha256
 from time import perf_counter
 from typing import Any, Literal
 
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from psycopg.rows import dict_row
 from pydantic import BaseModel, Field
 
 from observability import logger
+from rag.agent.tools.common.products import canonical_product_name_error
 from rag.agent.tools.common.sql_runtime import connect_readonly, set_readonly_guards
 
 
@@ -139,10 +141,30 @@ def _success_payload(
 
 
 @tool(args_schema=CheckLikeRateInput)
-async def check_like_rate(product_name: str) -> str:
+async def check_like_rate(product_name: str, config: RunnableConfig) -> str:
     """Return product like events divided by product-view events."""
 
     tool_name = "check_like_rate"
+    product_error = canonical_product_name_error(config, product_name)
+    if product_error:
+        return json.dumps(
+            {
+                "success": False,
+                "result_status": "unverified_product_name",
+                "agent": "operations",
+                "tool": tool_name,
+                "product_name": product_name,
+                "like_rate": None,
+                "error_type": product_error,
+                "error": (
+                    "The product name was not returned by find_real_name. "
+                    "Do not query a guessed or invented product name."
+                ),
+                "row_count": 0,
+                "sources": [],
+            },
+            ensure_ascii=False,
+        )
     started_at = perf_counter()
     logger.tool_event(
         status="started",

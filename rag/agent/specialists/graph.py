@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from functools import lru_cache
 from typing import Any, Literal
 
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
@@ -49,16 +50,94 @@ def build_specialist_graph(
         )
         return {"messages": [response]}
 
+    def route_after_tools(state: SpecialistState) -> str:
+        for message in reversed(state["messages"]):
+            if not isinstance(message, ToolMessage):
+                break
+            try:
+                payload = json.loads(str(message.content))
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict) and payload.get("error_type") in {
+                "user_rejected",
+                "approval_timeout",
+            }:
+                return "sql_cancelled"
+            if (
+                isinstance(payload, dict)
+                and payload.get("error_type") == "canonical_product_not_found"
+                and payload.get("terminal") is True
+            ):
+                return "product_resolution_failed"
+        return agent_name
+
+    async def finish_cancelled_sql(state: SpecialistState) -> dict[str, Any]:
+        error_type = "user_rejected"
+        for message in reversed(state["messages"]):
+            if not isinstance(message, ToolMessage):
+                break
+            try:
+                payload = json.loads(str(message.content))
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict) and payload.get("error_type") in {
+                "user_rejected",
+                "approval_timeout",
+            }:
+                error_type = str(payload["error_type"])
+                break
+        reason = (
+            "SQL approval timed out"
+            if error_type == "approval_timeout"
+            else "The user rejected the generated SQL"
+        )
+        return {
+            "messages": [
+                AIMessage(
+                    content=(
+                        f"{reason}. The database query was not executed, so no "
+                        "database result or citation is available."
+                    )
+                )
+            ]
+        }
+
+    async def finish_unresolved_product(state: SpecialistState) -> dict[str, Any]:
+        return {
+            "messages": [
+                AIMessage(
+                    content=(
+                        "No canonical product name matched after three sequential "
+                        "resolution attempts. No product metric query was executed. "
+                        "Ask the user for the exact product name or model; never "
+                        "guess or invent one."
+                    )
+                )
+            ]
+        }
+
     builder = StateGraph(SpecialistState)
     builder.add_node(agent_name, call_specialist)
     builder.add_node(f"{agent_name}_tools", ToolNode(tools=tools, handle_tool_errors=True))
+    builder.add_node("sql_cancelled", finish_cancelled_sql)
+    builder.add_node("product_resolution_failed", finish_unresolved_product)
     builder.add_edge(START, agent_name)
     builder.add_conditional_edges(
         agent_name,
         tools_condition,
         {"tools": f"{agent_name}_tools", END: END},
     )
-    builder.add_edge(f"{agent_name}_tools", agent_name)
+    builder.add_conditional_edges(
+        f"{agent_name}_tools",
+        route_after_tools,
+        {
+            agent_name: agent_name,
+            "sql_cancelled": "sql_cancelled",
+            "product_resolution_failed": "product_resolution_failed",
+        },
+    )
+    builder.add_edge("sql_cancelled", END)
+    builder.add_edge("product_resolution_failed", END)
     return builder.compile(name=f"{agent_name}-agent")
 
 

@@ -2,28 +2,40 @@
 
 ## Use this skill for
 
-Revenue, refunds by value, campaign spend or ROI, attributed revenue, costs,
-gross profit, gross margin, expenses, and estimated operating profit.
+Finance questions not covered by a dedicated skill, including gross sales,
+refund analysis by value or status, campaign spend or ROI, attributed revenue,
+expenses, estimated operating profit, and custom financial breakdowns or
+rankings.
+
+This is the generic fallback. Select it only when no dedicated Finance skill
+matches any part of the delegated task.
 
 ## Do not use this skill for
 
 Policy interpretation, inventory diagnosis, review themes, service root causes,
-or operational recommendations.
+operational recommendations, the dedicated net-sales total, or the dedicated
+gross-profit and gross-margin calculations. Do not use it to manufacture a
+forecast, prediction, projection, budget, or future-period estimate from recorded
+transactions.
 
 ## Procedure
 
 1. Identify the financial metric and its governed source.
 2. Identify the requested period, comparison period, dimensions, and filters.
-3. Retrieve only relevant Finance schema.
-4. If a column's type, meaning, or allowed values are unclear, call
+3. If the query involves a product name, first call `find_real_name` to obtain
+   the exact canonical name. Use only a name returned in `items`. Once it returns
+   `result_status=matched`, do not call `find_real_name` again for this task.
+4. Retrieve only relevant Finance schema.
+5. If a column's type, meaning, or allowed values are unclear, call
    `get_columns_detail` for its table before generating SQL.
-5. Resolve business entities before exact filtering when needed.
-6. Prefer governed profitability views for their defined calculations.
-7. Generate parameterized SQL at the requested grain.
-8. Execute through the Finance SQL tool and verify totals, units, and row count.
-9. Mark lifecycle campaign metrics, attribution, synthetic costs, refunds, and
+6. Resolve non-product business entities before exact filtering when needed.
+   Product names must use `find_real_name`, not the general entity resolver.
+7. Prefer governed profitability views for their defined calculations.
+8. Generate parameterized SQL at the requested grain.
+9. Execute through the Finance SQL tool and verify totals, units, and row count.
+10. Mark lifecycle campaign metrics, attribution, synthetic costs, refunds, and
    expenses accurately.
-10. Provide the result, citation, final SQL, parameters, and visible limitations.
+11. Provide the result, citation, final SQL, parameters, and visible limitations.
 
 ## Positive example
 

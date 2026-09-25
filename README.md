@@ -173,9 +173,9 @@ failure rolls them back and removes the newly stored file.
 
 The chat panel is connected to a three-agent LangGraph runtime under `rag/agent/`.
 The user-facing Supervisor routes structured questions to Finance or Operations.
-High-frequency product-review questions use a dedicated deterministic retrieval
-workflow, while other specialist questions use governed PostgreSQL generation as
-a long-tail fallback. All models use `langchain-openai` with the OpenAI Responses API. Tool permissions are
+High-frequency review, support-ticket, and financial calculations use dedicated
+deterministic workflows, while other specialist questions use governed PostgreSQL
+generation as a long-tail fallback. All models use `langchain-openai` with the OpenAI Responses API. Tool permissions are
 enforced centrally in `rag/agent/tools/registry.py`, and safe public progress is
 streamed through `/api/chat/stream`.
 
@@ -194,6 +194,16 @@ The current tools are:
   0.20 absolute adjacent-score gap cutoff.
 - `search_finance_schema`, `resolve_finance_entity`, `execute_finance_sql`:
   Finance-only schema, entity, and read-only SQL capabilities.
+- `load_finance_skills`: loads only the Finance workflow bodies selected from the
+  compact routing catalog; full Finance skills are not placed in the initial
+  specialist prompt.
+- `calculate_net_sales`: Finance-only fixed query over `transactions` and
+  completed `returns_refunds`, returning sales after discounts and completed
+  refunds for one optional date/entity scope.
+- `calculate_gross_profit`, `calculate_gross_margin`: Finance-only fixed queries
+  over `transactions`, completed `returns_refunds`, and `products`, returning
+  cost-covered recognized revenue, COGS, gross profit, gross-margin percentage,
+  and cost coverage. They calculate recorded-data metrics and do not forecast.
 - `search_operations_schema`, `resolve_operations_entity`,
   `execute_operations_sql`: Operations-only equivalents.
 - `search_customer_reviews`: Operations-only semantic review retrieval with date,
@@ -222,7 +232,7 @@ The current tools are:
   fields, with a minimum sample of 20 interaction rows per product.
 
 Finance and Operations share a reusable specialist graph but have independent
-prompts, skills, table permissions, and tool instances. Their handlers register
+prompts, progressively loaded skills, table permissions, and tool instances. Their handlers register
 with `specialist_dispatcher` when the Supervisor graph is built. Prompts and skills
 are Markdown files under `rag/agent/prompts/` and `rag/agent/skills/` and are
 injected at runtime.
@@ -233,6 +243,20 @@ sensitive and vector columns, dangerous functions, locking reads, DDL/DML, and
 system schemas, then executes inside a read-only transaction with a timeout and
 result cap. Configure a database role with SELECT-only grants through
 `AGENT_READONLY_DATABASE_URL`; `DATABASE_URL` is a development fallback.
+
+After local validation and before any database access, every model-generated SQL
+query pauses for explicit user approval. The chat UI shows the complete
+parameterized SQL and its bound parameter values with **Execute** and **Cancel**
+actions. Execute resumes the same Agent run; Cancel returns a `user_rejected`
+result to the specialist and Supervisor without opening a database connection.
+Pending approvals expire after `AGENT_SQL_APPROVAL_TIMEOUT_SECONDS` (15 minutes by
+default) and fail closed. Dedicated fixed-query and semantic-retrieval skills do
+not use this generic-SQL approval step.
+
+The chat composer includes an **Automatically execute SQL** checkbox, which is off
+by default. When enabled for a request, validated model-generated read-only SQL
+runs without creating an approval prompt; all table allow-lists, timeouts, row
+limits, and other SQL safety controls remain in force.
 
 Every SQL attempt writes a structured `sql.generated` log event containing the
 Agent-generated query text but not its parameter values. Local validation failures
@@ -246,6 +270,9 @@ result. The dedicated product-review workflow instead requires a successful
 `search_customer_reviews` call, forbids mixing in generic SQL tools, and validates
 the returned review citations. The dedicated support-ticket problem workflow
 accepts `check_concrete_problem` evidence and validates `[ticket:...]` citations.
+Finance net-sales, gross-profit, and gross-margin workflows use fixed
+parameterized queries and validate their `[db:finance:...]` evidence without
+entering generated SQL approval.
 Validation outcomes are emitted as public `validation` events.
 `AGENT_KNOWLEDGE_MIN_SIMILARITY`, `AGENT_REVIEW_MIN_SIMILARITY`, and
 `AGENT_TICKET_MIN_SIMILARITY` suppress weak vector matches.

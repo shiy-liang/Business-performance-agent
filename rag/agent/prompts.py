@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Mapping
 
 from rag.agent.workflows import (
+    build_finance_skill_catalog,
     build_operations_skill_catalog,
+    load_finance_workflow_config,
     load_operations_workflow_config,
 )
 
@@ -82,28 +84,17 @@ def build_supervisor_prompt(
 
 @lru_cache(maxsize=2)
 def load_specialist_components(agent_name: str) -> dict[str, str]:
-    """Load static prompt parts and the Operations routing catalog."""
+    """Load static prompt parts and each specialist's routing catalog."""
 
     if agent_name not in {"finance", "operations"}:
         raise PromptTemplateError(f"Unsupported specialist: {agent_name}")
     return {
         "system": _read(PROMPT_ROOT / agent_name / "system.md"),
         "response_contract": _read(PROMPT_ROOT / agent_name / "response_contract.md"),
-        **(
-            {
-                "sql_skill": _read(SKILL_ROOT / "finance" / "sql_query.md"),
-                "sql_safety": _read(SKILL_ROOT / "common" / "sql_safety.md"),
-                "product_bottom_purchase_rate": _read(
-                    SKILL_ROOT / "finance" / "product_bottom_purchase_rate.md"
-                )
-            }
+        "skill_catalog": (
+            build_finance_skill_catalog()
             if agent_name == "finance"
-            else {}
-        ),
-        **(
-            {"skill_catalog": build_operations_skill_catalog()}
-            if agent_name == "operations"
-            else {}
+            else build_operations_skill_catalog()
         ),
     }
 
@@ -117,27 +108,23 @@ def build_specialist_prompt(
     """Compose a domain specialist prompt with injectable SQL instructions."""
 
     components = load_specialist_components(agent_name)
-    if agent_name == "finance":
-        skill_items = [components["sql_skill"], components["sql_safety"]]
-        skill_items.insert(0, components["product_bottom_purchase_rate"])
-        skills = "\n\n".join(skill_items)
-        extra_values: dict[str, str] = {}
-    else:
-        # Operations uses progressive disclosure: only the catalog is in the
-        # system prompt; selected bodies arrive later through a ToolMessage.
-        skills = ""
-        settings = load_operations_workflow_config()
-        extra_values = {
-            "skill_catalog": components["skill_catalog"],
-            "max_workflows_per_task": str(settings.max_workflows_per_task),
-        }
+    # Specialists use progressive disclosure: only routing metadata is in the
+    # system prompt; complete selected bodies arrive later through a ToolMessage.
+    settings = (
+        load_finance_workflow_config()
+        if agent_name == "finance"
+        else load_operations_workflow_config()
+    )
+    extra_values = {
+        "skill_catalog": components["skill_catalog"],
+        "max_workflows_per_task": str(settings.max_workflows_per_task),
+    }
     return inject_template(
         components["system"],
         {
             "task": task,
             "available_tools": available_tools,
             "response_contract": components["response_contract"],
-            "skills": skills,
             **extra_values,
         },
     )

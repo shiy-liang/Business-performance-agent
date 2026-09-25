@@ -47,3 +47,5 @@ Rules:
   requests audit details. Never include failed attempts.
 - If evidence is unavailable, state the failed step under Limitations without
   guessing.
+- If generated SQL was rejected by the user or approval timed out, state that the
+  query was not executed and do not retry it.

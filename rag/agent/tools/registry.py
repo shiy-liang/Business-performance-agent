@@ -13,7 +13,11 @@ from rag.agent.tools.common.product_metrics import check_less_like, check_less_p
 from rag.agent.tools.common.products import find_real_name
 from rag.agent.tools.common.sql_runtime import get_columns_detail
 from rag.agent.tools.finance import (
+    calculate_gross_margin,
+    calculate_gross_profit,
+    calculate_net_sales,
     execute_finance_sql,
+    load_finance_skills,
     resolve_finance_entity,
     search_finance_schema,
 )
@@ -91,6 +95,10 @@ default_tool_registry = ToolRegistry(
         ToolRegistration(delegate_operations, frozenset({"supervisor"})),
         ToolRegistration(find_real_name, frozenset({"finance", "operations"})),
         ToolRegistration(check_less_purchase, frozenset({"finance", "operations"})),
+        ToolRegistration(load_finance_skills, frozenset({"finance"})),
+        ToolRegistration(calculate_net_sales, frozenset({"finance"})),
+        ToolRegistration(calculate_gross_profit, frozenset({"finance"})),
+        ToolRegistration(calculate_gross_margin, frozenset({"finance"})),
         ToolRegistration(search_finance_schema, frozenset({"finance"})),
         ToolRegistration(resolve_finance_entity, frozenset({"finance"})),
         ToolRegistration(execute_finance_sql, frozenset({"finance"})),

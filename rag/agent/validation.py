@@ -5,7 +5,10 @@ from __future__ import annotations
 import re
 from typing import Any, Literal
 
-from rag.agent.workflows import load_operations_workflow_config
+from rag.agent.workflows import (
+    load_finance_workflow_config,
+    load_operations_workflow_config,
+)
 
 
 SpecialistName = Literal["finance", "operations"]
@@ -17,6 +20,10 @@ REVIEW_TOOL_NAMES = frozenset(
     }
 )
 TICKET_PROBLEM_TOOL_NAMES = frozenset({"check_concrete_problem"})
+FINANCE_METRIC_TOOL_NAMES = frozenset(
+    {"calculate_net_sales", "calculate_gross_profit", "calculate_gross_margin"}
+)
+PRODUCT_RESOLUTION_TOOL_NAMES = frozenset({"find_real_name"})
 GENERIC_OPERATIONS_TOOL_NAMES = frozenset(
     {
         "search_operations_schema",
@@ -42,6 +49,19 @@ DEDICATED_OPERATIONS_TOOL_TO_WORKFLOW = {
     "check_less_purchase": "product_bottom_rates",
     "check_most_interact": "product_interaction_duration",
 }
+DEDICATED_FINANCE_TOOL_TO_WORKFLOW = {
+    "calculate_net_sales": "net_sales",
+    "calculate_gross_profit": "gross_profit_margin",
+    "calculate_gross_margin": "gross_profit_margin",
+    "check_less_purchase": "product_bottom_purchase_rate",
+}
+GENERIC_FINANCE_TOOL_NAMES = frozenset(
+    {
+        "search_finance_schema",
+        "resolve_finance_entity",
+        "execute_finance_sql",
+    }
+)
 
 
 def validate_specialist_evidence(
@@ -68,6 +88,8 @@ def validate_specialist_evidence(
         and payload.get("agent") == agent_name
         and payload.get("tool") not in REVIEW_TOOL_NAMES
         and payload.get("tool") not in TICKET_PROBLEM_TOOL_NAMES
+        and payload.get("tool") not in FINANCE_METRIC_TOOL_NAMES
+        and payload.get("tool") not in PRODUCT_RESOLUTION_TOOL_NAMES
         and payload.get("error_type")
         not in {
             None,
@@ -102,6 +124,16 @@ def validate_specialist_evidence(
         for payload in ticket_problem_payloads
         if payload.get("success") is False
     ]
+    terminal_product_resolution = next(
+        (
+            payload
+            for payload in tool_payloads
+            if payload.get("tool") in PRODUCT_RESOLUTION_TOOL_NAMES
+            and payload.get("error_type") == "canonical_product_not_found"
+            and payload.get("terminal") is True
+        ),
+        None,
+    )
     uses_review_workflow = agent_name == "operations" and bool(review_payloads)
     generic_operations_calls = [
         payload
@@ -113,18 +145,38 @@ def validate_specialist_evidence(
         for payload in tool_payloads
         if payload.get("tool") in DEDICATED_OPERATIONS_TOOL_TO_WORKFLOW
     ]
-    workflow_names = {
-        DEDICATED_OPERATIONS_TOOL_TO_WORKFLOW[str(payload.get("tool"))]
-        for payload in dedicated_operations_calls
-    }
+    generic_finance_calls = [
+        payload
+        for payload in tool_payloads
+        if payload.get("tool") in GENERIC_FINANCE_TOOL_NAMES
+    ]
+    dedicated_finance_calls = [
+        payload
+        for payload in tool_payloads
+        if payload.get("tool") in DEDICATED_FINANCE_TOOL_TO_WORKFLOW
+    ]
+    if agent_name == "finance":
+        workflow_names = {
+            DEDICATED_FINANCE_TOOL_TO_WORKFLOW[str(payload.get("tool"))]
+            for payload in dedicated_finance_calls
+        }
+        loader_name = "load_finance_skills"
+    else:
+        workflow_names = {
+            DEDICATED_OPERATIONS_TOOL_TO_WORKFLOW[str(payload.get("tool"))]
+            for payload in dedicated_operations_calls
+        }
+        loader_name = "load_operations_skills"
     for payload in tool_payloads:
         if (
-            payload.get("tool") == "load_operations_skills"
+            payload.get("tool") == loader_name
             and payload.get("success") is True
             and isinstance(payload.get("selected_skills"), list)
         ):
             workflow_names.update(str(name) for name in payload["selected_skills"])
     if generic_operations_calls:
+        workflow_names.add("sql_query")
+    if generic_finance_calls:
         workflow_names.add("sql_query")
 
     if not answer.strip():
@@ -150,7 +202,7 @@ def validate_specialist_evidence(
                 errors.append("No successful semantic customer-review search was returned.")
     if "sql_query" in workflow_names and len(workflow_names) > 1:
         errors.append(
-            "Dedicated Operations workflows cannot be mixed with the generic SQL fallback."
+            "Dedicated specialist workflows cannot be mixed with the generic SQL fallback."
         )
     if agent_name == "operations":
         maximum = load_operations_workflow_config().max_workflows_per_task
@@ -159,10 +211,18 @@ def validate_specialist_evidence(
                 f"Operations used {len(workflow_names)} workflows, exceeding the "
                 f"configured maximum of {maximum}."
             )
+    if agent_name == "finance":
+        maximum = load_finance_workflow_config().max_workflows_per_task
+        if len(workflow_names) > maximum:
+            errors.append(
+                f"Finance used {len(workflow_names)} workflows, exceeding the "
+                f"configured maximum of {maximum}."
+            )
     if (
         not successful_queries
         and not successful_review_retrievals
         and not successful_ticket_problem_retrievals
+        and terminal_product_resolution is None
     ):
         errors.append("No successful specialist evidence was returned.")
 
@@ -233,6 +293,16 @@ def validate_specialist_evidence(
         warnings.append(
             "At least one concrete support-ticket retrieval was unavailable or blocked."
         )
+    failed_finance_metrics = [
+        payload
+        for payload in tool_payloads
+        if payload.get("tool") in FINANCE_METRIC_TOOL_NAMES
+        and payload.get("success") is False
+    ]
+    if failed_finance_metrics:
+        warnings.append(
+            "At least one dedicated Finance metric retrieval was unavailable or blocked."
+        )
 
     return {
         "valid": not errors,
@@ -241,6 +311,7 @@ def validate_specialist_evidence(
         "successful_query_count": len(successful_queries),
         "successful_review_tool_count": len(successful_review_retrievals),
         "successful_ticket_tool_count": len(successful_ticket_problem_retrievals),
+        "terminal_product_resolution": terminal_product_resolution is not None,
         "workflow_count": len(workflow_names),
         "workflows": sorted(workflow_names),
         "evidence_count": len(source_citations),
