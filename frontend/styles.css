@@ -1480,6 +1480,141 @@ h2 {
   background: transparent;
 }
 
+.chat-sql-approvals {
+  display: grid;
+  gap: 14px;
+  padding: 0 clamp(18px, 3vw, 34px) 26px;
+}
+
+.chat-sql-approvals[hidden] {
+  display: none;
+}
+
+.sql-approval-card {
+  padding: 18px;
+  border: 1px solid #e4b76f;
+  border-radius: 12px;
+  background: #fff9ec;
+  box-shadow: 0 8px 20px rgba(97, 63, 11, 0.08);
+}
+
+.sql-approval-card.is-approved {
+  border-color: #9dcab5;
+  background: #f1faf5;
+}
+
+.sql-approval-card.is-cancelled {
+  border-color: #d8deda;
+  background: #f6f7f5;
+}
+
+.sql-approval-heading {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.sql-approval-heading strong {
+  color: #603c08;
+  font-size: 14px;
+}
+
+.sql-approval-heading span {
+  padding: 4px 7px;
+  color: #75521c;
+  border-radius: 999px;
+  background: #f6e4bd;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+}
+
+.sql-approval-warning,
+.sql-approval-purpose,
+.sql-approval-decision-status {
+  margin: 0 0 10px;
+  color: #5f5749;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.sql-approval-purpose {
+  color: #6d766f;
+}
+
+.sql-approval-label {
+  display: block;
+  margin: 13px 0 6px;
+  color: #59645e;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.sql-approval-card pre {
+  max-height: 260px;
+  margin: 0;
+  padding: 13px 14px;
+  overflow: auto;
+  border-radius: 9px;
+  color: #e8f0ec;
+  background: #172622;
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre;
+}
+
+.sql-approval-card pre code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+.sql-approval-decision-status:not(:empty) {
+  margin-top: 12px;
+  margin-bottom: 0;
+  font-weight: 700;
+}
+
+.sql-approval-actions {
+  display: flex;
+  gap: 9px;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
+.sql-approval-actions button {
+  min-width: 76px;
+  padding: 9px 15px;
+  cursor: pointer;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.sql-approval-actions button:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.sql-approval-cancel {
+  color: #59645e;
+  border: 1px solid #cdd5cf;
+  background: #fff;
+}
+
+.sql-approval-execute {
+  color: #f4fff9;
+  border: 1px solid var(--green-dark);
+  background: var(--green-dark);
+}
+
+.chat-progress-item.approval i {
+  background: var(--amber);
+  box-shadow: 0 0 0 3px rgba(199, 129, 44, 0.13);
+}
+
 .chat-answer blockquote {
   margin: 0.7em 0 1em;
   padding: 10px 14px;

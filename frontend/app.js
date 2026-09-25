@@ -44,6 +44,7 @@ const elements = {
   chatThinking: document.querySelector("#chat-thinking"),
   chatThinkingLabel: document.querySelector("#chat-thinking-label"),
   chatAnswer: document.querySelector("#chat-answer"),
+  chatSqlApprovals: document.querySelector("#chat-sql-approvals"),
   chatAnswerStatus: document.querySelector("#chat-answer-status"),
   chatCopyButton: document.querySelector("#chat-copy-button"),
   chatSources: document.querySelector("#chat-sources"),
@@ -308,6 +309,8 @@ function resetConversationUi() {
   elements.chatQuestion.textContent = "";
   elements.chatProgress.replaceChildren();
   elements.chatAnswer.replaceChildren();
+  elements.chatSqlApprovals.replaceChildren();
+  elements.chatSqlApprovals.hidden = true;
   elements.chatSources.replaceChildren();
   elements.chatSources.hidden = true;
   elements.chatCopyButton.hidden = true;
@@ -348,6 +351,8 @@ function prepareChatResponse(question) {
   elements.chatProgress.replaceChildren();
   elements.chatAnswer.replaceChildren();
   elements.chatAnswer.classList.remove("is-streaming");
+  elements.chatSqlApprovals.replaceChildren();
+  elements.chatSqlApprovals.hidden = true;
   elements.chatSources.replaceChildren();
   elements.chatSources.hidden = true;
   elements.chatCopyButton.hidden = true;
@@ -468,6 +473,129 @@ function renderChatSources(sources) {
   elements.chatSources.hidden = false;
 }
 
+function renderSqlApproval(data) {
+  const approvalId = String(data?.approval_id || "");
+  const sql = String(data?.sql || "").trim();
+  if (!approvalId || !sql) return;
+
+  const card = document.createElement("article");
+  card.className = "sql-approval-card";
+  card.dataset.approvalId = approvalId;
+  card.dataset.runId = String(data?.run_id || "");
+
+  const heading = document.createElement("div");
+  heading.className = "sql-approval-heading";
+  const title = document.createElement("strong");
+  title.textContent = "SQL query approval required";
+  const agent = document.createElement("span");
+  agent.textContent = `${String(data?.agent || "specialist").toUpperCase()} AGENT`;
+  heading.append(title, agent);
+
+  const warning = document.createElement("p");
+  warning.className = "sql-approval-warning";
+  warning.textContent = String(
+    data?.message ||
+      "No dedicated skill matched this request. The Agent-generated query may fail, take a long time, or consume additional tokens.",
+  );
+
+  const purpose = document.createElement("p");
+  purpose.className = "sql-approval-purpose";
+  purpose.textContent = data?.purpose ? `Purpose: ${String(data.purpose)}` : "";
+  purpose.hidden = !data?.purpose;
+
+  const sqlLabel = document.createElement("span");
+  sqlLabel.className = "sql-approval-label";
+  sqlLabel.textContent = "Complete SQL to execute (including the row-limit guard)";
+  const pre = document.createElement("pre");
+  const code = document.createElement("code");
+  code.textContent = sql;
+  pre.append(code);
+
+  const parameters = data?.parameters && typeof data.parameters === "object"
+    ? data.parameters
+    : {};
+  const parameterKeys = Object.keys(parameters);
+  const parameterBlock = document.createElement("div");
+  parameterBlock.className = "sql-approval-parameters";
+  parameterBlock.hidden = parameterKeys.length === 0;
+  const parameterLabel = document.createElement("span");
+  parameterLabel.className = "sql-approval-label";
+  parameterLabel.textContent = "Bound parameters";
+  const parameterPre = document.createElement("pre");
+  const parameterCode = document.createElement("code");
+  parameterCode.textContent = JSON.stringify(parameters, null, 2);
+  parameterPre.append(parameterCode);
+  parameterBlock.append(parameterLabel, parameterPre);
+
+  const decisionStatus = document.createElement("p");
+  decisionStatus.className = "sql-approval-decision-status";
+  decisionStatus.setAttribute("role", "status");
+
+  const actions = document.createElement("div");
+  actions.className = "sql-approval-actions";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "sql-approval-cancel";
+  cancel.dataset.sqlDecision = "cancel";
+  cancel.textContent = "Cancel";
+  const execute = document.createElement("button");
+  execute.type = "button";
+  execute.className = "sql-approval-execute";
+  execute.dataset.sqlDecision = "execute";
+  execute.textContent = "Execute";
+  actions.append(cancel, execute);
+
+  card.append(
+    heading,
+    warning,
+    purpose,
+    sqlLabel,
+    pre,
+    parameterBlock,
+    decisionStatus,
+    actions,
+  );
+  elements.chatSqlApprovals.append(card);
+  elements.chatSqlApprovals.hidden = false;
+  elements.chatAnswerStatus.textContent = "Awaiting approval";
+  elements.chatAnswerStatus.classList.remove("is-streaming");
+  setThinking("Waiting for your SQL execution decision…");
+  appendChatActivity("approval", "SQL approval", "Waiting for approval of the Agent-generated read-only query");
+}
+
+async function submitSqlApproval(card, decision) {
+  const approvalId = String(card?.dataset?.approvalId || "");
+  const runId = String(card?.dataset?.runId || "");
+  if (!approvalId || !runId || !["execute", "cancel"].includes(decision)) return;
+  const buttons = [...card.querySelectorAll("button[data-sql-decision]")];
+  const status = card.querySelector(".sql-approval-decision-status");
+  buttons.forEach((button) => { button.disabled = true; });
+  if (status) status.textContent = decision === "execute" ? "Submitting approval…" : "Cancelling the query…";
+  try {
+    await fetchJson(`/api/chat/sql-approvals/${encodeURIComponent(approvalId)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision, run_id: runId }),
+    });
+    card.classList.add(decision === "execute" ? "is-approved" : "is-cancelled");
+    if (status) {
+      status.textContent = decision === "execute"
+        ? "Approved. The read-only query is now running."
+        : "Cancelled. The database query will not be executed.";
+    }
+    elements.chatAnswerStatus.textContent = decision === "execute" ? "Querying" : "Query cancelled";
+    setThinking(decision === "execute" ? "Running the approved SQL…" : "Supervisor is preparing the cancellation response…");
+    appendChatActivity(
+      decision === "execute" ? "tool-start" : "approval",
+      "SQL approval",
+      decision === "execute" ? "The user approved execution" : "The user declined execution",
+    );
+  } catch (error) {
+    buttons.forEach((button) => { button.disabled = false; });
+    if (status) status.textContent = `Could not submit the decision: ${error.message}`;
+  }
+}
+
 function handleChatEvent(eventName, data) {
   const message = String(data?.message || "");
   if (eventName === "status") {
@@ -494,6 +622,8 @@ function handleChatEvent(eventName, data) {
     appendChatActivity("validation", `${agent} · ${label}`, message);
   } else if (eventName === "sources") {
     renderChatSources(data?.items);
+  } else if (eventName === "sql_approval") {
+    renderSqlApproval(data);
   } else if (eventName === "token") {
     const text = String(data?.text || "");
     if (!text) return;
@@ -1114,6 +1244,13 @@ document.querySelectorAll(".prompt-chip").forEach((button) => {
     resizeChatInput();
     elements.chatForm.requestSubmit();
   });
+});
+
+elements.chatSqlApprovals.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-sql-decision]");
+  if (!button) return;
+  const card = button.closest(".sql-approval-card");
+  submitSqlApproval(card, String(button.dataset.sqlDecision || ""));
 });
 
 elements.chatCopyButton.addEventListener("click", async () => {

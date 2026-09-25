@@ -15,6 +15,11 @@ from rag.agent.bootstrap import initialize_agent_runtime
 from rag.agent.graph import build_supervisor_graph
 from rag.agent.middleware import AgentLoggingCallback, PublicEventMiddleware
 from rag.agent.run_store import RunRecorder
+from rag.agent.sql_approval import (
+    SqlApprovalAlreadyDecidedError,
+    SqlApprovalNotFoundError,
+    sql_approval_manager,
+)
 from rag.agent.state import PublicAgentEvent
 from rag.agent.tools.registry import ToolRegistry, default_tool_registry
 
@@ -96,6 +101,7 @@ async def stream_supervisor(
                 "run_name": "business-supervisor",
                 "callbacks": [AgentLoggingCallback()],
                 "configurable": {
+                    "run_id": run_id,
                     "delegation_runtime_state": {},
                 },
             },
@@ -152,7 +158,16 @@ async def run_supervisor(question: str, **kwargs: Any) -> dict[str, Any]:
 
     final: dict[str, Any] = {}
     async for event in stream_supervisor(question, **kwargs):
-        if event["event"] == "done":
+        if event["event"] == "sql_approval":
+            # A collected (non-streaming) client cannot display an interactive
+            # approval while the request is open. Fail closed instead of running
+            # model-generated SQL without explicit consent.
+            approval_id = str(event["data"].get("approval_id") or "")
+            try:
+                await sql_approval_manager.decide(approval_id, "cancel")
+            except (SqlApprovalNotFoundError, SqlApprovalAlreadyDecidedError):
+                pass
+        elif event["event"] == "done":
             final = event["data"]
         elif event["event"] == "error":
             raise RuntimeError(str(event["data"].get("message")))

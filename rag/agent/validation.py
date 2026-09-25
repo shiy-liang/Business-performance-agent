@@ -17,6 +17,7 @@ REVIEW_TOOL_NAMES = frozenset(
     }
 )
 TICKET_PROBLEM_TOOL_NAMES = frozenset({"check_concrete_problem"})
+PRODUCT_RESOLUTION_TOOL_NAMES = frozenset({"find_real_name"})
 GENERIC_OPERATIONS_TOOL_NAMES = frozenset(
     {
         "search_operations_schema",
@@ -68,6 +69,7 @@ def validate_specialist_evidence(
         and payload.get("agent") == agent_name
         and payload.get("tool") not in REVIEW_TOOL_NAMES
         and payload.get("tool") not in TICKET_PROBLEM_TOOL_NAMES
+        and payload.get("tool") not in PRODUCT_RESOLUTION_TOOL_NAMES
         and payload.get("error_type")
         not in {
             None,
@@ -102,6 +104,16 @@ def validate_specialist_evidence(
         for payload in ticket_problem_payloads
         if payload.get("success") is False
     ]
+    terminal_product_resolution = next(
+        (
+            payload
+            for payload in tool_payloads
+            if payload.get("tool") in PRODUCT_RESOLUTION_TOOL_NAMES
+            and payload.get("error_type") == "canonical_product_not_found"
+            and payload.get("terminal") is True
+        ),
+        None,
+    )
     uses_review_workflow = agent_name == "operations" and bool(review_payloads)
     generic_operations_calls = [
         payload
@@ -163,6 +175,7 @@ def validate_specialist_evidence(
         not successful_queries
         and not successful_review_retrievals
         and not successful_ticket_problem_retrievals
+        and terminal_product_resolution is None
     ):
         errors.append("No successful specialist evidence was returned.")
 
@@ -241,6 +254,7 @@ def validate_specialist_evidence(
         "successful_query_count": len(successful_queries),
         "successful_review_tool_count": len(successful_review_retrievals),
         "successful_ticket_tool_count": len(successful_ticket_problem_retrievals),
+        "terminal_product_resolution": terminal_product_resolution is not None,
         "workflow_count": len(workflow_names),
         "workflows": sorted(workflow_names),
         "evidence_count": len(source_citations),

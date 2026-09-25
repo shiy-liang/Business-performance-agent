@@ -134,6 +134,14 @@ class PublicEventMiddleware:
                     },
                 }
             )
+        elif event_type == "on_custom_event" and name == "sql_approval":
+            if isinstance(data, dict):
+                translated.append(
+                    {
+                        "event": "sql_approval",
+                        "data": dict(data),
+                    }
+                )
         elif event_type == "on_tool_start" and name in self.allowed_tools:
             translated.extend(
                 [
@@ -323,6 +331,11 @@ class PublicEventMiddleware:
                     "stage": "evidence_validation",
                     "message": "The query succeeded; the specialist is validating the returned evidence.",
                 }
+            if payload.get("error_type") in {"user_rejected", "approval_timeout"}:
+                return {
+                    "stage": "query_cancelled",
+                    "message": "The generated SQL was not executed; the specialist is returning the cancellation to the Supervisor.",
+                }
             if payload.get("error_type") == "concurrent_query_blocked":
                 return {
                     "stage": "query_guard",
@@ -339,6 +352,11 @@ class PublicEventMiddleware:
             }
         if name.startswith("delegate_"):
             validation = payload.get("validation") or {}
+            if payload.get("status") == "query_cancelled":
+                return {
+                    "stage": "answering",
+                    "message": "The SQL approval ended without execution; the Supervisor is preparing a response without database results.",
+                }
             if payload.get("status") == "completed" and validation.get("valid") is True:
                 return {
                     "stage": "answering",
@@ -359,6 +377,11 @@ class PublicEventMiddleware:
                 "message": "Knowledge evidence is ready for final synthesis.",
             }
         if name == "find_real_name":
+            if payload.get("terminal") is True:
+                return {
+                    "stage": "evidence_gap",
+                    "message": "No canonical product matched after three attempts; the user must provide an exact product name.",
+                }
             return {
                 "stage": "query_planning",
                 "message": "Canonical product candidates are ready for the specialist.",
@@ -428,10 +451,10 @@ class PublicEventMiddleware:
             "check_concrete_problem": "Operations is searching concrete descriptions in support-ticket notes.",
             "search_finance_schema": "Finance is selecting authorized tables and columns.",
             "resolve_finance_entity": "Finance is matching the requested entity to database values.",
-            "execute_finance_sql": "Finance is validating and running a read-only SQL query.",
+            "execute_finance_sql": "Finance is validating generated read-only SQL before user approval.",
             "search_operations_schema": "Operations is selecting authorized tables and columns.",
             "resolve_operations_entity": "Operations is matching the requested entity to database values.",
-            "execute_operations_sql": "Operations is validating and running a read-only SQL query.",
+            "execute_operations_sql": "Operations is validating generated read-only SQL before user approval.",
             "search_customer_reviews": "Operations is searching customer review themes with structured filters.",
             "find_other_comment_product": "Operations is retrieving additional unseen reviews for the selected product.",
             "find_other_comment_category": "Operations is retrieving additional unseen reviews for the selected category.",
@@ -446,7 +469,17 @@ class PublicEventMiddleware:
                 return f"{name} loaded {count} workflow skill(s)."
             return f"{name} reported {payload.get('error_type', 'an error')}."
         if name == "find_real_name" and payload is not None:
-            return f"{name} returned {len(payload.get('items') or [])} canonical product names."
+            count = len(payload.get("items") or [])
+            call_number = payload.get("call_number")
+            threshold = payload.get("minimum_similarity")
+            if payload.get("terminal") is True:
+                return f"{name} found no canonical product after three attempts; resolution stopped."
+            suffix = (
+                f" on attempt {call_number} at threshold {threshold}"
+                if call_number is not None and threshold is not None
+                else ""
+            )
+            return f"{name} returned {count} canonical product names{suffix}."
         if name == "check_purchase_rate" and payload is not None:
             return f"{name} completed with status {payload.get('result_status', 'unknown')}."
         if name == "check_like_rate" and payload is not None:

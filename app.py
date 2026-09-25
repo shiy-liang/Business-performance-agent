@@ -20,6 +20,7 @@ from backend.routers.marketing import router as marketing_router
 from backend.routers.products import router as products_router
 from backend.routers.sessions import router as sessions_router
 from rag.agent.bootstrap import initialize_agent_runtime
+from rag.agent.sql_approval import sql_approval_manager
 
 
 @asynccontextmanager
@@ -27,7 +28,10 @@ async def lifespan(application: FastAPI):
     """Initialize reusable Agent graphs, clients, and tools before serving."""
 
     application.state.agent_runtime = initialize_agent_runtime()
-    yield
+    try:
+        yield
+    finally:
+        await sql_approval_manager.clear()
 
 
 app = FastAPI(

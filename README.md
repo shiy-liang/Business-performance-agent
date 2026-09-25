@@ -234,6 +234,15 @@ system schemas, then executes inside a read-only transaction with a timeout and
 result cap. Configure a database role with SELECT-only grants through
 `AGENT_READONLY_DATABASE_URL`; `DATABASE_URL` is a development fallback.
 
+After local validation and before any database access, every model-generated SQL
+query pauses for explicit user approval. The chat UI shows the complete
+parameterized SQL and its bound parameter values with **Execute** and **Cancel**
+actions. Execute resumes the same Agent run; Cancel returns a `user_rejected`
+result to the specialist and Supervisor without opening a database connection.
+Pending approvals expire after `AGENT_SQL_APPROVAL_TIMEOUT_SECONDS` (15 minutes by
+default) and fail closed. Dedicated fixed-query and semantic-retrieval skills do
+not use this generic-SQL approval step.
+
 Every SQL attempt writes a structured `sql.generated` log event containing the
 Agent-generated query text but not its parameter values. Local validation failures
 retain `error_type=validation_error` and add a stable `validation_error_type` plus

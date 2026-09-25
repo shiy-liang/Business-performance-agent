@@ -19,3 +19,5 @@ citation is propagated separately as internal evidence.
 
 If evidence is unavailable, state that clearly and identify the failed step. Do
 not return JSON and do not write a user-facing executive narrative.
+If the user rejected generated SQL or approval timed out, state that the query
+was not executed and do not retry it.

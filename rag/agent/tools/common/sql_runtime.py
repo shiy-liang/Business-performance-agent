@@ -15,6 +15,7 @@ from typing import Any, Literal
 import psycopg
 import sqlglot
 from dotenv import load_dotenv
+from langchain_core.callbacks.manager import adispatch_custom_event
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, tool
 from psycopg import sql as psycopg_sql
@@ -24,6 +25,7 @@ from sqlglot import exp
 
 from model.config import PROJECT_ROOT
 from observability import logger
+from rag.agent.sql_approval import sql_approval_manager
 from rag.agent.tools.common.schema_catalog import (
     AGENT_TABLES,
     COLUMN_DETAILS,
@@ -651,6 +653,8 @@ def _sql_runtime_state(config: RunnableConfig) -> dict[str, Any]:
 def _claim_attempt(config: RunnableConfig) -> tuple[str, int]:
     runtime_state = _sql_runtime_state(config)
     attempts = int(runtime_state.get("attempts", 0))
+    if runtime_state.get("approval_denied") is True:
+        return "user_rejected", attempts
     if runtime_state.get("in_flight") is True:
         return "concurrent_query_blocked", attempts
     maximum = sql_max_attempts()
@@ -851,6 +855,11 @@ def build_sql_tools(
         if claim_status != "permitted":
             if claim_status == "concurrent_query_blocked":
                 error = "Another SQL query is already running; parallel SQL calls are not allowed."
+            elif claim_status == "user_rejected":
+                error = (
+                    "The user already rejected generated SQL for this task; "
+                    "no database query may be executed."
+                )
             else:
                 error = f"The maximum of {sql_max_attempts()} SQL attempts was reached."
             return json.dumps(
@@ -901,6 +910,125 @@ def build_sql_tools(
             agent_name=agent_name,
             sql=sql,
         )
+        try:
+            validated_sql, tables = validate_readonly_sql(
+                sql,
+                actual_parameters,
+                agent_name,
+            )
+        except SqlValidationError as error:
+            result = {
+                "success": False,
+                "error_type": "validation_error",
+                "validation_error_type": error.validation_error_type,
+                "error": str(error),
+                "retryable": attempt < sql_max_attempts(),
+                "sources": [],
+            }
+            _finish_attempt(config, success=False)
+            result.setdefault("agent", agent_name)
+            logger.tool_event(
+                status="completed",
+                tool_name=tool_name,
+                duration_ms=round((perf_counter() - started_at) * 1000, 2),
+                attempt=attempt,
+                success=False,
+                error_type="validation_error",
+                validation_error_type=error.validation_error_type,
+                validation_error=str(error),
+            )
+            return json.dumps(result, ensure_ascii=False, default=str)
+
+        configurable = config.get("configurable")
+        run_id = (
+            str(configurable.get("run_id") or "")
+            if isinstance(configurable, dict)
+            else ""
+        )
+        pending = await sql_approval_manager.create(
+            run_id=run_id,
+            agent_name=agent_name,
+        )
+        executable_sql = (
+            f"SELECT * FROM ({validated_sql}) AS agent_query "
+            f"LIMIT {remaining_rows + 1}"
+        )
+        approval_wait = asyncio.create_task(sql_approval_manager.wait(pending))
+        try:
+            await adispatch_custom_event(
+                "sql_approval",
+                {
+                    "approval_id": pending.approval_id,
+                    "run_id": run_id,
+                    "agent": agent_name,
+                    "purpose": purpose,
+                    "sql": executable_sql,
+                    "generated_sql": validated_sql,
+                    "parameters": actual_parameters,
+                    "tables": tables,
+                    "message": (
+                        "No dedicated skill matched this request. The Agent is ready "
+                        "to run the following read-only query. It may fail, take a "
+                        "long time, or consume additional tokens. Do you want to execute it?"
+                    ),
+                },
+                config=config,
+            )
+        except asyncio.CancelledError:
+            approval_wait.cancel()
+            try:
+                await approval_wait
+            except asyncio.CancelledError:
+                pass
+            _finish_attempt(config, success=False)
+            raise
+        except Exception:
+            approval_wait.cancel()
+            try:
+                await approval_wait
+            except (asyncio.CancelledError, TimeoutError):
+                pass
+            _finish_attempt(config, success=False)
+            raise
+
+        try:
+            decision = await approval_wait
+        except TimeoutError:
+            decision = "cancel"
+            approval_error_type = "approval_timeout"
+        except asyncio.CancelledError:
+            _finish_attempt(config, success=False)
+            raise
+        else:
+            approval_error_type = "user_rejected"
+
+        if decision != "execute":
+            runtime_state["approval_denied"] = True
+            _finish_attempt(config, success=False)
+            result = {
+                "success": False,
+                "agent": agent_name,
+                "error_type": approval_error_type,
+                "error": (
+                    "SQL approval timed out; the database query was not executed."
+                    if approval_error_type == "approval_timeout"
+                    else "The user rejected the generated SQL; the database query was not executed."
+                ),
+                "retryable": False,
+                "sql": validated_sql,
+                "parameters": actual_parameters,
+                "sources": [],
+            }
+            logger.tool_event(
+                status="completed",
+                tool_name=tool_name,
+                duration_ms=round((perf_counter() - started_at) * 1000, 2),
+                attempt=attempt,
+                success=False,
+                error_type=approval_error_type,
+            )
+            return json.dumps(result, ensure_ascii=False, default=str)
+
         try:
             result = await asyncio.to_thread(
                 _execute_sql_sync,

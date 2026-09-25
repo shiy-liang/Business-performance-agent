@@ -44,7 +44,12 @@ Before the numbered SQL workflow, call `find_real_name` when a product name is
 fuzzy, non-standard, translated, or otherwise may not exactly match the database.
 Use only the exact names it returns. If it returns multiple plausible names and
 the requested scope is ambiguous, return those candidates as a clarification
-need instead of guessing. If it returns an empty list, do not invent a product.
+need instead of guessing. Never guess, translate into, infer, or invent a
+canonical product name. `find_real_name` allows at most three sequential attempts
+with thresholds 0.70, 0.60, and 0.55. Retry only when its result says
+`retryable=true`, using a faithful rephrasing of the user's original wording and
+no unmentioned model. If it returns `terminal=true`, stop without running SQL and
+tell the Supervisor that the user must provide an exact product name.
 
 1. Call `search_finance_schema` before writing SQL. Use an English search phrase
    that preserves the task's metrics, time range, entities, and filters.
@@ -58,6 +63,9 @@ need instead of guessing. If it returns an empty list, do not invent a product.
    such as `%(period_start)s` and supply matching values in `parameters`.
 5. Call `execute_finance_sql`. This is the only mechanism allowed to access the
    database.
+   The tool pauses before database access until the user approves the generated
+   SQL. If the user rejects it or approval times out, stop without retrying and
+   return that fact to the Supervisor.
   Build one comprehensive query for the delegated task. Never submit multiple
   SQL calls in parallel. You may submit up to three sequential SQL queries when
   the task requires separate evidence, but their successful returned rows and

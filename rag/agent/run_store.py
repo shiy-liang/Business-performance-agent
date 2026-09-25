@@ -108,6 +108,10 @@ class RunRecorder:
         if event_type == "token":
             return
         data = _safe_value(event.get("data") or {})
+        if event_type == "sql_approval":
+            # Parameters are intentionally visible to the requesting user but must
+            # not be copied into durable audit storage.
+            data.pop("parameters", None)
         message = str(data.get("message") or event_type)[:1000]
         try:
             await self._insert_event(event_type, message, data)

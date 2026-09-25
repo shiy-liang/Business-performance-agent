@@ -94,6 +94,7 @@ async def run_specialist_agent(
                 "attempts": 0,
                 "in_flight": False,
                 "succeeded": False,
+                "approval_denied": False,
             },
             "review_runtime_state": {
                 "semantic_calls": 0,
@@ -108,6 +109,11 @@ async def run_specialist_agent(
             "ticket_problem_runtime_state": {
                 "calls": 0,
                 "in_flight": False,
+            },
+            "product_resolution_runtime_state": {
+                "attempts": 0,
+                "in_flight": False,
+                "accepted_product_names": [],
             },
             "workflow_runtime_state": {
                 "selected_skills": [],
@@ -139,6 +145,14 @@ async def run_specialist_agent(
     answer = _final_answer(messages)
     tool_payloads = _collect_tool_payloads(messages)
     sources = _collect_sources(tool_payloads)
+    cancelled_query = next(
+        (
+            payload
+            for payload in tool_payloads
+            if payload.get("error_type") in {"user_rejected", "approval_timeout"}
+        ),
+        None,
+    )
     validation = validate_specialist_evidence(
         agent_name,
         answer,
@@ -156,11 +170,24 @@ async def run_specialist_agent(
         validation_error_count=len(validation["errors"]),
     )
     return {
-        "status": "completed" if validation["valid"] else "invalid_evidence",
+        "status": (
+            "query_cancelled"
+            if cancelled_query is not None
+            else "completed" if validation["valid"] else "invalid_evidence"
+        ),
         "agent": agent_name,
         "answer": answer,
         "sources": sources,
         "validation": validation,
+        "query_cancellation": (
+            {
+                "error_type": cancelled_query.get("error_type"),
+                "message": cancelled_query.get("error"),
+                "executed": False,
+            }
+            if cancelled_query is not None
+            else None
+        ),
         "duration_ms": duration_ms,
     }
 

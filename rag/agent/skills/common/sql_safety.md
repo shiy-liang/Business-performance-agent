@@ -12,12 +12,18 @@ that dedicated skill and do not run the mandatory SQL sequence below.
 ## Mandatory sequence
 
 1. If a product name is fuzzy, non-standard, or cross-language, resolve it with
-   `find_real_name` and use only returned exact database values.
+   `find_real_name` and use only exact values from its successful returned list. Never
+   invent, infer, translate into, or guess a product name. The resolver allows
+   three sequential attempts at thresholds 0.70, 0.60, and 0.55. Retry only when
+   `retryable=true`; when `terminal=true`, stop and request the exact product name.
 2. Retrieve the agent-scoped schema.
 3. Resolve other uncertain entity values when required.
 4. Generate one explicit-column `SELECT` statement.
 5. Submit the query to the agent-scoped execution tool.
    Submit exactly one SQL call at a time. Never issue parallel alternatives.
+   The execution tool will pause after local validation and ask the user to
+   approve the complete SQL and parameters. Do not claim that the query has run
+   while approval is pending.
 6. Distinguish validation errors, SQL errors, empty results, and successful data.
 7. Correct only from concrete schema or error evidence, with no more than three
    execution attempts.
@@ -50,3 +56,5 @@ that dedicated skill and do not run the mandatory SQL sequence below.
 - Empty rows: inspect entities, dates, statuses, and filter strictness.
 - Timeout: simplify the query or reduce the time range; do not remove safety caps.
 - Attempt limit or database outage: stop and report insufficient evidence.
+- User rejection or approval timeout: stop immediately, do not generate a
+  replacement query, and report that no database query was executed.
