@@ -31,6 +31,7 @@ router = APIRouter(prefix="/api", tags=["assistant"])
 class ChatRequest(BaseModel):
     session_id: str = Field(min_length=1, max_length=100)
     message: str = Field(min_length=1, max_length=2000)
+    auto_execute_sql: bool = False
 
 
 class SqlApprovalRequest(BaseModel):
@@ -105,9 +106,12 @@ async def stream_chat(request: ChatRequest) -> StreamingResponse:
 
     async def events() -> AsyncIterator[str]:
         yield "retry: 3000\n\n"
+        stream_kwargs: dict[str, object] = {"conversation_messages": context}
+        if request.auto_execute_sql:
+            stream_kwargs["auto_execute_sql"] = True
         async for event in stream_supervisor(
             request.message,
-            conversation_messages=context,
+            **stream_kwargs,
         ):
             if event["event"] == "done":
                 answer = str(event["data"].get("answer") or "").strip()
@@ -140,9 +144,12 @@ async def chat(request: ChatRequest) -> dict[str, object]:
 
     context = _session_context(request.session_id, request.message)
     try:
+        run_kwargs: dict[str, object] = {"conversation_messages": context}
+        if request.auto_execute_sql:
+            run_kwargs["auto_execute_sql"] = True
         result = await run_supervisor(
             request.message,
-            conversation_messages=context,
+            **run_kwargs,
         )
     except Exception as exc:
         logger.exception("chat.request_failed", exc, component="chat")

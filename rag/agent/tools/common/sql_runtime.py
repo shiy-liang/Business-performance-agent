@@ -414,7 +414,7 @@ def search_schema_catalog(
         "supported_entity_types": sorted(
             entity_type
             for entity_type, (_, _, agents) in ENTITY_FIELDS.items()
-            if agent_name in agents
+            if agent_name in agents and entity_type != "product"
         ),
         "rules": [
             "Use only returned table and column names.",
@@ -686,19 +686,20 @@ def _finish_attempt(
         ) + result_chars
 
 
-def _dedicated_operations_workflows(config: RunnableConfig) -> tuple[str, ...]:
-    """Read dedicated selections without coupling the shared runtime to the loader."""
+def _selected_workflows(config: RunnableConfig) -> tuple[bool, tuple[str, ...]]:
+    """Read progressive workflow state without coupling to either loader."""
 
     configurable = config.get("configurable")
     if not isinstance(configurable, dict):
-        return ()
+        return False, ()
     state = configurable.get("workflow_runtime_state")
     if not isinstance(state, dict):
-        return ()
+        return False, ()
+    loaded = state.get("loaded") is True
     selected = state.get("selected_skills")
     if not isinstance(selected, list):
-        return ()
-    return tuple(str(name) for name in selected if str(name) != "sql_query")
+        return loaded, ()
+    return loaded, tuple(str(name) for name in selected)
 
 
 def _generic_workflow_block(
@@ -706,10 +707,25 @@ def _generic_workflow_block(
     config: RunnableConfig,
     tool_name: str,
 ) -> str | None:
-    if agent_name != "operations":
-        return None
-    dedicated = _dedicated_operations_workflows(config)
-    if not dedicated:
+    loaded, selected = _selected_workflows(config)
+    dedicated = tuple(name for name in selected if name != "sql_query")
+    if not loaded:
+        return json.dumps(
+            {
+                "success": False,
+                "agent": agent_name,
+                "tool": tool_name,
+                "error_type": "skill_not_loaded",
+                "error": (
+                    f"Load the {agent_name} sql_query skill before using generic "
+                    "SQL tools."
+                ),
+                "retryable": True,
+                "sources": [],
+            },
+            ensure_ascii=False,
+        )
+    if selected == ("sql_query",):
         configurable = config.get("configurable")
         if not isinstance(configurable, dict):
             configurable = {}
@@ -720,15 +736,28 @@ def _generic_workflow_block(
             configurable["workflow_runtime_state"] = state
         state["generic_workflow_started"] = True
         return None
+    if not dedicated:
+        return json.dumps(
+            {
+                "success": False,
+                "agent": agent_name,
+                "tool": tool_name,
+                "error_type": "generic_workflow_not_selected",
+                "error": "Select only the sql_query skill for generic SQL tools.",
+                "retryable": False,
+                "sources": [],
+            },
+            ensure_ascii=False,
+        )
     return json.dumps(
         {
             "success": False,
-            "agent": "operations",
+            "agent": agent_name,
             "tool": tool_name,
             "error_type": "dedicated_workflow_selected",
             "error": (
-                "Generic Operations SQL tools are disabled because dedicated "
-                "workflows were selected for this task."
+                f"Generic {agent_name.title()} SQL tools are disabled because "
+                "dedicated workflows were selected for this task."
             ),
             "selected_skills": list(dedicated),
             "retryable": False,
@@ -744,12 +773,9 @@ def build_sql_tools(
     """Build schema, detail, entity, and SQL tools with fixed domain permissions."""
 
     schema_description = (
-        "Find operations-authorized business tables, columns, relationships, and "
-        "entity types before generating SQL for a generic structured-data task. "
-        "Do not call this for a dedicated non-SQL skill."
-        if agent_name == "operations"
-        else "Find finance-authorized business tables, columns, relationships, and "
-        "entity types before generating SQL. Call this first for every Finance task."
+        f"Find {agent_name}-authorized business tables, columns, relationships, "
+        "and entity types before generating SQL for a generic structured-data "
+        "task. Do not call this for a dedicated non-SQL skill."
     )
 
     @tool(
@@ -797,6 +823,23 @@ def build_sql_tools(
         blocked = _generic_workflow_block(agent_name, config, tool_name)
         if blocked is not None:
             return blocked
+        if entity_type.strip().lower() == "product":
+            return json.dumps(
+                {
+                    "success": False,
+                    "agent": agent_name,
+                    "tool": tool_name,
+                    "error_type": "product_resolver_required",
+                    "error": (
+                        "Product names must be resolved with find_real_name. "
+                        "Do not use the general entity resolver for products."
+                    ),
+                    "retryable": False,
+                    "candidates": [],
+                    "sources": [],
+                },
+                ensure_ascii=False,
+            )
         logger.tool_event(
             status="started",
             tool_name=tool_name,
@@ -945,89 +988,128 @@ def build_sql_tools(
             if isinstance(configurable, dict)
             else ""
         )
-        pending = await sql_approval_manager.create(
-            run_id=run_id,
-            agent_name=agent_name,
+        auto_execute_sql = (
+            bool(configurable.get("auto_execute_sql"))
+            if isinstance(configurable, dict)
+            else False
         )
         executable_sql = (
             f"SELECT * FROM ({validated_sql}) AS agent_query "
             f"LIMIT {remaining_rows + 1}"
         )
-        approval_wait = asyncio.create_task(sql_approval_manager.wait(pending))
-        try:
-            await adispatch_custom_event(
-                "sql_approval",
-                {
-                    "approval_id": pending.approval_id,
-                    "run_id": run_id,
-                    "agent": agent_name,
-                    "purpose": purpose,
-                    "sql": executable_sql,
-                    "generated_sql": validated_sql,
-                    "parameters": actual_parameters,
-                    "tables": tables,
-                    "message": (
-                        "No dedicated skill matched this request. The Agent is ready "
-                        "to run the following read-only query. It may fail, take a "
-                        "long time, or consume additional tokens. Do you want to execute it?"
-                    ),
-                },
-                config=config,
-            )
-        except asyncio.CancelledError:
-            approval_wait.cancel()
-            try:
-                await approval_wait
-            except asyncio.CancelledError:
-                pass
-            _finish_attempt(config, success=False)
-            raise
-        except Exception:
-            approval_wait.cancel()
-            try:
-                await approval_wait
-            except (asyncio.CancelledError, TimeoutError):
-                pass
-            _finish_attempt(config, success=False)
-            raise
-
-        try:
-            decision = await approval_wait
-        except TimeoutError:
-            decision = "cancel"
-            approval_error_type = "approval_timeout"
-        except asyncio.CancelledError:
-            _finish_attempt(config, success=False)
-            raise
-        else:
-            approval_error_type = "user_rejected"
-
-        if decision != "execute":
-            runtime_state["approval_denied"] = True
-            _finish_attempt(config, success=False)
-            result = {
-                "success": False,
-                "agent": agent_name,
-                "error_type": approval_error_type,
-                "error": (
-                    "SQL approval timed out; the database query was not executed."
-                    if approval_error_type == "approval_timeout"
-                    else "The user rejected the generated SQL; the database query was not executed."
-                ),
-                "retryable": False,
-                "sql": validated_sql,
-                "parameters": actual_parameters,
-                "sources": [],
-            }
-            logger.tool_event(
-                status="completed",
+        if auto_execute_sql:
+            logger.info(
+                "sql.auto_execute",
+                component="tool",
                 tool_name=tool_name,
-                duration_ms=round((perf_counter() - started_at) * 1000, 2),
                 attempt=attempt,
-                success=False,
-                error_type=approval_error_type,
+                agent_name=agent_name,
             )
-            return json.dumps(result, ensure_ascii=False, default=str)
+            try:
+                await adispatch_custom_event(
+                    "sql_auto_execute",
+                    {
+                        "run_id": run_id,
+                        "agent": agent_name,
+                        "purpose": purpose,
+                        "tables": tables,
+                        "message": (
+                            "Automatic SQL execution is enabled. The validated "
+                            "read-only query is running without an approval prompt."
+                        ),
+                    },
+                    config=config,
+                )
+            except asyncio.CancelledError:
+                _finish_attempt(config, success=False)
+                raise
+            except Exception as error:
+                logger.warning(
+                    "sql.auto_execute_event_failed",
+                    component="tool",
+                    tool_name=tool_name,
+                    error_type=type(error).__name__,
+                )
+        else:
+            pending = await sql_approval_manager.create(
+                run_id=run_id,
+                agent_name=agent_name,
+            )
+            approval_wait = asyncio.create_task(sql_approval_manager.wait(pending))
+            try:
+                await adispatch_custom_event(
+                    "sql_approval",
+                    {
+                        "approval_id": pending.approval_id,
+                        "run_id": run_id,
+                        "agent": agent_name,
+                        "purpose": purpose,
+                        "sql": executable_sql,
+                        "generated_sql": validated_sql,
+                        "parameters": actual_parameters,
+                        "tables": tables,
+                        "message": (
+                            "No dedicated skill matched this request. The Agent is ready "
+                            "to run the following read-only query. It may fail, take a "
+                            "long time, or consume additional tokens. Do you want to execute it?"
+                        ),
+                    },
+                    config=config,
+                )
+            except asyncio.CancelledError:
+                approval_wait.cancel()
+                try:
+                    await approval_wait
+                except asyncio.CancelledError:
+                    pass
+                _finish_attempt(config, success=False)
+                raise
+            except Exception:
+                approval_wait.cancel()
+                try:
+                    await approval_wait
+                except (asyncio.CancelledError, TimeoutError):
+                    pass
+                _finish_attempt(config, success=False)
+                raise
+
+            try:
+                decision = await approval_wait
+            except TimeoutError:
+                decision = "cancel"
+                approval_error_type = "approval_timeout"
+            except asyncio.CancelledError:
+                _finish_attempt(config, success=False)
+                raise
+            else:
+                approval_error_type = "user_rejected"
+
+            if decision != "execute":
+                runtime_state["approval_denied"] = True
+                _finish_attempt(config, success=False)
+                result = {
+                    "success": False,
+                    "agent": agent_name,
+                    "error_type": approval_error_type,
+                    "error": (
+                        "SQL approval timed out; the database query was not executed."
+                        if approval_error_type == "approval_timeout"
+                        else "The user rejected the generated SQL; the database query was not executed."
+                    ),
+                    "retryable": False,
+                    "sql": validated_sql,
+                    "parameters": actual_parameters,
+                    "sources": [],
+                }
+                logger.tool_event(
+                    status="completed",
+                    tool_name=tool_name,
+                    duration_ms=round((perf_counter() - started_at) * 1000, 2),
+                    attempt=attempt,
+                    success=False,
+                    error_type=approval_error_type,
+                )
+                return json.dumps(result, ensure_ascii=False, default=str)
 
         try:
             result = await asyncio.to_thread(

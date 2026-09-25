@@ -12,10 +12,12 @@ that dedicated skill and do not run the mandatory SQL sequence below.
 ## Mandatory sequence
 
 1. If a product name is fuzzy, non-standard, or cross-language, resolve it with
-   `find_real_name` and use only exact values from its successful returned list. Never
-   invent, infer, translate into, or guess a product name. The resolver allows
-   three sequential attempts at thresholds 0.70, 0.60, and 0.55. Retry only when
-   `retryable=true`; when `terminal=true`, stop and request the exact product name.
+   `find_real_name` and use only exact values from the successful result's `items`.
+   Never invent, infer, translate into, or guess a product name. The resolver
+   allows three sequential attempts at thresholds 0.70, 0.60, and 0.55. Retry
+   only when `retryable=true`. When `result_status=matched`, reuse the returned
+   name and never call the resolver again. When no match returns `terminal=true`,
+   stop and request the exact product name.
 2. Retrieve the agent-scoped schema.
 3. Resolve other uncertain entity values when required.
 4. Generate one explicit-column `SELECT` statement.

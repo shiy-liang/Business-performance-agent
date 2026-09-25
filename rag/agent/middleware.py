@@ -88,6 +88,11 @@ class PublicEventMiddleware:
         self._reasoning_announced = False
         self._announced_specialists: set[str] = set()
         self._model_turns: dict[str, int] = {}
+        self._product_resolution_calls: dict[str, int] = {}
+        self._product_resolution_in_flight: set[str] = set()
+        self._product_resolution_resolved: set[str] = set()
+        self._product_resolution_run_scopes: dict[str, str] = {}
+        self._suppressed_tool_runs: set[str] = set()
 
     def started(self, run_id: str) -> PublicAgentEvent:
         return {
@@ -104,7 +109,46 @@ class PublicEventMiddleware:
         name = str(event.get("name", ""))
         data = event.get("data") or {}
         tags = set(event.get("tags") or [])
+        event_run_id = str(event.get("run_id") or "")
+        resolution_scope = (
+            "finance"
+            if "finance" in tags
+            else "operations" if "operations" in tags else "specialist"
+        )
         translated: list[PublicAgentEvent] = []
+
+        if name == "find_real_name" and event_type == "on_tool_start":
+            calls = self._product_resolution_calls.get(resolution_scope, 0)
+            if (
+                resolution_scope in self._product_resolution_resolved
+                or resolution_scope in self._product_resolution_in_flight
+                or calls >= 3
+            ):
+                if event_run_id:
+                    self._suppressed_tool_runs.add(event_run_id)
+                return []
+            self._product_resolution_calls[resolution_scope] = calls + 1
+            self._product_resolution_in_flight.add(resolution_scope)
+            if event_run_id:
+                self._product_resolution_run_scopes[event_run_id] = resolution_scope
+        elif name == "find_real_name" and event_type == "on_tool_end":
+            if event_run_id in self._suppressed_tool_runs:
+                self._suppressed_tool_runs.discard(event_run_id)
+                return []
+            resolution_scope = self._product_resolution_run_scopes.pop(
+                event_run_id,
+                resolution_scope,
+            )
+            self._product_resolution_in_flight.discard(resolution_scope)
+        elif name == "find_real_name" and event_type == "on_tool_error":
+            if event_run_id in self._suppressed_tool_runs:
+                self._suppressed_tool_runs.discard(event_run_id)
+                return []
+            resolution_scope = self._product_resolution_run_scopes.pop(
+                event_run_id,
+                resolution_scope,
+            )
+            self._product_resolution_in_flight.discard(resolution_scope)
 
         if event_type == "on_chat_model_start":
             progress = self._model_progress_message(name, tags)
@@ -134,11 +178,14 @@ class PublicEventMiddleware:
                     },
                 }
             )
-        elif event_type == "on_custom_event" and name == "sql_approval":
+        elif event_type == "on_custom_event" and name in {
+            "sql_approval",
+            "sql_auto_execute",
+        }:
             if isinstance(data, dict):
                 translated.append(
                     {
-                        "event": "sql_approval",
+                        "event": name,
                         "data": dict(data),
                     }
                 )
@@ -161,7 +208,16 @@ class PublicEventMiddleware:
         elif event_type == "on_tool_end" and name in self.allowed_tools:
             payload = _tool_payload(data.get("output"))
             if payload:
-                if name == "load_operations_skills" and payload.get("success") is True:
+                if (
+                    name == "find_real_name"
+                    and payload.get("success") is True
+                    and payload.get("result_status") == "matched"
+                ):
+                    self._product_resolution_resolved.add(resolution_scope)
+                if (
+                    name in {"load_finance_skills", "load_operations_skills"}
+                    and payload.get("success") is True
+                ):
                     skill_items = payload.get("selected_skill_titles") or []
                     translated.append(
                         {
@@ -290,11 +346,11 @@ class PublicEventMiddleware:
         if turn == 1:
             if agent == "operations":
                 return "Operations is selecting a dedicated workflow or the governed SQL fallback."
-            return "Finance is identifying the required measures and authorized schema."
+            return "Finance is selecting a dedicated workflow or the governed SQL fallback."
         if turn == 2:
             if agent == "operations":
                 return "Operations is using the authorized evidence tools for the selected workflow."
-            return "Finance is composing one governed read-only query."
+            return "Finance is using the authorized evidence tools for the selected workflow."
         if turn == 3:
             return f"{label} is checking returned evidence and preparing its finding."
         return f"{label} is correcting an evidence gap using validator feedback."
@@ -305,11 +361,12 @@ class PublicEventMiddleware:
         payload: dict[str, Any] | None,
     ) -> dict[str, Any]:
         payload = payload or {}
-        if name == "load_operations_skills":
+        if name in {"load_finance_skills", "load_operations_skills"}:
+            label = "Finance" if name == "load_finance_skills" else "Operations"
             if payload.get("success") is True:
                 return {
                     "stage": "workflow_execution",
-                    "message": "Selected workflow instructions are loaded; Operations is collecting evidence.",
+                    "message": f"Selected workflow instructions are loaded; {label} is collecting evidence.",
                 }
             return {
                 "stage": "workflow_selection",
@@ -377,7 +434,15 @@ class PublicEventMiddleware:
                 "message": "Knowledge evidence is ready for final synthesis.",
             }
         if name == "find_real_name":
-            if payload.get("terminal") is True:
+            if payload.get("result_status") == "matched":
+                return {
+                    "stage": "query_planning",
+                    "message": "The canonical product name is resolved; the specialist is applying it to the requested analysis.",
+                }
+            if (
+                payload.get("terminal") is True
+                and payload.get("result_status") == "canonical_product_not_found"
+            ):
                 return {
                     "stage": "evidence_gap",
                     "message": "No canonical product matched after three attempts; the user must provide an exact product name.",
@@ -422,6 +487,20 @@ class PublicEventMiddleware:
                 "message": "Concrete support-ticket evidence is ready for validation.",
             }
         if name in {
+            "calculate_net_sales",
+            "calculate_gross_profit",
+            "calculate_gross_margin",
+        }:
+            if payload.get("success") is True:
+                return {
+                    "stage": "evidence_validation",
+                    "message": "The fixed Finance calculation is ready for validation.",
+                }
+            return {
+                "stage": "evidence_gap",
+                "message": "The fixed Finance calculation was unavailable; the limitation will be reported.",
+            }
+        if name in {
             "search_customer_reviews",
             "find_other_comment_product",
             "find_other_comment_category",
@@ -441,7 +520,11 @@ class PublicEventMiddleware:
             "search_knowledge": "Searching the uploaded knowledge base for supporting rules.",
             "delegate_finance": "Preparing a structured task for the Finance Agent.",
             "delegate_operations": "Preparing a structured task for the Operations Agent.",
+            "load_finance_skills": "Loading instructions for the selected Finance workflows.",
             "load_operations_skills": "Loading instructions for the selected Operations workflows.",
+            "calculate_net_sales": "Finance is calculating refund-adjusted net sales.",
+            "calculate_gross_profit": "Finance is calculating gross profit from recorded transactions.",
+            "calculate_gross_margin": "Finance is calculating gross margin from recorded transactions.",
             "find_real_name": "Matching the requested product to canonical database names.",
             "check_purchase_rate": "Calculating the product's interest-to-purchase event ratio.",
             "check_like_rate": "Calculating the product's view-to-like event ratio.",
@@ -451,10 +534,10 @@ class PublicEventMiddleware:
             "check_concrete_problem": "Operations is searching concrete descriptions in support-ticket notes.",
             "search_finance_schema": "Finance is selecting authorized tables and columns.",
             "resolve_finance_entity": "Finance is matching the requested entity to database values.",
-            "execute_finance_sql": "Finance is validating generated read-only SQL before user approval.",
+            "execute_finance_sql": "Finance is validating generated read-only SQL.",
             "search_operations_schema": "Operations is selecting authorized tables and columns.",
             "resolve_operations_entity": "Operations is matching the requested entity to database values.",
-            "execute_operations_sql": "Operations is validating generated read-only SQL before user approval.",
+            "execute_operations_sql": "Operations is validating generated read-only SQL.",
             "search_customer_reviews": "Operations is searching customer review themes with structured filters.",
             "find_other_comment_product": "Operations is retrieving additional unseen reviews for the selected product.",
             "find_other_comment_category": "Operations is retrieving additional unseen reviews for the selected category.",
@@ -463,16 +546,39 @@ class PublicEventMiddleware:
 
     @staticmethod
     def _tool_end_message(name: str, payload: dict[str, Any] | None) -> str:
-        if name == "load_operations_skills" and payload is not None:
+        if (
+            name in {"load_finance_skills", "load_operations_skills"}
+            and payload is not None
+        ):
             if payload.get("success") is True:
                 count = len(payload.get("selected_skills") or [])
                 return f"{name} loaded {count} workflow skill(s)."
             return f"{name} reported {payload.get('error_type', 'an error')}."
+        if (
+            name in {
+                "calculate_net_sales",
+                "calculate_gross_profit",
+                "calculate_gross_margin",
+            }
+            and payload is not None
+        ):
+            if payload.get("success") is False:
+                return f"{name} could not complete the fixed Finance calculation."
+            result = payload.get("result") or {}
+            return (
+                f"{name} completed for {int(result.get('transaction_count') or 0)} "
+                "transactions."
+            )
         if name == "find_real_name" and payload is not None:
             count = len(payload.get("items") or [])
             call_number = payload.get("call_number")
             threshold = payload.get("minimum_similarity")
-            if payload.get("terminal") is True:
+            if payload.get("result_status") == "matched":
+                return f"{name} resolved {count} canonical product name(s)."
+            if (
+                payload.get("terminal") is True
+                and payload.get("result_status") == "canonical_product_not_found"
+            ):
                 return f"{name} found no canonical product after three attempts; resolution stopped."
             suffix = (
                 f" on attempt {call_number} at threshold {threshold}"

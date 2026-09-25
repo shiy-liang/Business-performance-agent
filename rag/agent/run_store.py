@@ -108,7 +108,7 @@ class RunRecorder:
         if event_type == "token":
             return
         data = _safe_value(event.get("data") or {})
-        if event_type == "sql_approval":
+        if event_type in {"sql_approval", "sql_auto_execute"}:
             # Parameters are intentionally visible to the requesting user but must
             # not be copied into durable audit storage.
             data.pop("parameters", None)

@@ -18,6 +18,7 @@ from rag.agent.specialists.graph import (
 )
 from rag.agent.tools.registry import ToolRegistry, default_tool_registry
 from rag.agent.validation import validate_specialist_evidence
+from rag.agent.workflows import load_agent_runtime_config
 
 
 def _collect_tool_payloads(messages: list[Any]) -> list[dict[str, Any]]:
@@ -82,9 +83,10 @@ async def run_specialist_agent(
         active_graph = get_default_specialist_graph(agent_name)
     else:
         active_graph = build_specialist_graph(agent_name, tool_registry=registry)
+    runtime_config = load_agent_runtime_config()
     child_config: RunnableConfig = dict(config or {})
     child_config["run_name"] = f"{agent_name}-agent"
-    child_config["recursion_limit"] = 16
+    child_config["recursion_limit"] = runtime_config.specialist.recursion_limit
     child_config["tags"] = [agent_name, "specialist"]
     configurable = dict(child_config.get("configurable") or {})
     configurable.update(
@@ -110,9 +112,14 @@ async def run_specialist_agent(
                 "calls": 0,
                 "in_flight": False,
             },
+            "finance_metric_runtime_state": {
+                "calls": {},
+                "in_flight": [],
+            },
             "product_resolution_runtime_state": {
                 "attempts": 0,
                 "in_flight": False,
+                "resolved": False,
                 "accepted_product_names": [],
             },
             "workflow_runtime_state": {

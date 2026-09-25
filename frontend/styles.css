@@ -1034,10 +1034,128 @@ h2 {
   justify-content: space-between;
 }
 
-.chat-compose-actions > span {
+.chat-compose-meta {
+  display: flex;
+  gap: 7px 14px;
+  align-items: center;
+  min-width: 0;
   padding-left: 7px;
+  flex-wrap: wrap;
+}
+
+.chat-shortcut {
   color: #849994;
   font-size: 9px;
+}
+
+.sql-auto-execute-setting {
+  position: relative;
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+}
+
+.sql-auto-execute-toggle {
+  position: relative;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  color: #b8c9c4;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.sql-auto-execute-toggle input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+}
+
+.sql-auto-checkbox {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  border: 1px solid rgba(231, 240, 235, 0.42);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+}
+
+.sql-auto-execute-toggle input:checked + .sql-auto-checkbox {
+  border-color: var(--lime);
+  background: var(--lime);
+}
+
+.sql-auto-execute-toggle input:checked + .sql-auto-checkbox::after {
+  position: absolute;
+  top: 1px;
+  left: 4px;
+  width: 4px;
+  height: 7px;
+  content: "";
+  border: solid #173e34;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.sql-auto-execute-toggle input:focus-visible + .sql-auto-checkbox {
+  outline: 3px solid rgba(200, 239, 116, 0.2);
+  outline-offset: 2px;
+}
+
+.sql-auto-execute-toggle input:disabled ~ span {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.sql-auto-help {
+  position: relative;
+}
+
+.sql-auto-help summary {
+  display: grid;
+  width: 16px;
+  height: 16px;
+  color: #a5b9b3;
+  cursor: pointer;
+  border: 1px solid rgba(231, 240, 235, 0.28);
+  border-radius: 50%;
+  font-size: 9px;
+  font-weight: 800;
+  list-style: none;
+  place-items: center;
+}
+
+.sql-auto-help summary::-webkit-details-marker {
+  display: none;
+}
+
+.sql-auto-help summary:focus-visible {
+  outline: 3px solid rgba(200, 239, 116, 0.2);
+  outline-offset: 2px;
+}
+
+.sql-auto-help > div {
+  position: absolute;
+  z-index: 12;
+  bottom: calc(100% + 9px);
+  left: 50%;
+  width: min(280px, 72vw);
+  padding: 10px 12px;
+  color: #e4efeb;
+  border: 1px solid rgba(231, 240, 235, 0.18);
+  border-radius: 9px;
+  background: #173e34;
+  box-shadow: 0 10px 24px rgba(4, 19, 15, 0.3);
+  font-size: 10px;
+  line-height: 1.5;
+  transform: translateX(-50%);
 }
 
 .chat-form button {
@@ -2124,12 +2242,22 @@ footer {
     grid-template-columns: 1fr;
   }
 
-  .chat-compose-actions > span {
+  .chat-shortcut {
     display: none;
   }
 
   .chat-compose-actions {
-    justify-content: flex-end;
+    gap: 10px;
+  }
+
+  .chat-compose-meta {
+    padding-left: 3px;
+  }
+
+  .sql-auto-help > div {
+    right: -18px;
+    left: auto;
+    transform: none;
   }
 
   .chat-answer-header {

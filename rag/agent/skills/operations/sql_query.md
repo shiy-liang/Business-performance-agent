@@ -6,6 +6,9 @@ Sales units and breakdowns, inventory status, product and store performance,
 customer activity, returns by count or reason, support service, and operational
 campaign conversion metrics.
 
+This is the generic fallback. Select it only when no dedicated Operations skill
+matches any part of the delegated task.
+
 ## Do not use this skill for
 
 Profitability, margin, expenses, financial ROI conclusions, policy interpretation,
@@ -15,17 +18,21 @@ skill. Never generate SQL for a task that matches that dedicated skill.
 ## Procedure
 
 1. Identify the operational measure, grain, period, scope, and filters.
-2. Retrieve only relevant Operations schema.
-3. If a column's type, meaning, or allowed values are unclear, call
+2. If the query involves a product name, first call `find_real_name` to obtain
+   the exact canonical name. Use only a name returned in `items`. Once it returns
+   `result_status=matched`, do not call `find_real_name` again for this task.
+3. Retrieve only relevant Operations schema.
+4. If a column's type, meaning, or allowed values are unclear, call
    `get_columns_detail` for its table before generating SQL.
-4. Resolve uncertain products, stores, campaigns, customers, or categories.
-5. Choose the correct fact date and avoid mixing transaction, return, review, and
+5. Resolve uncertain stores, campaigns, customers, or categories. Product names
+   must use `find_real_name`, not the general entity resolver.
+6. Choose the correct fact date and avoid mixing transaction, return, review, and
    inventory grains.
-6. For inventory, select one appropriate snapshot before aggregating.
-7. Generate parameterized, explicit-column SQL with deterministic ordering.
-8. Execute through the Operations SQL tool and check for fan-out or truncation.
-9. Label synthetic fields and describe relationships as associations.
-10. Provide the result, citation, final SQL, parameters, and visible limitations.
+7. For inventory, select one appropriate snapshot before aggregating.
+8. Generate parameterized, explicit-column SQL with deterministic ordering.
+9. Execute through the Operations SQL tool and check for fan-out or truncation.
+10. Label synthetic fields and describe relationships as associations.
+11. Provide the result, citation, final SQL, parameters, and visible limitations.
 
 ## Positive example
 

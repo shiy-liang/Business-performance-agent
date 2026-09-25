@@ -22,6 +22,7 @@ from rag.agent.sql_approval import (
 )
 from rag.agent.state import PublicAgentEvent
 from rag.agent.tools.registry import ToolRegistry, default_tool_registry
+from rag.agent.workflows import load_agent_runtime_config
 
 
 async def stream_supervisor(
@@ -30,6 +31,7 @@ async def stream_supervisor(
     conversation_messages: list[AnyMessage] | None = None,
     graph: Any | None = None,
     tool_registry: ToolRegistry | None = None,
+    auto_execute_sql: bool = False,
 ) -> AsyncIterator[PublicAgentEvent]:
     """Yield safe progress, tool, citation, and answer-token events."""
 
@@ -52,6 +54,7 @@ async def stream_supervisor(
         registry = tool_registry or default_tool_registry
         active_graph = graph or build_supervisor_graph(tool_registry=registry)
     middleware = PublicEventMiddleware(registry.all_tool_names())
+    agent_runtime = load_agent_runtime_config()
     recorder = RunRecorder(run_id)
     context_token = logger.bind_context(run_id=run_id, agent_name="supervisor")
     logger.info("agent.started", component="agent")
@@ -97,12 +100,13 @@ async def stream_supervisor(
                 "messages": messages,
             },
             config={
-                "recursion_limit": 10,
+                "recursion_limit": agent_runtime.supervisor.recursion_limit,
                 "run_name": "business-supervisor",
                 "callbacks": [AgentLoggingCallback()],
                 "configurable": {
                     "run_id": run_id,
                     "delegation_runtime_state": {},
+                    "auto_execute_sql": auto_execute_sql,
                 },
             },
             version="v2",

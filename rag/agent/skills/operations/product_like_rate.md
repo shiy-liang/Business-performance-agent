@@ -15,12 +15,14 @@ views, or wishlists after views.
    Never invent, infer, translate into, or guess a canonical product name. The
    resolver permits three sequential attempts with thresholds 0.70, 0.60, and
    0.55. Retry only when `retryable=true`, using a faithful rephrasing that does
-   not add an unmentioned model. If the third result is empty and
+   not add an unmentioned model. When `result_status=matched`, use an exact name
+   from `items` and never call `find_real_name` again. If the third result is empty and
    `terminal=true`, stop immediately and ask for the exact product name.
 2. Call `check_like_rate` with one exact canonical `product_name`. Do not search
    schema, generate SQL, call an entity resolver, or call
    `execute_operations_sql` for this metric.
-   The name must be one of the exact values in the successful list returned by `find_real_name`
+   The name must be one of the exact values in the successful result's `items`
+   returned by `find_real_name`
    whenever resolution was attempted; never call this tool after empty results.
 3. For an explicit comparison, call the tool sequentially once per requested
    canonical product. Do not introduce products the user did not request.

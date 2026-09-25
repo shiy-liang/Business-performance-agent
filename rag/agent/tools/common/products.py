@@ -111,11 +111,13 @@ def _product_resolution_state(config: RunnableConfig) -> dict[str, Any]:
         state = {
             "attempts": 0,
             "in_flight": False,
+            "resolved": False,
             "accepted_product_names": [],
         }
         configurable["product_resolution_runtime_state"] = state
     state.setdefault("attempts", 0)
     state.setdefault("in_flight", False)
+    state.setdefault("resolved", False)
     state.setdefault("accepted_product_names", [])
     return state
 
@@ -141,12 +143,36 @@ def canonical_product_name_error(
 
 @tool(args_schema=FindRealNameInput)
 async def find_real_name(query: str, config: RunnableConfig) -> str:
-    """Resolve a fuzzy product in at most three sequential, progressively broader attempts."""
+    """Resolve a fuzzy product, stopping after the first match or three attempts."""
 
     tool_name = "find_real_name"
     state = _product_resolution_state(config)
     attempts = int(state.get("attempts", 0))
     agent_name = str(config.get("configurable", {}).get("agent_name") or "")
+    accepted_product_names = [
+        str(value) for value in state.get("accepted_product_names") or []
+    ]
+    if state.get("resolved") is True or accepted_product_names:
+        state["resolved"] = True
+        return json.dumps(
+            {
+                "success": False,
+                "agent": agent_name,
+                "tool": tool_name,
+                "result_status": "already_resolved",
+                "error_type": "already_resolved",
+                "error": (
+                    "A canonical product name was already resolved. Reuse the exact "
+                    "returned name and do not call find_real_name again."
+                ),
+                "call_number": attempts,
+                "max_attempts": MAX_PRODUCT_NAME_ATTEMPTS,
+                "retryable": False,
+                "terminal": True,
+                "items": accepted_product_names,
+            },
+            ensure_ascii=False,
+        )
     if state.get("in_flight") is True:
         return json.dumps(
             {
@@ -228,6 +254,7 @@ async def find_real_name(query: str, config: RunnableConfig) -> str:
             existing.append(product_name)
             seen.add(product_name.casefold())
     state["accepted_product_names"] = existing
+    state["resolved"] = bool(existing)
     terminal = not product_names and call_number >= MAX_PRODUCT_NAME_ATTEMPTS
     result_status = (
         "matched"
@@ -248,8 +275,22 @@ async def find_real_name(query: str, config: RunnableConfig) -> str:
         ),
     )
     if product_names:
-        # Preserve the established successful-result contract for existing callers.
-        return json.dumps(product_names, ensure_ascii=False)
+        return json.dumps(
+            {
+                "success": True,
+                "agent": agent_name,
+                "tool": tool_name,
+                "result_status": "matched",
+                "call_number": call_number,
+                "max_attempts": MAX_PRODUCT_NAME_ATTEMPTS,
+                "minimum_similarity": minimum_similarity,
+                "retryable": False,
+                "terminal": True,
+                "items": product_names,
+                "accepted_product_names": existing,
+            },
+            ensure_ascii=False,
+        )
 
     payload = {
         "success": False,

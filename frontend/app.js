@@ -49,6 +49,7 @@ const elements = {
   chatCopyButton: document.querySelector("#chat-copy-button"),
   chatSources: document.querySelector("#chat-sources"),
   chatSubmitLabel: document.querySelector("#chat-submit-label"),
+  sqlAutoExecute: document.querySelector("#sql-auto-execute"),
   knowledgeDropZone: document.querySelector("#knowledge-drop-zone"),
   knowledgeFileInput: document.querySelector("#knowledge-file-input"),
   knowledgeFileCount: document.querySelector("#knowledge-file-count"),
@@ -624,6 +625,11 @@ function handleChatEvent(eventName, data) {
     renderChatSources(data?.items);
   } else if (eventName === "sql_approval") {
     renderSqlApproval(data);
+  } else if (eventName === "sql_auto_execute") {
+    const detail = message || "Running validated SQL automatically without an approval prompt.";
+    elements.chatAnswerStatus.textContent = "Querying";
+    setThinking(detail);
+    appendChatActivity("tool-start", "Automatic SQL execution", detail);
   } else if (eventName === "token") {
     const text = String(data?.text || "");
     if (!text) return;
@@ -666,6 +672,7 @@ function parseSseFrame(frame) {
 async function submitChat(question) {
   const cleanQuestion = String(question || "").trim();
   if (!cleanQuestion) return;
+  const autoExecuteSql = elements.sqlAutoExecute.checked;
   try {
     await ensureChatSession();
   } catch (error) {
@@ -680,6 +687,7 @@ async function submitChat(question) {
 
   const submitButton = elements.chatForm.querySelector('button[type="submit"]');
   submitButton.disabled = true;
+  elements.sqlAutoExecute.disabled = true;
   elements.chatSubmitLabel.textContent = "Working";
 
   try {
@@ -691,6 +699,7 @@ async function submitChat(question) {
         body: JSON.stringify({
           session_id: state.chatSessionId,
           message: cleanQuestion,
+          auto_execute_sql: autoExecuteSql,
         }),
         signal: controller.signal,
       });
@@ -735,6 +744,7 @@ async function submitChat(question) {
     if (state.chatController === controller) {
       state.chatController = null;
       submitButton.disabled = false;
+      elements.sqlAutoExecute.disabled = false;
       elements.chatSubmitLabel.textContent = "Send";
     }
   }
