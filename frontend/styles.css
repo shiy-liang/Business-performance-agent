@@ -15,6 +15,9 @@
   --amber-soft: #fbefd9;
   --red: #bd4d47;
   --red-soft: #f8e5e2;
+  --activity-scrollbar-track: rgba(4, 17, 17, 0.16);
+  --activity-scrollbar-thumb: #526964;
+  --activity-scrollbar-thumb-hover: #6b817b;
   --shadow: 0 18px 48px rgba(32, 50, 42, 0.07);
   --radius-lg: 24px;
   --radius-md: 16px;
@@ -115,8 +118,7 @@ button {
 
 .live-pill,
 .soft-badge,
-.alert-badge,
-.count-chip {
+.alert-badge {
   display: inline-flex;
   align-items: center;
   white-space: nowrap;
@@ -920,7 +922,6 @@ h2 {
 }
 
 .compact-list,
-.ticket-list,
 .rank-list,
 .campaign-list {
   min-height: 140px;
@@ -931,7 +932,6 @@ h2 {
 }
 
 .inventory-row,
-.ticket-row,
 .rank-row,
 .campaign-row {
   display: grid;
@@ -1017,40 +1017,6 @@ h2 {
   margin-top: 2px;
   color: var(--muted);
   font-size: 10px;
-}
-
-.count-chip {
-  padding: 5px 8px;
-  color: #7c430d;
-  background: var(--amber-soft);
-}
-
-.ticket-row {
-  grid-template-columns: auto minmax(0, 1fr);
-  padding: 11px 1px;
-}
-
-.age-box {
-  min-width: 48px;
-  padding: 7px 6px;
-  text-align: center;
-  border-radius: 9px;
-  color: #965419;
-  background: var(--amber-soft);
-}
-
-.age-box strong,
-.age-box small {
-  display: block;
-}
-
-.age-box strong {
-  font-size: 14px;
-}
-
-.age-box small {
-  margin-top: 1px;
-  font-size: 8px;
 }
 
 .assistant-header {
@@ -1497,11 +1463,13 @@ h2 {
   display: grid;
   grid-template-columns: minmax(220px, 270px) minmax(0, 1fr);
   gap: 12px;
-  align-items: stretch;
+  align-items: start;
 }
 
 .chat-trace {
+  align-self: start;
   min-width: 0;
+  min-height: 0;
   overflow: hidden;
   border: 1px solid rgba(226, 238, 232, 0.12);
   border-radius: 14px;
@@ -1540,6 +1508,10 @@ h2 {
   border-bottom-color: rgba(226, 238, 232, 0.09);
 }
 
+.chat-trace[open] {
+  height: var(--activity-panel-height, auto);
+}
+
 .trace-title {
   color: #edf4f1;
   font-size: 11px;
@@ -1552,7 +1524,40 @@ h2 {
 }
 
 .trace-content {
+  height: var(--activity-content-max-height, auto);
+  max-height: var(--activity-content-max-height, 400px);
+  min-height: 0;
   padding: 13px 15px 15px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: var(--activity-scrollbar-thumb) transparent;
+  scrollbar-width: thin;
+}
+
+.trace-content::-webkit-scrollbar {
+  width: 7px;
+}
+
+.trace-content::-webkit-scrollbar-track {
+  background: var(--activity-scrollbar-track);
+}
+
+.trace-content::-webkit-scrollbar-thumb {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--activity-scrollbar-thumb);
+  background-clip: padding-box;
+}
+
+.trace-content::-webkit-scrollbar-thumb:hover {
+  background: var(--activity-scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+
+.trace-content::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .chat-subtasks {
@@ -2287,11 +2292,29 @@ h2 {
   border-radius: 9px;
   color: #2c3a33;
   background: #fff;
+  font-family: inherit;
   font-size: 10px;
+  text-align: left;
 }
 
-.chat-sources a.source-entry:hover {
+button.source-entry {
+  width: 100%;
+  cursor: pointer;
+  appearance: none;
+}
+
+button.source-entry:hover {
   border-color: #9db9aa;
+}
+
+button.source-entry:focus-visible {
+  outline: 2px solid #5d8975;
+  outline-offset: 2px;
+}
+
+button.source-entry:disabled {
+  cursor: wait;
+  opacity: 0.72;
 }
 
 .source-index {
@@ -2332,7 +2355,9 @@ h2 {
 
 .source-open {
   color: var(--green-dark);
-  font-size: 13px;
+  font-size: 8px;
+  font-weight: 750;
+  white-space: nowrap;
 }
 
 .assistant-status {
@@ -2440,7 +2465,6 @@ h2 {
 
 .campaign-row:last-child,
 .inventory-row:last-child,
-.ticket-row:last-child,
 .rank-row:last-child {
   border-bottom: 0;
 }
@@ -2660,6 +2684,15 @@ footer {
 
   .chat-trace:not([open]) summary {
     border-bottom: 0;
+  }
+
+  .chat-trace[open] {
+    height: auto;
+  }
+
+  .trace-content {
+    height: auto;
+    max-height: 360px;
   }
 
   .source-list {

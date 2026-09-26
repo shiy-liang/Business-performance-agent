@@ -34,8 +34,6 @@ const elements = {
   businessRiskList: document.querySelector("#business-risk-list"),
   inventoryRiskSummary: document.querySelector("#inventory-risk-summary"),
   inventoryList: document.querySelector("#inventory-list"),
-  ticketCount: document.querySelector("#ticket-count"),
-  ticketList: document.querySelector("#ticket-list"),
   productTabs: document.querySelector("#product-tabs"),
   productList: document.querySelector("#product-list"),
   campaignCount: document.querySelector("#campaign-count"),
@@ -47,6 +45,10 @@ const elements = {
   chatInput: document.querySelector("#chat-input"),
   chatResponse: document.querySelector("#chat-response"),
   chatQuestion: document.querySelector("#chat-question"),
+  chatTrace: document.querySelector(".chat-trace"),
+  chatTraceSummary: document.querySelector(".chat-trace > summary"),
+  chatTraceContent: document.querySelector(".trace-content"),
+  chatAnswerCard: document.querySelector(".chat-answer-card"),
   chatProgress: document.querySelector("#chat-progress"),
   chatSubtasks: document.querySelector("#chat-subtasks"),
   chatThinking: document.querySelector("#chat-thinking"),
@@ -79,6 +81,9 @@ const numberFormatter = new Intl.NumberFormat("en-US", {
 });
 
 const firstOperatingYear = 2020;
+const narrowChatLayout = window.matchMedia("(max-width: 760px)");
+let activitySizingInitialized = false;
+let activityResizeObserver = null;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -361,6 +366,8 @@ function archiveCompletedTurn() {
 function prepareChatResponse(question) {
   state.chatAnswerText = "";
   state.chatTurnComplete = false;
+  elements.chatTrace.open = true;
+  elements.chatTraceContent.scrollTop = 0;
   elements.chatResponse.hidden = false;
   elements.chatQuestion.textContent = question;
   elements.chatProgress.replaceChildren();
@@ -422,6 +429,67 @@ function scheduleChatAnswerRender() {
   state.chatRenderFrame = window.requestAnimationFrame(renderChatAnswer);
 }
 
+function isActivityNearBottom() {
+  const distanceFromBottom =
+    elements.chatTraceContent.scrollHeight -
+    elements.chatTraceContent.scrollTop -
+    elements.chatTraceContent.clientHeight;
+  return distanceFromBottom < 64;
+}
+
+function scrollActivityToBottom() {
+  elements.chatTraceContent.scrollTop = elements.chatTraceContent.scrollHeight;
+}
+
+function updateActivityContent(update) {
+  const shouldAutoScroll = isActivityNearBottom();
+
+  update();
+
+  if (shouldAutoScroll) scrollActivityToBottom();
+}
+
+function syncActivityHeight() {
+  const shouldStayAtBottom = isActivityNearBottom();
+
+  if (narrowChatLayout.matches || elements.chatResponse.hidden) {
+    elements.chatTrace.style.removeProperty("--activity-panel-height");
+    elements.chatTrace.style.removeProperty("--activity-content-max-height");
+  } else {
+    const responseHeight = elements.chatAnswerCard.getBoundingClientRect().height;
+    const headerHeight = elements.chatTraceSummary.getBoundingClientRect().height;
+    const traceBorderHeight =
+      elements.chatTrace.offsetHeight - elements.chatTrace.clientHeight;
+    const contentHeight = Math.max(
+      0,
+      Math.floor(responseHeight - headerHeight - traceBorderHeight),
+    );
+
+    elements.chatTrace.style.setProperty(
+      "--activity-panel-height",
+      `${Math.round(responseHeight)}px`,
+    );
+    elements.chatTrace.style.setProperty(
+      "--activity-content-max-height",
+      `${contentHeight}px`,
+    );
+  }
+
+  if (shouldStayAtBottom) scrollActivityToBottom();
+}
+
+function initializeActivitySizing() {
+  if (activitySizingInitialized) return;
+  activitySizingInitialized = true;
+
+  if (typeof ResizeObserver === "function") {
+    activityResizeObserver = new ResizeObserver(syncActivityHeight);
+    activityResizeObserver.observe(elements.chatAnswerCard);
+  }
+  narrowChatLayout.addEventListener("change", syncActivityHeight);
+  syncActivityHeight();
+}
+
 function appendChatActivity(kind, label, message) {
   const item = document.createElement("div");
   item.className = `chat-progress-item ${kind}`;
@@ -432,7 +500,7 @@ function appendChatActivity(kind, label, message) {
   heading.textContent = label;
   copy.append(heading, document.createTextNode(String(message || "")));
   item.append(dot, copy);
-  elements.chatProgress.append(item);
+  updateActivityContent(() => elements.chatProgress.append(item));
 }
 
 const SUBTASK_STATUS_LABELS = {
@@ -487,27 +555,29 @@ function renderSubtasks(items) {
   const tasks = Array.isArray(items)
     ? items.filter((item) => item && typeof item === "object" && item.id)
     : [];
-  state.chatSubtasks.clear();
-  tasks.forEach((item) => {
-    const task = { ...item, status: normalizedSubtaskStatus(item.status) };
-    state.chatSubtasks.set(String(task.id), task);
+  updateActivityContent(() => {
+    state.chatSubtasks.clear();
+    tasks.forEach((item) => {
+      const task = { ...item, status: normalizedSubtaskStatus(item.status) };
+      state.chatSubtasks.set(String(task.id), task);
+    });
+    elements.chatSubtasks.replaceChildren();
+    elements.chatSubtasks.hidden = state.chatSubtasks.size === 0;
+    if (!state.chatSubtasks.size) return;
+
+    const heading = document.createElement("div");
+    heading.className = "subtask-heading";
+    const title = document.createElement("strong");
+    title.textContent = "Subtasks";
+    const count = document.createElement("span");
+    heading.append(title, count);
+
+    const list = document.createElement("div");
+    list.className = "subtask-list";
+    state.chatSubtasks.forEach((task) => list.append(buildSubtaskRow(task)));
+    elements.chatSubtasks.append(heading, list);
+    updateSubtaskProgressCount();
   });
-  elements.chatSubtasks.replaceChildren();
-  elements.chatSubtasks.hidden = state.chatSubtasks.size === 0;
-  if (!state.chatSubtasks.size) return;
-
-  const heading = document.createElement("div");
-  heading.className = "subtask-heading";
-  const title = document.createElement("strong");
-  title.textContent = "Subtasks";
-  const count = document.createElement("span");
-  heading.append(title, count);
-
-  const list = document.createElement("div");
-  list.className = "subtask-list";
-  state.chatSubtasks.forEach((task) => list.append(buildSubtaskRow(task)));
-  elements.chatSubtasks.append(heading, list);
-  updateSubtaskProgressCount();
 }
 
 function updateSubtaskStatus(data) {
@@ -529,10 +599,12 @@ function updateSubtaskStatus(data) {
     renderSubtasks([...state.chatSubtasks.values()]);
     return;
   }
-  row.className = `subtask-row is-${status}`;
-  const label = row.querySelector(".subtask-state-label");
-  if (label) label.textContent = SUBTASK_STATUS_LABELS[status];
-  updateSubtaskProgressCount();
+  updateActivityContent(() => {
+    row.className = `subtask-row is-${status}`;
+    const label = row.querySelector(".subtask-state-label");
+    if (label) label.textContent = SUBTASK_STATUS_LABELS[status];
+    updateSubtaskProgressCount();
+  });
 }
 
 function setThinking(message, visible = true) {
@@ -541,12 +613,85 @@ function setThinking(message, visible = true) {
 }
 
 function safeSourceUrl(value) {
+  if (value === null || value === undefined) return null;
+  const candidate = String(value).trim();
+  if (!candidate) return null;
+
   try {
-    const url = new URL(String(value || ""), window.location.origin);
+    const url = new URL(candidate, window.location.origin);
     if (!['http:', 'https:'].includes(url.protocol)) return null;
     return url.href;
   } catch (_error) {
     return null;
+  }
+}
+
+function groupChatSources(sources) {
+  const entries = [];
+  const knowledgeFiles = new Map();
+
+  sources.forEach((source) => {
+    if (!source || typeof source !== "object") return;
+    if (source.file_id === null || source.file_id === undefined) {
+      entries.push({ kind: "source", source });
+      return;
+    }
+
+    const key = String(source.file_id);
+    let group = knowledgeFiles.get(key);
+    if (!group) {
+      group = {
+        kind: "knowledge-file",
+        file_id: source.file_id,
+        filename: source.filename,
+        download_url: source.download_url,
+        chunks: [],
+      };
+      knowledgeFiles.set(key, group);
+      entries.push(group);
+    }
+    if (!group.filename && source.filename) group.filename = source.filename;
+    if (!group.download_url && source.download_url) group.download_url = source.download_url;
+    group.chunks.push({
+      chunk_index: source.chunk_index,
+      citation: source.citation,
+      similarity: source.similarity,
+    });
+  });
+
+  return entries;
+}
+
+async function downloadChatSource(source, trigger, status) {
+  const href = safeSourceUrl(source.download_url);
+  if (!href) return;
+
+  const idleLabel = status.textContent;
+  trigger.disabled = true;
+  status.textContent = "Downloading…";
+  try {
+    const response = await fetch(href, { credentials: "same-origin" });
+    if (!response.ok) throw new Error(`Download failed (${response.status})`);
+
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const download = document.createElement("a");
+    download.href = objectUrl;
+    download.download = String(source.filename || "knowledge-source");
+    download.hidden = true;
+    document.body.append(download);
+    download.click();
+    download.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    status.textContent = "Downloaded";
+    window.setTimeout(() => {
+      if (status.isConnected) status.textContent = idleLabel;
+    }, 1400);
+  } catch (error) {
+    console.error("Reference download failed", error);
+    status.textContent = "Download failed · retry";
+  } finally {
+    trigger.disabled = false;
   }
 }
 
@@ -557,20 +702,24 @@ function renderChatSources(sources) {
     return;
   }
 
+  const entries = groupChatSources(sources);
+
   const heading = document.createElement("div");
   heading.className = "sources-heading";
   const title = document.createElement("strong");
   title.textContent = "References";
   const count = document.createElement("span");
-  count.textContent = `${sources.length} cited source${sources.length === 1 ? "" : "s"}`;
+  count.textContent = `${entries.length} cited source${entries.length === 1 ? "" : "s"}`;
   heading.append(title, count);
 
   const list = document.createElement("div");
   list.className = "source-list";
-  sources.forEach((source, index) => {
+  entries.forEach((entryData, index) => {
+    const isKnowledgeFile = entryData.kind === "knowledge-file";
+    const source = isKnowledgeFile ? entryData : entryData.source;
     const href = safeSourceUrl(source.download_url);
-    const entry = document.createElement(href ? "a" : "div");
-    if (href) entry.href = href;
+    const entry = document.createElement(href ? "button" : "div");
+    if (href) entry.type = "button";
     entry.className = "source-entry";
 
     const number = document.createElement("span");
@@ -581,15 +730,37 @@ function renderChatSources(sources) {
     const filename = document.createElement("strong");
     filename.textContent = source.filename || source.citation || "Knowledge source";
     const detail = document.createElement("small");
-    const similarity = Number(source.similarity);
-    detail.textContent = [
-      source.citation,
-      Number.isFinite(similarity) ? `${Math.round(similarity * 100)}% match` : "",
-    ].filter(Boolean).join(" · ");
+    if (isKnowledgeFile) {
+      const chunkDetails = source.chunks.map((chunk) => {
+        const similarity = Number(chunk.similarity);
+        const chunkLabel = chunk.chunk_index === null || chunk.chunk_index === undefined
+          ? String(chunk.citation || "evidence")
+          : `#${chunk.chunk_index}`;
+        return Number.isFinite(similarity)
+          ? `${chunkLabel} ${Math.round(similarity * 100)}%`
+          : chunkLabel;
+      });
+      detail.textContent = `${source.chunks.length} evidence chunk${source.chunks.length === 1 ? "" : "s"} · ${chunkDetails.join(", ")}`;
+      detail.title = source.chunks
+        .map((chunk) => String(chunk.citation || `#${chunk.chunk_index}`))
+        .join(", ");
+    } else {
+      const similarity = Number(source.similarity);
+      detail.textContent = [
+        source.citation,
+        Number.isFinite(similarity) ? `${Math.round(similarity * 100)}% match` : "",
+      ].filter(Boolean).join(" · ");
+    }
     copy.append(filename, detail);
     const open = document.createElement("span");
     open.className = "source-open";
-    open.textContent = href ? "↗" : "";
+    open.textContent = href ? "Download" : "";
+    if (href) {
+      entry.addEventListener("click", (event) => {
+        event.preventDefault();
+        downloadChatSource(source, entry, open);
+      });
+    }
     entry.append(number, copy, open);
     list.append(entry);
   });
@@ -1283,36 +1454,6 @@ function renderInventorySection(inventory, inventoryIssue) {
   `;
 }
 
-function renderSupportTickets(tickets) {
-  const ticketItems = Array.isArray(tickets.oldest) ? tickets.oldest : [];
-  elements.ticketCount.textContent = `${numberFormatter.format(
-    finiteNumber(tickets.unresolved_high_priority_count),
-  )} unresolved`;
-
-  if (ticketItems.length === 0) {
-    renderEmpty(elements.ticketList, "No unresolved high-priority tickets");
-    return;
-  }
-
-  elements.ticketList.className = "ticket-list";
-  elements.ticketList.innerHTML = ticketItems
-    .map(
-      (ticket) => `
-        <article class="ticket-row">
-          <span class="age-box">
-            <strong>${numberFormatter.format(finiteNumber(ticket.open_days))}</strong>
-            <small>days open</small>
-          </span>
-          <div>
-            <span class="row-title">${escapeHtml(ticket.notes || ticket.issue_category || "Support ticket")}</span>
-            <span class="row-subtitle">${escapeHtml(ticket.issue_category || "Uncategorized")} · ${escapeHtml(ticket.resolution_status || "Unknown status")} · ${escapeHtml(ticket.submission_date || "Unknown date")}</span>
-          </div>
-        </article>
-      `,
-    )
-    .join("");
-}
-
 function renderBusinessActionCenter(data, candidateIssues) {
   const actionCenter = data && typeof data === "object" ? data : {};
   const issues = Array.isArray(candidateIssues)
@@ -1324,7 +1465,6 @@ function renderBusinessActionCenter(data, candidateIssues) {
 
   renderDetectedRisks(issues);
   renderInventorySection(actionCenter.inventory || {}, inventoryIssue);
-  renderSupportTickets(actionCenter.support_tickets || {});
 }
 
 const productTabLabels = {
@@ -1444,11 +1584,9 @@ function panelError(panel, message) {
   } else if (panel === "action") {
     elements.businessRiskCount.className = "soft-badge";
     elements.businessRiskCount.textContent = "Unavailable";
-    elements.ticketCount.textContent = "—";
     renderEmpty(elements.businessRiskList, message);
     renderEmpty(elements.inventoryRiskSummary, "Inventory summary is temporarily unavailable");
     renderEmpty(elements.inventoryList, "Inventory data is temporarily unavailable");
-    renderEmpty(elements.ticketList, "Ticket data is temporarily unavailable");
   } else if (panel === "products") {
     state.productData = null;
     renderEmpty(elements.productList, message);
@@ -1664,6 +1802,7 @@ elements.chatCopyButton.addEventListener("click", async () => {
 });
 
 async function initialise() {
+  initializeActivitySizing();
   try {
     await createChatSession({ clearUi: true });
   } catch (error) {
