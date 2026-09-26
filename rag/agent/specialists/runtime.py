@@ -162,6 +162,12 @@ async def run_specialist_agent(
                 "resolved": False,
                 "accepted_product_names": [],
             },
+            "campaign_resolution_runtime_state": {
+                "attempts": 0,
+                "in_flight": False,
+                "resolved": False,
+                "accepted_campaign_names": [],
+            },
             "skill_runtime_state": {
                 "selected_skills": [],
                 "assigned_skills": assigned_skills,

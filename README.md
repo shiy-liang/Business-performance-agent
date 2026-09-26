@@ -192,6 +192,10 @@ The current tools are:
   cross-language product phrase to ranked exact `public.products.product_name`
   values using a fixed Top-5 pgvector query, a 0.70 minimum similarity, and a
   0.20 absolute adjacent-score gap cutoff.
+- `find_real_campaign_name`: shared by Finance and Operations; maps a fuzzy,
+  abbreviated, or cross-language campaign phrase to exact
+  `public.campaigns.campaign_name` values. It uses the same Top-5, three-attempt,
+  similarity-threshold, and adjacent-score-gap rules as `find_real_name`.
 - `search_finance_schema`, `resolve_finance_entity`, `execute_finance_sql`:
   Finance-only schema, entity, and read-only SQL capabilities.
 - `load_finance_skills`: loads only the Finance workflow bodies selected from the

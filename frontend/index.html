@@ -354,6 +354,31 @@
       </footer>
     </div>
 
+    <dialog
+      id="new-chat-dialog"
+      class="confirmation-dialog"
+      aria-labelledby="new-chat-dialog-title"
+      aria-describedby="new-chat-dialog-description"
+    >
+      <form method="dialog" class="confirmation-dialog-content">
+        <div class="confirmation-dialog-icon" aria-hidden="true">!</div>
+        <div>
+          <h3 id="new-chat-dialog-title">Start a new chat?</h3>
+          <p id="new-chat-dialog-description">
+            Starting a new chat will permanently delete your current conversation. Do you want to continue?
+          </p>
+        </div>
+        <div class="confirmation-dialog-actions">
+          <button class="confirmation-dialog-cancel" type="submit" value="cancel" autofocus>
+            Cancel
+          </button>
+          <button class="confirmation-dialog-confirm" type="submit" value="confirm">
+            Start New Chat
+          </button>
+        </div>
+      </form>
+    </dialog>
+
     <script src="/static/vendor/chat-renderer.js?v=__ASSET_VERSION__" defer></script>
     <script src="/static/app.js?v=__ASSET_VERSION__" defer></script>
   </body>
