@@ -265,7 +265,9 @@ def _blocked_payload(tool_name: str, error_type: str) -> str:
         "concurrent_query_blocked": (
             "Another call for this Finance metric is already running."
         ),
-        "attempt_limit": "This Finance metric tool may be called only once per run.",
+        "attempt_limit": (
+            "This Finance metric tool may be called only once per subtask."
+        ),
         "unverified_canonical_product": (
             "The product name was not returned by find_real_name."
         ),

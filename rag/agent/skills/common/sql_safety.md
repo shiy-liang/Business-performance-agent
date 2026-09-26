@@ -23,6 +23,9 @@ the mandatory SQL sequence for those dedicated-owned subtasks.
 4. Generate one explicit-column `SELECT` statement.
 5. Submit the query to the agent-scoped execution tool.
    Submit exactly one SQL call at a time. Never issue parallel alternatives.
+   SQL attempts, approval state, and cumulative result counters reset when the
+   current subtask reaches a terminal status, so the next subtask starts with a
+   fresh SQL allowance.
    The execution tool will pause after local validation and ask the user to
    approve the complete SQL and parameters. Do not claim that the query has run
    while approval is pending.

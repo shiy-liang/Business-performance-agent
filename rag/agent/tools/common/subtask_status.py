@@ -13,6 +13,13 @@ from pydantic import BaseModel, Field
 
 SubTaskStatus = Literal["running", "completed", "blocked", "empty"]
 TERMINAL_STATUSES = frozenset({"completed", "blocked", "empty"})
+RESETTABLE_CONSTRAINT_STATES = (
+    "sql_runtime_state",
+    "review_runtime_state",
+    "ticket_problem_runtime_state",
+    "finance_metric_runtime_state",
+    "product_resolution_runtime_state",
+)
 
 
 class UpdateSubTaskStatusInput(BaseModel):
@@ -83,6 +90,47 @@ def _update_shared_plan(
         if isinstance(item, dict) and item.get("id") == subtask_id:
             item["status"] = status
             return
+
+
+def _reset_specialist_constraints(config: RunnableConfig) -> list[str]:
+    """Reset every tool-call guard before the next sequential subtask starts."""
+
+    configurable = config.get("configurable")
+    if not isinstance(configurable, dict):
+        return []
+    configurable["sql_runtime_state"] = {
+        "attempts": 0,
+        "in_flight": False,
+        "approval_denied": False,
+        "successful_queries": 0,
+        "successful_rows": 0,
+        "successful_result_chars": 0,
+    }
+    configurable["review_runtime_state"] = {
+        "semantic_calls": 0,
+        "semantic_in_flight": False,
+        "other_comment_calls": 0,
+        "other_comment_in_flight": False,
+        "review_ids": [],
+        "primary_product_name": None,
+        "primary_product_category": None,
+        "comparison_mode": False,
+    }
+    configurable["ticket_problem_runtime_state"] = {
+        "calls": 0,
+        "in_flight": False,
+    }
+    configurable["finance_metric_runtime_state"] = {
+        "calls": {},
+        "in_flight": [],
+    }
+    configurable["product_resolution_runtime_state"] = {
+        "attempts": 0,
+        "in_flight": False,
+        "resolved": False,
+        "accepted_product_names": [],
+    }
+    return list(RESETTABLE_CONSTRAINT_STATES)
 
 
 @tool(args_schema=UpdateSubTaskStatusInput)
@@ -169,6 +217,9 @@ async def update_sub_task_status(
 
     item["status"] = status
     _update_shared_plan(config, subtask_id, status)
+    reset_states = (
+        _reset_specialist_constraints(config) if status in TERMINAL_STATUSES else []
+    )
     event = {
         "agent": agent_name,
         "subtask_id": subtask_id,
@@ -176,6 +227,7 @@ async def update_sub_task_status(
         "skill": str(item.get("skill") or ""),
         "status": status,
         "message": " ".join(message.split()),
+        "constraints_reset": reset_states,
     }
     await adispatch_custom_event("subtask_status", event, config=config)
     return json.dumps(
@@ -192,6 +244,7 @@ async def update_sub_task_status(
 __all__ = [
     "SubTaskStatus",
     "TERMINAL_STATUSES",
+    "RESETTABLE_CONSTRAINT_STATES",
     "UpdateSubTaskStatusInput",
     "update_sub_task_status",
 ]
