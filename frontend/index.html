@@ -26,15 +26,19 @@
         </span>
       </a>
       <nav class="sidebar-nav" aria-label="Dashboard sections">
-        <a class="sidebar-link" href="#action-center" title="Action Center">
+        <a class="sidebar-link" href="#overview" data-page-link="overview" title="Business overview">
+          <span class="sidebar-link-icon" aria-hidden="true">00</span>
+          <span class="sidebar-link-label">Business overview</span>
+        </a>
+        <a class="sidebar-link" href="#action-center" data-page-link="action-center" title="Action Center">
           <span class="sidebar-link-icon" aria-hidden="true">01</span>
           <span class="sidebar-link-label">Action Center</span>
         </a>
-        <a class="sidebar-link" href="#product-performance" title="Product Performance">
+        <a class="sidebar-link" href="#product-performance" data-page-link="product-performance" title="Product Performance">
           <span class="sidebar-link-icon" aria-hidden="true">02</span>
           <span class="sidebar-link-label">Product Performance</span>
         </a>
-        <a class="sidebar-link" href="#campaign-performance" title="Campaign Performance">
+        <a class="sidebar-link" href="#campaign-performance" data-page-link="campaign-performance" title="Campaign Performance">
           <span class="sidebar-link-icon" aria-hidden="true">03</span>
           <span class="sidebar-link-label">Campaign Performance</span>
         </a>
@@ -42,16 +46,13 @@
     </aside>
     <button id="sidebar-backdrop" class="sidebar-backdrop" type="button" aria-label="Close navigation" hidden></button>
     <div class="app-shell">
-      <header class="topbar">
-        <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-controls="sidebar" aria-expanded="true" aria-label="Collapse navigation" title="Toggle navigation">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
-        </button>
-      </header>
-
       <main>
         <section class="page-heading">
-          <div>
-            <h1>Business overview</h1>
+          <div class="page-heading-title">
+            <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-controls="sidebar" aria-expanded="true" aria-label="Close navigation" title="Toggle navigation">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+            </button>
+            <h1 id="page-title">Business overview</h1>
           </div>
           <button id="knowledge-open" class="knowledge-open" type="button" aria-haspopup="dialog" aria-controls="knowledge-dialog">
             <span class="knowledge-open-icon" aria-hidden="true">+</span>
@@ -62,18 +63,17 @@
         <div id="global-error" class="global-error" role="alert" hidden></div>
 
         <div class="dashboard-grid">
-          <section class="panel finance-panel" aria-labelledby="finance-title">
+          <section id="overview" class="panel finance-panel" data-page="overview" aria-label="Financial overview">
             <div class="panel-header finance-header">
-              <div>
-                <p class="panel-kicker">01 · Financial pulse</p>
-                <h2 id="finance-title">Financial pulse</h2>
-              </div>
               <div class="finance-header-actions">
                 <span id="connection-status" class="live-pill"><i></i> Connecting to database</span>
-                <button id="finance-period-toggle" class="finance-period-toggle" type="button" aria-expanded="false" aria-controls="finance-filters" title="Choose operating period and store">
-                  <span id="finance-period">Loading</span>
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
-                </button>
+                <div class="finance-scope">
+                  <button id="finance-period-toggle" class="finance-period-toggle" type="button" aria-expanded="false" aria-controls="finance-filters" title="Choose operating period and store">
+                    <span id="finance-period">Loading</span>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+                  </button>
+                  <span id="finance-store-label" class="finance-store-label" aria-live="polite">All stores</span>
+                </div>
               </div>
             </div>
 
@@ -145,23 +145,26 @@
             </p>
           </section>
 
-          <section id="action-center" class="panel action-panel" aria-labelledby="action-title">
-            <div class="panel-header">
-              <div>
-                <p class="panel-kicker">02 · Actions and risks</p>
-                <h2 id="action-title">Business Action Center</h2>
-              </div>
-              <span id="business-risk-count" class="soft-badge">Loading</span>
-            </div>
-
+          <section id="action-center" class="panel action-panel" data-page="action-center" aria-label="Business Action Center" hidden>
             <div class="action-panel-scroll">
               <div class="subsection-heading action-section-heading">
                 <div>
                   <strong>Detected risks</strong>
                   <span>Deterministic signals for the selected operating period</span>
                 </div>
+                <span id="business-risk-count" class="soft-badge">Loading</span>
               </div>
               <div id="business-risk-list" class="risk-list loading-copy">Loading risks…</div>
+
+              <div class="section-divider"></div>
+
+              <div class="subsection-heading action-section-heading">
+                <div>
+                  <strong>Products with low-rated reviews</strong>
+                  <span>1–2 star customer reviews in the selected month · company-wide</span>
+                </div>
+              </div>
+              <div id="review-hotspot-list" class="review-hotspot-list loading-copy">Loading product reviews…</div>
 
               <div class="section-divider"></div>
 
@@ -176,29 +179,30 @@
             </div>
           </section>
 
-          <section id="assistant-panel" class="panel assistant-panel" role="dialog" aria-labelledby="assistant-title" hidden>
+          <section id="assistant-panel" class="panel assistant-panel" role="dialog" aria-label="Business assistant" hidden>
+            <div id="assistant-resize-handle" class="assistant-resize-handle" role="separator" aria-label="Resize chat panel" aria-orientation="vertical" aria-valuemin="320" aria-valuemax="900" aria-valuenow="520" tabindex="0"></div>
             <div class="assistant-header">
-              <div class="assistant-copy">
-                <div>
-                  <p class="panel-kicker">03 · Ask your business</p>
-                  <h2 id="assistant-title">Ask your business directly</h2>
-                  <p>Get a structured answer with an auditable activity trail and cited evidence.</p>
-                </div>
-              </div>
               <div class="assistant-header-actions">
                 <button id="new-chat-button" class="new-chat-button" type="button">
                   New Chat
+                </button>
+                <button id="assistant-dock-toggle" class="assistant-dock-toggle" type="button" aria-label="Expand chat to side panel" aria-pressed="false" title="Expand chat to side panel">
+                  <svg class="assistant-expand-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7M4 4v7M4 4l7 7M20 20h-7M20 20v-7M20 20l-7-7" /></svg>
+                  <svg class="assistant-shrink-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 11H4M11 11V4M11 11 4 4M13 13h7M13 13v7M13 13l7 7" /></svg>
                 </button>
                 <button id="assistant-close" class="assistant-close" type="button" aria-label="Close chat">×</button>
               </div>
             </div>
 
             <div id="chat-conversation" class="chat-conversation">
-              <div class="prompt-grid" aria-label="Suggested questions">
-              <button type="button" class="prompt-chip">How did revenue and profit perform last month?</button>
-              <button type="button" class="prompt-chip">Which products need immediate replenishment?</button>
-              <button type="button" class="prompt-chip">Which campaign delivered the highest return?</button>
-              <button type="button" class="prompt-chip">What are customers complaining about recently?</button>
+              <div id="chat-welcome" class="chat-welcome">
+                <h2>How can we help?</h2>
+                <div class="prompt-grid" aria-label="Suggested questions">
+                  <button type="button" class="prompt-chip">How did revenue and profit perform last month?</button>
+                  <button type="button" class="prompt-chip">Which products need immediate replenishment?</button>
+                  <button type="button" class="prompt-chip">Which campaign delivered the highest return?</button>
+                  <button type="button" class="prompt-chip">What are customers complaining about recently?</button>
+                </div>
               </div>
 
             <div id="chat-history" class="chat-history" aria-label="Conversation history"></div>
@@ -233,7 +237,7 @@
                   </div>
                 </details>
 
-                <article class="chat-answer-card" aria-labelledby="chat-answer-title">
+                <article class="chat-answer-card" aria-labelledby="chat-answer-title" hidden>
                   <header class="chat-answer-header">
                     <div>
                       <span class="answer-mark" aria-hidden="true">AI</span>
@@ -301,12 +305,8 @@
             </form>
           </section>
 
-          <section id="product-performance" class="panel product-panel" aria-labelledby="product-title">
+          <section id="product-performance" class="panel product-panel" data-page="product-performance" aria-label="Product performance" hidden>
             <div class="panel-header product-header">
-              <div>
-                <p class="panel-kicker">04 · Product performance</p>
-                <h2 id="product-title">Product performance</h2>
-              </div>
               <div id="product-tabs" class="tabs" role="group" aria-label="Product ranking type">
                 <button class="tab active" data-tab="best_sellers" type="button" aria-pressed="true">Best sellers</button>
                 <button class="tab" data-tab="top_rated" type="button" aria-pressed="false">Top rated</button>
@@ -314,24 +314,61 @@
                 <button class="tab" data-tab="lowest_rated" type="button" aria-pressed="false">Low rated</button>
               </div>
             </div>
+            <div class="insight-layout">
+              <div class="insight-card">
+                <div class="insight-heading"><strong id="product-chart-title">Best sellers comparison</strong><span>Top five in the selected ranking</span></div>
+                <div id="product-chart" class="comparison-chart loading-copy">Loading product comparison…</div>
+              </div>
+              <div class="insight-card">
+                <div class="insight-heading"><strong>Ranking details</strong><span id="product-table-note">Selected operating period</span></div>
+                <div id="product-table" class="table-scroll loading-copy">Loading product details…</div>
+              </div>
+            </div>
             <div id="product-list" class="rank-list loading-copy">Analyzing products…</div>
+            <section id="product-reviews" class="insight-card product-reviews-panel" aria-labelledby="product-reviews-title">
+              <div class="insight-heading"><strong id="product-reviews-title">Customer reviews</strong><span id="review-scope-note">Selected month · company-wide (reviews have no store field)</span></div>
+              <div class="review-controls">
+                <label class="filter-control review-filter-control"><span>Product</span>
+                  <select id="review-product-select" aria-label="Choose product to view reviews" disabled><option value="">Loading products…</option></select>
+                </label>
+                <label class="filter-control review-filter-control"><span>Rating</span>
+                  <select id="review-rating-filter" aria-label="Filter customer reviews by rating">
+                    <option value="low">1–2 stars</option>
+                    <option value="all">All ratings</option>
+                  </select>
+                </label>
+              </div>
+              <div id="review-product-summary" class="review-product-summary" aria-live="polite">Choose a product to see its reviews.</div>
+              <div id="review-comments" class="review-comments" aria-live="polite"></div>
+            </section>
           </section>
 
-          <section id="campaign-performance" class="panel marketing-panel" aria-labelledby="marketing-title">
-            <div class="panel-header">
-              <div>
-                <p class="panel-kicker">05 · Campaign performance</p>
-                <h2 id="marketing-title">Campaign performance</h2>
+          <section id="campaign-performance" class="panel marketing-panel" data-page="campaign-performance" aria-label="Campaign performance" hidden>
+            <div class="insight-layout">
+              <div class="insight-card">
+                <div class="insight-heading"><strong>Reported ROI comparison</strong><span>Top five campaigns overlapping the selected month</span></div>
+                <div id="campaign-chart" class="comparison-chart loading-copy">Loading ROI comparison…</div>
               </div>
-              <span id="campaign-count" class="soft-badge">—</span>
+            </div>
+            <div class="insight-card insight-card-full">
+              <div class="insight-heading"><strong>Campaign details</strong><span>Full-lifecycle metrics, not monthly attribution</span></div>
+              <div id="campaign-table" class="table-scroll loading-copy">Loading campaign details…</div>
             </div>
             <div class="campaign-label-row">
               <span>Campaign</span><span>Conversion</span><span>ROI</span>
             </div>
             <div id="campaign-list" class="campaign-list loading-copy">Loading campaigns…</div>
-            <p class="data-note">
-              Campaigns have no store field. Metrics cover each campaign lifecycle, while the month controls inclusion.
-            </p>
+            <div id="campaign-detail" class="insight-card campaign-detail" role="region" aria-label="Selected campaign timeline" aria-live="polite" hidden>
+              <div class="insight-heading"><strong id="campaign-detail-title"></strong><span>Campaign timeline and transaction activity</span></div>
+              <div class="campaign-detail-metrics">
+                <div><span>Start date</span><strong id="campaign-detail-start"></strong></div>
+                <div><span>End date</span><strong id="campaign-detail-end"></strong></div>
+                <div><span>Transactions during dates</span><strong id="campaign-detail-count"></strong></div>
+              </div>
+              <div class="campaign-detail-track" aria-hidden="true"></div>
+              <div class="campaign-detail-axis"><span id="campaign-detail-axis-start"></span><span id="campaign-detail-axis-end"></span></div>
+              <p class="data-note">Company-wide transactions dated within this period, not necessarily attributable to the campaign.</p>
+            </div>
           </section>
 
           <dialog id="knowledge-dialog" class="knowledge-dialog" aria-labelledby="knowledge-title">
@@ -394,7 +431,6 @@
 
       <footer>
         <span>Business Performance Agent</span>
-        <span>Costs, inventory, expenses, refunds, and campaign attribution include synthetic data</span>
       </footer>
     </div>
 
