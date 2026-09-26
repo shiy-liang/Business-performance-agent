@@ -12,35 +12,34 @@ from pydantic import BaseModel, Field
 from rag.agent.workflows import (
     OPERATIONS_SKILL_BY_NAME,
     load_operations_skill_bodies,
-    load_operations_workflow_config,
+    load_operations_skill_config,
 )
 
 
 class LoadOperationsSkillsInput(BaseModel):
-    """One complete, ordered workflow selection for the delegated task."""
+    """One complete, ordered skill selection for the delegated task packet."""
 
     skill_names: list[str] = Field(
         min_length=1,
         description=(
-            "Unique Operations skill names selected from the injected skill catalog. "
-            "Submit all matching dedicated skills together in one call."
+            "Unique Operations skill names assigned by the Supervisor. Submit the "
+            "ordered union of all assigned skills together in one call."
         ),
     )
 
 
-def _workflow_runtime_state(config: RunnableConfig) -> dict[str, Any]:
+def _skill_runtime_state(config: RunnableConfig) -> dict[str, Any]:
     configurable = config.get("configurable")
     if not isinstance(configurable, dict):
         configurable = {}
         config["configurable"] = configurable
-    state = configurable.get("workflow_runtime_state")
+    state = configurable.get("skill_runtime_state")
     if not isinstance(state, dict):
         state = {
             "selected_skills": [],
             "loaded": False,
-            "generic_workflow_started": False,
         }
-        configurable["workflow_runtime_state"] = state
+        configurable["skill_runtime_state"] = state
     return state
 
 
@@ -50,7 +49,7 @@ def selected_operations_skills(config: RunnableConfig) -> tuple[str, ...]:
     configurable = config.get("configurable")
     if not isinstance(configurable, dict):
         return ()
-    state = configurable.get("workflow_runtime_state")
+    state = configurable.get("skill_runtime_state")
     if not isinstance(state, dict):
         return ()
     selected = state.get("selected_skills")
@@ -64,9 +63,9 @@ async def load_operations_skills(
     skill_names: list[str],
     config: RunnableConfig,
 ) -> str:
-    """Load full instructions for selected Operations workflows before using evidence tools."""
+    """Load all Supervisor-assigned Operations skills before evidence tools."""
 
-    settings = load_operations_workflow_config()
+    settings = load_operations_skill_config()
     selected = list(dict.fromkeys(skill_names))
     unknown = [name for name in selected if name not in OPERATIONS_SKILL_BY_NAME]
     if unknown:
@@ -85,46 +84,37 @@ async def load_operations_skills(
             {
                 "success": False,
                 "error_type": "duplicate_skill",
-                "error": "Each workflow may be selected only once.",
+                "error": "Each skill may be selected only once.",
             },
             ensure_ascii=False,
         )
-    if len(selected) > settings.max_workflows_per_task:
+    if len(selected) > settings.max_skills_per_task:
         return json.dumps(
             {
                 "success": False,
-                "error_type": "workflow_limit",
+                "error_type": "skill_limit",
                 "error": (
-                    "The workflow selection exceeds the configured maximum of "
-                    f"{settings.max_workflows_per_task}."
+                    "The skill selection exceeds the configured maximum of "
+                    f"{settings.max_skills_per_task}."
                 ),
-                "max_workflows_per_task": settings.max_workflows_per_task,
-            },
-            ensure_ascii=False,
-        )
-    if "sql_query" in selected and len(selected) > 1:
-        return json.dumps(
-            {
-                "success": False,
-                "error_type": "generic_workflow_conflict",
-                "error": (
-                    "sql_query is a fallback and cannot be selected with a dedicated "
-                    "workflow. Keep the matching dedicated workflows only."
-                ),
+                "max_skills_per_task": settings.max_skills_per_task,
             },
             ensure_ascii=False,
         )
 
-    state = _workflow_runtime_state(config)
-    if state.get("generic_workflow_started") is True and "sql_query" not in selected:
+    state = _skill_runtime_state(config)
+    assigned = state.get("assigned_skills")
+    if isinstance(assigned, list) and assigned and selected != assigned:
         return json.dumps(
             {
                 "success": False,
-                "error_type": "generic_workflow_already_started",
+                "error_type": "assigned_skill_mismatch",
                 "error": (
-                    "A dedicated workflow cannot be selected after the generic SQL "
-                    "fallback has started."
+                    "Load exactly the ordered union of Supervisor-assigned skills. "
+                    "Do not add, omit, or reroute skills."
                 ),
+                "assigned_skills": assigned,
+                "received_skills": selected,
             },
             ensure_ascii=False,
         )
@@ -133,7 +123,7 @@ async def load_operations_skills(
             {
                 "success": False,
                 "error_type": "skills_already_loaded",
-                "error": "Workflow instructions were already loaded for this task.",
+                "error": "Skill instructions were already loaded for this task.",
                 "selected_skills": state.get("selected_skills") or [],
             },
             ensure_ascii=False,
@@ -149,10 +139,10 @@ async def load_operations_skills(
             "selected_skill_titles": [
                 OPERATIONS_SKILL_BY_NAME[name].title for name in selected
             ],
-            "max_workflows_per_task": settings.max_workflows_per_task,
+            "max_skills_per_task": settings.max_skills_per_task,
             "instruction": (
-                "The selected skill bodies below are the authoritative workflow "
-                "instructions for this delegated task. Follow all selected bodies."
+                "The selected skill bodies are authoritative for their assigned "
+                "subtasks. Follow each body only for the matching subtask."
             ),
             "skill_bodies": load_operations_skill_bodies(selected),
         },

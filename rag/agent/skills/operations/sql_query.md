@@ -6,14 +6,16 @@ Sales units and breakdowns, inventory status, product and store performance,
 customer activity, returns by count or reason, support service, and operational
 campaign conversion metrics.
 
-This is the generic fallback. Select it only when no dedicated Operations skill
-matches any part of the delegated task.
+Assign this skill to an atomic structured-data subtask only when no dedicated
+Operations skill covers that subtask. It may coexist with dedicated skills in the
+same task packet when they own different subtasks.
 
 ## Do not use this skill for
 
 Profitability, margin, expenses, financial ROI conclusions, policy interpretation,
 or product feedback and review questions covered by the Product Review Retrieval
-skill. Never generate SQL for a task that matches that dedicated skill.
+skill. Never generate SQL for, verify, enrich, or retry a subtask assigned to a
+dedicated skill.
 
 ## Procedure
 

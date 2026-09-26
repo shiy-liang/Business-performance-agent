@@ -86,8 +86,15 @@ async def stream_supervisor(
         skills_event: PublicAgentEvent = {
             "event": "skills",
             "data": {
-                "items": ["Business Diagnosis", "Evidence Policy"],
-                "message": "Business Diagnosis and Evidence Policy skills were applied.",
+                "items": [
+                    "Business Diagnosis",
+                    "Supervisor Task Decomposition",
+                    "Evidence Policy",
+                ],
+                "message": (
+                    "Business Diagnosis, Supervisor Task Decomposition, and "
+                    "Evidence Policy skills were applied."
+                ),
             },
         }
         await recorder.record(skills_event)
@@ -106,6 +113,11 @@ async def stream_supervisor(
                 "configurable": {
                     "run_id": run_id,
                     "delegation_runtime_state": {},
+                    "subtask_plan_runtime_state": {
+                        "formatted": False,
+                        "sub_tasks": [],
+                        "groups": {},
+                    },
                     "auto_execute_sql": auto_execute_sql,
                 },
             },

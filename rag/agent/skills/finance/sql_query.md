@@ -7,14 +7,16 @@ refund analysis by value or status, campaign spend or ROI, attributed revenue,
 expenses, estimated operating profit, and custom financial breakdowns or
 rankings.
 
-This is the generic fallback. Select it only when no dedicated Finance skill
-matches any part of the delegated task.
+Assign this skill to an atomic structured-data subtask only when no dedicated
+Finance skill covers that subtask. It may coexist with dedicated skills in the
+same task packet when they own different subtasks.
 
 ## Do not use this skill for
 
 Policy interpretation, inventory diagnosis, review themes, service root causes,
 operational recommendations, the dedicated net-sales total, or the dedicated
-gross-profit and gross-margin calculations. Do not use it to manufacture a
+gross-profit and gross-margin calculations. Never use SQL to verify, enrich, or
+retry a subtask assigned to those dedicated skills. Do not use it to manufacture a
 forecast, prediction, projection, budget, or future-period estimate from recorded
 transactions.
 

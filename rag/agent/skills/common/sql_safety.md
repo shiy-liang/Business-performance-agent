@@ -5,9 +5,9 @@
 Generate useful PostgreSQL queries without giving the model direct database
 access or write capability.
 
-Apply this skill only after the Agent has selected the generic SQL workflow. If
-another injected skill defines a dedicated non-SQL workflow for the task, follow
-that dedicated skill and do not run the mandatory SQL sequence below.
+Apply this skill only to a subtask explicitly assigned to `sql_query`. Other
+loaded skills may define dedicated procedures for different subtasks; never run
+the mandatory SQL sequence for those dedicated-owned subtasks.
 
 ## Mandatory sequence
 

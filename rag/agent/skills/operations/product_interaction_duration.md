@@ -5,7 +5,7 @@
 Use this skill when the task asks which products receive the most or longest
 interaction time across product-related user behaviors.
 
-## Dedicated workflow
+## Execution procedure
 
 1. Call `check_most_interact` with no arguments.
 2. Do not retrieve schema, generate SQL, resolve product names, or call another

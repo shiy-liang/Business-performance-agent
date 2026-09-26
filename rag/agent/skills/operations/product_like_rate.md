@@ -7,7 +7,7 @@ expressed interest through an add-to-cart or wishlist-add event, including
 wording about like rate, interest rate, view-to-like conversion, carts after
 views, or wishlists after views.
 
-## Dedicated workflow
+## Execution procedure
 
 1. Use `find_real_name` first only when the product wording is fuzzy,
    non-standard, or cross-language. If it returns multiple plausible products

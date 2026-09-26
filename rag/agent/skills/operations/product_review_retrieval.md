@@ -6,7 +6,7 @@ Use this skill whenever the delegated task asks for customer feedback, reviews,
 ratings, opinions, praise, complaints, likes, dislikes, or perceived strengths and
 weaknesses of a product or product category.
 
-## Dedicated workflow
+## Execution procedure
 
 1. Do not call `find_real_name` for this skill. Review retrieval uses semantic
    matching, so fuzzy or cross-language phrases such as "苹果平板" and
@@ -42,8 +42,8 @@ weaknesses of a product or product category.
 9. Omit `rating` from an expansion call unless a stricter low-rating threshold is
    required. The default threshold is 5 and the tool returns rows strictly below
    the selected threshold.
-10. Stop as soon as the evidence is sufficient. Do not use the generic SQL
-   workflow as a second route for the same review task.
+10. Stop as soon as the evidence is sufficient. Do not use generic SQL as a
+   second route for the same review subtask.
 
 ## Interpretation
 

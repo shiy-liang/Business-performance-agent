@@ -12,6 +12,7 @@ from rag.agent.tools.common.knowledge import search_knowledge
 from rag.agent.tools.common.product_metrics import check_less_like, check_less_purchase
 from rag.agent.tools.common.products import find_real_name
 from rag.agent.tools.common.sql_runtime import get_columns_detail
+from rag.agent.tools.common.subtask_status import update_sub_task_status
 from rag.agent.tools.finance import (
     calculate_gross_margin,
     calculate_gross_profit,
@@ -38,6 +39,7 @@ from rag.agent.tools.supervisor.delegation import (
     delegate_finance,
     delegate_operations,
 )
+from rag.agent.tools.supervisor.task_planning import format_sub_task
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,10 +92,15 @@ class ToolRegistry:
 
 default_tool_registry = ToolRegistry(
     (
+        ToolRegistration(format_sub_task, frozenset({"supervisor"})),
         ToolRegistration(search_knowledge, frozenset({"supervisor"})),
         ToolRegistration(delegate_finance, frozenset({"supervisor"})),
         ToolRegistration(delegate_operations, frozenset({"supervisor"})),
         ToolRegistration(find_real_name, frozenset({"finance", "operations"})),
+        ToolRegistration(
+            update_sub_task_status,
+            frozenset({"finance", "operations"}),
+        ),
         ToolRegistration(check_less_purchase, frozenset({"finance", "operations"})),
         ToolRegistration(load_finance_skills, frozenset({"finance"})),
         ToolRegistration(calculate_net_sales, frozenset({"finance"})),

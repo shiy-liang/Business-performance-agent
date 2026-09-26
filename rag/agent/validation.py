@@ -6,8 +6,8 @@ import re
 from typing import Any, Literal
 
 from rag.agent.workflows import (
-    load_finance_workflow_config,
-    load_operations_workflow_config,
+    load_finance_skill_config,
+    load_operations_skill_config,
 )
 
 
@@ -24,6 +24,7 @@ FINANCE_METRIC_TOOL_NAMES = frozenset(
     {"calculate_net_sales", "calculate_gross_profit", "calculate_gross_margin"}
 )
 PRODUCT_RESOLUTION_TOOL_NAMES = frozenset({"find_real_name"})
+SUBTASK_STATUS_TOOL_NAMES = frozenset({"update_sub_task_status"})
 GENERIC_OPERATIONS_TOOL_NAMES = frozenset(
     {
         "search_operations_schema",
@@ -38,7 +39,7 @@ ARTIFACT_ONLY_TOOL_NAMES = frozenset(
         "check_most_interact",
     }
 )
-DEDICATED_OPERATIONS_TOOL_TO_WORKFLOW = {
+DEDICATED_OPERATIONS_TOOL_TO_SKILL = {
     "check_concrete_problem": "support_ticket_problem_retrieval",
     "search_customer_reviews": "product_review_retrieval",
     "find_other_comment_product": "product_review_retrieval",
@@ -49,7 +50,7 @@ DEDICATED_OPERATIONS_TOOL_TO_WORKFLOW = {
     "check_less_purchase": "product_bottom_rates",
     "check_most_interact": "product_interaction_duration",
 }
-DEDICATED_FINANCE_TOOL_TO_WORKFLOW = {
+DEDICATED_FINANCE_TOOL_TO_SKILL = {
     "calculate_net_sales": "net_sales",
     "calculate_gross_profit": "gross_profit_margin",
     "calculate_gross_margin": "gross_profit_margin",
@@ -69,6 +70,8 @@ def validate_specialist_evidence(
     answer: str,
     tool_payloads: list[dict[str, Any]],
     sources: list[dict[str, Any]],
+    *,
+    assigned_sub_tasks: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Validate that a specialist conclusion is backed by successful tools."""
 
@@ -90,6 +93,7 @@ def validate_specialist_evidence(
         and payload.get("tool") not in TICKET_PROBLEM_TOOL_NAMES
         and payload.get("tool") not in FINANCE_METRIC_TOOL_NAMES
         and payload.get("tool") not in PRODUCT_RESOLUTION_TOOL_NAMES
+        and payload.get("tool") not in SUBTASK_STATUS_TOOL_NAMES
         and payload.get("error_type")
         not in {
             None,
@@ -134,7 +138,7 @@ def validate_specialist_evidence(
         ),
         None,
     )
-    uses_review_workflow = agent_name == "operations" and bool(review_payloads)
+    uses_review_skill = agent_name == "operations" and bool(review_payloads)
     generic_operations_calls = [
         payload
         for payload in tool_payloads
@@ -143,7 +147,7 @@ def validate_specialist_evidence(
     dedicated_operations_calls = [
         payload
         for payload in tool_payloads
-        if payload.get("tool") in DEDICATED_OPERATIONS_TOOL_TO_WORKFLOW
+        if payload.get("tool") in DEDICATED_OPERATIONS_TOOL_TO_SKILL
     ]
     generic_finance_calls = [
         payload
@@ -153,36 +157,40 @@ def validate_specialist_evidence(
     dedicated_finance_calls = [
         payload
         for payload in tool_payloads
-        if payload.get("tool") in DEDICATED_FINANCE_TOOL_TO_WORKFLOW
+        if payload.get("tool") in DEDICATED_FINANCE_TOOL_TO_SKILL
     ]
     if agent_name == "finance":
-        workflow_names = {
-            DEDICATED_FINANCE_TOOL_TO_WORKFLOW[str(payload.get("tool"))]
+        skill_names = {
+            DEDICATED_FINANCE_TOOL_TO_SKILL[str(payload.get("tool"))]
             for payload in dedicated_finance_calls
         }
         loader_name = "load_finance_skills"
     else:
-        workflow_names = {
-            DEDICATED_OPERATIONS_TOOL_TO_WORKFLOW[str(payload.get("tool"))]
+        skill_names = {
+            DEDICATED_OPERATIONS_TOOL_TO_SKILL[str(payload.get("tool"))]
             for payload in dedicated_operations_calls
         }
         loader_name = "load_operations_skills"
+    loaded_skills: set[str] = set()
     for payload in tool_payloads:
         if (
             payload.get("tool") == loader_name
             and payload.get("success") is True
             and isinstance(payload.get("selected_skills"), list)
         ):
-            workflow_names.update(str(name) for name in payload["selected_skills"])
+            selected = {str(name) for name in payload["selected_skills"]}
+            loaded_skills.update(selected)
     if generic_operations_calls:
-        workflow_names.add("sql_query")
+        skill_names.add("sql_query")
     if generic_finance_calls:
-        workflow_names.add("sql_query")
+        skill_names.add("sql_query")
+    invoked_skill_names = set(skill_names)
+    skill_names.update(loaded_skills)
 
     if not answer.strip():
         errors.append("The specialist returned no final analysis.")
 
-    if uses_review_workflow:
+    if uses_review_skill:
         semantic_searches = [
             payload
             for payload in review_payloads
@@ -190,33 +198,118 @@ def validate_specialist_evidence(
         ]
         if review_payloads[0].get("tool") != "search_customer_reviews":
             errors.append(
-                "The dedicated product-review workflow did not call semantic review search first."
+                "The product-review skill did not call semantic review search first."
             )
         if not any(payload.get("success") is True for payload in semantic_searches):
             if successful_queries:
                 warnings.append(
                     "No successful customer-review evidence was returned; other "
-                    "workflow evidence remains available."
+                    "skill evidence remains available."
                 )
             else:
                 errors.append("No successful semantic customer-review search was returned.")
-    if "sql_query" in workflow_names and len(workflow_names) > 1:
-        errors.append(
-            "Dedicated specialist workflows cannot be mixed with the generic SQL fallback."
-        )
     if agent_name == "operations":
-        maximum = load_operations_workflow_config().max_workflows_per_task
-        if len(workflow_names) > maximum:
+        maximum = load_operations_skill_config().max_skills_per_task
+        if len(skill_names) > maximum:
             errors.append(
-                f"Operations used {len(workflow_names)} workflows, exceeding the "
+                f"Operations used {len(skill_names)} skills, exceeding the "
                 f"configured maximum of {maximum}."
             )
     if agent_name == "finance":
-        maximum = load_finance_workflow_config().max_workflows_per_task
-        if len(workflow_names) > maximum:
+        maximum = load_finance_skill_config().max_skills_per_task
+        if len(skill_names) > maximum:
             errors.append(
-                f"Finance used {len(workflow_names)} workflows, exceeding the "
+                f"Finance used {len(skill_names)} skills, exceeding the "
                 f"configured maximum of {maximum}."
+            )
+
+    assigned = list(assigned_sub_tasks or [])
+    subtask_statuses: dict[str, str] = {}
+    if assigned:
+        expected_skills = {str(item.get("skill") or "") for item in assigned}
+        loader_indices = [
+            index
+            for index, payload in enumerate(tool_payloads)
+            if payload.get("tool") == loader_name
+        ]
+        if len(loader_indices) != 1:
+            errors.append(
+                "The specialist must call its skill loader exactly once before "
+                "using evidence tools."
+            )
+        elif any(
+            payload.get("tool") != loader_name
+            for payload in tool_payloads[: loader_indices[0]]
+        ):
+            errors.append(
+                "The specialist used an evidence tool before loading its assigned skills."
+            )
+        missing_loaded_skills = sorted(expected_skills - loaded_skills)
+        unexpected_loaded_skills = sorted(loaded_skills - expected_skills)
+        if missing_loaded_skills:
+            errors.append(
+                "The specialist did not load every Supervisor-assigned skill: "
+                + ", ".join(missing_loaded_skills)
+                + "."
+            )
+        if unexpected_loaded_skills:
+            errors.append(
+                "The specialist loaded unassigned skills: "
+                + ", ".join(unexpected_loaded_skills)
+                + "."
+            )
+        unexpected_skills = sorted(invoked_skill_names - expected_skills)
+        if unexpected_skills:
+            errors.append(
+                "The specialist invoked evidence from unassigned skills: "
+                + ", ".join(unexpected_skills)
+                + "."
+            )
+        status_history: dict[str, list[str]] = {
+            str(item.get("id") or ""): [] for item in assigned
+        }
+        for payload in tool_payloads:
+            if (
+                payload.get("tool") == "update_sub_task_status"
+                and payload.get("success") is True
+            ):
+                task_id = str(payload.get("subtask_id") or "")
+                if task_id in status_history:
+                    status_history[task_id].append(str(payload.get("status") or ""))
+        invalid_transitions: list[str] = []
+        for task_id, history in status_history.items():
+            if (
+                len(history) != 2
+                or history[0] != "running"
+                or history[1] not in {"completed", "blocked", "empty"}
+            ):
+                invalid_transitions.append(task_id)
+            else:
+                subtask_statuses[task_id] = history[1]
+        if invalid_transitions:
+            errors.append(
+                "Every subtask must publish exactly one running transition followed "
+                "by exactly one terminal transition: "
+                + ", ".join(invalid_transitions)
+                + "."
+            )
+        invalid_sections: list[str] = []
+        for item in assigned:
+            task_id = str(item.get("id") or "")
+            matches = re.findall(
+                rf"^### Subtask {re.escape(task_id)} — (completed|blocked|empty)$",
+                answer,
+                flags=re.MULTILINE,
+            )
+            if len(matches) != 1:
+                invalid_sections.append(task_id)
+            elif subtask_statuses.get(task_id) != matches[0]:
+                invalid_sections.append(task_id)
+        if invalid_sections:
+            errors.append(
+                "Each assigned subtask must have exactly one valid status section: "
+                + ", ".join(invalid_sections)
+                + "."
             )
     if (
         not successful_queries
@@ -312,8 +405,10 @@ def validate_specialist_evidence(
         "successful_review_tool_count": len(successful_review_retrievals),
         "successful_ticket_tool_count": len(successful_ticket_problem_retrievals),
         "terminal_product_resolution": terminal_product_resolution is not None,
-        "workflow_count": len(workflow_names),
-        "workflows": sorted(workflow_names),
+        "skill_count": len(skill_names),
+        "skills": sorted(skill_names),
+        "assigned_subtask_count": len(assigned),
+        "subtask_statuses": subtask_statuses,
         "evidence_count": len(source_citations),
     }
 

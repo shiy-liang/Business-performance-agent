@@ -686,13 +686,13 @@ def _finish_attempt(
         ) + result_chars
 
 
-def _selected_workflows(config: RunnableConfig) -> tuple[bool, tuple[str, ...]]:
-    """Read progressive workflow state without coupling to either loader."""
+def _selected_skills(config: RunnableConfig) -> tuple[bool, tuple[str, ...]]:
+    """Read progressive skill state without coupling to either loader."""
 
     configurable = config.get("configurable")
     if not isinstance(configurable, dict):
         return False, ()
-    state = configurable.get("workflow_runtime_state")
+    state = configurable.get("skill_runtime_state")
     if not isinstance(state, dict):
         return False, ()
     loaded = state.get("loaded") is True
@@ -702,13 +702,12 @@ def _selected_workflows(config: RunnableConfig) -> tuple[bool, tuple[str, ...]]:
     return loaded, tuple(str(name) for name in selected)
 
 
-def _generic_workflow_block(
+def _generic_sql_block(
     agent_name: SqlAgentName,
     config: RunnableConfig,
     tool_name: str,
 ) -> str | None:
-    loaded, selected = _selected_workflows(config)
-    dedicated = tuple(name for name in selected if name != "sql_query")
+    loaded, selected = _selected_skills(config)
     if not loaded:
         return json.dumps(
             {
@@ -725,41 +724,19 @@ def _generic_workflow_block(
             },
             ensure_ascii=False,
         )
-    if selected == ("sql_query",):
-        configurable = config.get("configurable")
-        if not isinstance(configurable, dict):
-            configurable = {}
-            config["configurable"] = configurable
-        state = configurable.get("workflow_runtime_state")
-        if not isinstance(state, dict):
-            state = {"selected_skills": [], "loaded": False}
-            configurable["workflow_runtime_state"] = state
-        state["generic_workflow_started"] = True
+    if "sql_query" in selected:
         return None
-    if not dedicated:
-        return json.dumps(
-            {
-                "success": False,
-                "agent": agent_name,
-                "tool": tool_name,
-                "error_type": "generic_workflow_not_selected",
-                "error": "Select only the sql_query skill for generic SQL tools.",
-                "retryable": False,
-                "sources": [],
-            },
-            ensure_ascii=False,
-        )
     return json.dumps(
         {
             "success": False,
             "agent": agent_name,
             "tool": tool_name,
-            "error_type": "dedicated_workflow_selected",
+            "error_type": "generic_sql_skill_not_selected",
             "error": (
-                f"Generic {agent_name.title()} SQL tools are disabled because "
-                "dedicated workflows were selected for this task."
+                f"Generic {agent_name.title()} SQL tools require an assigned "
+                "sql_query subtask. Loaded dedicated skills do not authorize SQL."
             ),
-            "selected_skills": list(dedicated),
+            "selected_skills": list(selected),
             "retryable": False,
             "sources": [],
         },
@@ -790,7 +767,7 @@ def build_sql_tools(
     ) -> str:
         started_at = perf_counter()
         tool_name = f"search_{agent_name}_schema"
-        blocked = _generic_workflow_block(agent_name, config, tool_name)
+        blocked = _generic_sql_block(agent_name, config, tool_name)
         if blocked is not None:
             return blocked
         logger.tool_event(status="started", tool_name=tool_name, query_length=len(query))
@@ -820,7 +797,7 @@ def build_sql_tools(
     ) -> str:
         started_at = perf_counter()
         tool_name = f"resolve_{agent_name}_entity"
-        blocked = _generic_workflow_block(agent_name, config, tool_name)
+        blocked = _generic_sql_block(agent_name, config, tool_name)
         if blocked is not None:
             return blocked
         if entity_type.strip().lower() == "product":
@@ -891,7 +868,7 @@ def build_sql_tools(
     ) -> str:
         started_at = perf_counter()
         tool_name = f"execute_{agent_name}_sql"
-        blocked = _generic_workflow_block(agent_name, config, tool_name)
+        blocked = _generic_sql_block(agent_name, config, tool_name)
         if blocked is not None:
             return blocked
         claim_status, attempt = _claim_attempt(config)

@@ -9,10 +9,10 @@ what reasons customers described. Do not use it for structured ticket counts,
 priority/status breakdowns, resolution times, satisfaction metrics, or other
 questions answerable from ordinary columns.
 
-## Dedicated workflow
+## Execution procedure
 
 1. Call `check_concrete_problem` exactly once. Do not retrieve schema, resolve an
-   entity, generate SQL, or call `execute_operations_sql` for this workflow.
+   entity, generate SQL, or call `execute_operations_sql` for this subtask.
 2. Put the requested concrete issue and business context in `query`. Preserve
    explicit payment methods, symptoms, dates, products, channels, or failure
    descriptions from the delegated task.

@@ -14,35 +14,34 @@ from observability import logger
 from rag.agent.workflows import (
     FINANCE_SKILL_BY_NAME,
     load_finance_skill_bodies,
-    load_finance_workflow_config,
+    load_finance_skill_config,
 )
 
 
 class LoadFinanceSkillsInput(BaseModel):
-    """One complete, ordered Finance workflow selection for the task."""
+    """One complete, ordered Finance skill selection for the task packet."""
 
     skill_names: list[str] = Field(
         min_length=1,
         description=(
-            "Unique Finance skill names selected from the injected skill catalog. "
-            "Submit all matching dedicated skills together in one call."
+            "Unique Finance skill names assigned by the Supervisor. Submit the "
+            "ordered union of all assigned skills together in one call."
         ),
     )
 
 
-def _workflow_runtime_state(config: RunnableConfig) -> dict[str, Any]:
+def _skill_runtime_state(config: RunnableConfig) -> dict[str, Any]:
     configurable = config.get("configurable")
     if not isinstance(configurable, dict):
         configurable = {}
         config["configurable"] = configurable
-    state = configurable.get("workflow_runtime_state")
+    state = configurable.get("skill_runtime_state")
     if not isinstance(state, dict):
         state = {
             "selected_skills": [],
             "loaded": False,
-            "generic_workflow_started": False,
         }
-        configurable["workflow_runtime_state"] = state
+        configurable["skill_runtime_state"] = state
     return state
 
 
@@ -52,7 +51,7 @@ def selected_finance_skills(config: RunnableConfig) -> tuple[str, ...]:
     configurable = config.get("configurable")
     if not isinstance(configurable, dict):
         return ()
-    state = configurable.get("workflow_runtime_state")
+    state = configurable.get("skill_runtime_state")
     if not isinstance(state, dict):
         return ()
     selected = state.get("selected_skills")
@@ -82,7 +81,7 @@ async def load_finance_skills(
     skill_names: list[str],
     config: RunnableConfig,
 ) -> str:
-    """Load full instructions for selected Finance workflows before evidence tools."""
+    """Load all Supervisor-assigned Finance skills before evidence tools."""
 
     tool_name = "load_finance_skills"
     started_at = perf_counter()
@@ -91,7 +90,7 @@ async def load_finance_skills(
         tool_name=tool_name,
         requested_skill_count=len(skill_names),
     )
-    settings = load_finance_workflow_config()
+    settings = load_finance_skill_config()
     selected = list(dict.fromkeys(skill_names))
     unknown = [name for name in selected if name not in FINANCE_SKILL_BY_NAME]
     if unknown:
@@ -112,49 +111,39 @@ async def load_finance_skills(
                 "success": False,
                 "tool": tool_name,
                 "error_type": "duplicate_skill",
-                "error": "Each workflow may be selected only once.",
+                "error": "Each skill may be selected only once.",
             },
             started_at=started_at,
         )
-    if len(selected) > settings.max_workflows_per_task:
+    if len(selected) > settings.max_skills_per_task:
         return _response(
             {
                 "success": False,
                 "tool": tool_name,
-                "error_type": "workflow_limit",
+                "error_type": "skill_limit",
                 "error": (
-                    "The workflow selection exceeds the configured maximum of "
-                    f"{settings.max_workflows_per_task}."
+                    "The skill selection exceeds the configured maximum of "
+                    f"{settings.max_skills_per_task}."
                 ),
-                "max_workflows_per_task": settings.max_workflows_per_task,
-            },
-            started_at=started_at,
-        )
-    if "sql_query" in selected and len(selected) > 1:
-        return _response(
-            {
-                "success": False,
-                "tool": tool_name,
-                "error_type": "generic_workflow_conflict",
-                "error": (
-                    "sql_query is a fallback and cannot be selected with a "
-                    "dedicated workflow."
-                ),
+                "max_skills_per_task": settings.max_skills_per_task,
             },
             started_at=started_at,
         )
 
-    state = _workflow_runtime_state(config)
-    if state.get("generic_workflow_started") is True and "sql_query" not in selected:
+    state = _skill_runtime_state(config)
+    assigned = state.get("assigned_skills")
+    if isinstance(assigned, list) and assigned and selected != assigned:
         return _response(
             {
                 "success": False,
                 "tool": tool_name,
-                "error_type": "generic_workflow_already_started",
+                "error_type": "assigned_skill_mismatch",
                 "error": (
-                    "A dedicated workflow cannot be selected after the generic "
-                    "SQL fallback has started."
+                    "Load exactly the ordered union of Supervisor-assigned skills. "
+                    "Do not add, omit, or reroute skills."
                 ),
+                "assigned_skills": assigned,
+                "received_skills": selected,
             },
             started_at=started_at,
         )
@@ -164,7 +153,7 @@ async def load_finance_skills(
                 "success": False,
                 "tool": tool_name,
                 "error_type": "skills_already_loaded",
-                "error": "Workflow instructions were already loaded for this task.",
+                "error": "Skill instructions were already loaded for this task.",
                 "selected_skills": state.get("selected_skills") or [],
             },
             started_at=started_at,
@@ -180,10 +169,10 @@ async def load_finance_skills(
             "selected_skill_titles": [
                 FINANCE_SKILL_BY_NAME[name].title for name in selected
             ],
-            "max_workflows_per_task": settings.max_workflows_per_task,
+            "max_skills_per_task": settings.max_skills_per_task,
             "instruction": (
-                "The selected skill bodies below are the authoritative workflow "
-                "instructions for this delegated task. Follow all selected bodies."
+                "The selected skill bodies are authoritative for their assigned "
+                "subtasks. Follow each body only for the matching subtask."
             ),
             "skill_bodies": load_finance_skill_bodies(selected),
         },

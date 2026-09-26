@@ -65,6 +65,30 @@ def _final_answer(messages: list[Any]) -> str:
     return ""
 
 
+def _assigned_sub_tasks(task: str, agent_name: SpecialistName) -> list[dict[str, str]]:
+    """Read the immutable Supervisor task packet passed through delegation."""
+
+    try:
+        packet = json.loads(task)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(packet, dict) or packet.get("agent") != agent_name:
+        return []
+    items = packet.get("sub_tasks")
+    if not isinstance(items, list):
+        return []
+    return [
+        {
+            "id": str(item.get("id") or ""),
+            "question": str(item.get("question") or ""),
+            "agent": str(item.get("agent") or ""),
+            "skill": str(item.get("skill") or ""),
+        }
+        for item in items
+        if isinstance(item, dict)
+    ]
+
+
 async def run_specialist_agent(
     agent_name: SpecialistName,
     task: str,
@@ -84,6 +108,20 @@ async def run_specialist_agent(
     else:
         active_graph = build_specialist_graph(agent_name, tool_registry=registry)
     runtime_config = load_agent_runtime_config()
+    assigned_sub_tasks = _assigned_sub_tasks(task, agent_name)
+    assigned_skills = list(
+        dict.fromkeys(
+            item["skill"] for item in assigned_sub_tasks if item.get("skill")
+        )
+    )
+    progress_items = {
+        item["id"]: {
+            **item,
+            "status": "pending",
+        }
+        for item in assigned_sub_tasks
+        if item.get("id")
+    }
     child_config: RunnableConfig = dict(config or {})
     child_config["run_name"] = f"{agent_name}-agent"
     child_config["recursion_limit"] = runtime_config.specialist.recursion_limit
@@ -122,10 +160,14 @@ async def run_specialist_agent(
                 "resolved": False,
                 "accepted_product_names": [],
             },
-            "workflow_runtime_state": {
+            "skill_runtime_state": {
                 "selected_skills": [],
+                "assigned_skills": assigned_skills,
                 "loaded": False,
-                "generic_workflow_started": False,
+            },
+            "subtask_progress_runtime_state": {
+                "order": list(progress_items),
+                "items": progress_items,
             },
         }
     )
@@ -165,6 +207,7 @@ async def run_specialist_agent(
         answer,
         tool_payloads,
         sources,
+        assigned_sub_tasks=assigned_sub_tasks,
     )
     duration_ms = round((perf_counter() - started_at) * 1000, 2)
     logger.info(
@@ -178,12 +221,15 @@ async def run_specialist_agent(
     )
     return {
         "status": (
-            "query_cancelled"
+            "completed"
+            if validation["valid"]
+            else "query_cancelled"
             if cancelled_query is not None
-            else "completed" if validation["valid"] else "invalid_evidence"
+            else "invalid_evidence"
         ),
         "agent": agent_name,
         "answer": answer,
+        "assigned_sub_tasks": assigned_sub_tasks,
         "sources": sources,
         "validation": validation,
         "query_cancellation": (

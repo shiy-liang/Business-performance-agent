@@ -1470,6 +1470,178 @@ h2 {
   padding: 13px 15px 15px;
 }
 
+.chat-subtasks {
+  margin-bottom: 14px;
+  padding-bottom: 13px;
+  border-bottom: 1px solid rgba(226, 238, 232, 0.09);
+}
+
+.chat-subtasks[hidden] {
+  display: none;
+}
+
+.subtask-heading {
+  display: flex;
+  margin-bottom: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.subtask-heading strong {
+  color: #dce8e4;
+  font-size: 9px;
+  font-weight: 780;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.subtask-heading span {
+  color: #728984;
+  font-size: 8px;
+}
+
+.subtask-list {
+  display: grid;
+  gap: 6px;
+}
+
+.subtask-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 9px;
+  min-height: 46px;
+  padding: 8px 9px 8px 10px;
+  align-items: center;
+  border: 1px solid rgba(226, 238, 232, 0.09);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.035);
+  transition: border-color 180ms ease, background 180ms ease, opacity 180ms ease;
+}
+
+.subtask-copy {
+  min-width: 0;
+}
+
+.subtask-copy strong,
+.subtask-copy small {
+  display: block;
+}
+
+.subtask-copy strong {
+  overflow: hidden;
+  color: #d7e3df;
+  font-size: 9px;
+  font-weight: 650;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+}
+
+.subtask-copy small {
+  margin-top: 3px;
+  overflow: hidden;
+  color: #708681;
+  font-size: 7px;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.subtask-state {
+  display: grid;
+  gap: 4px;
+  min-width: 54px;
+  justify-items: end;
+}
+
+.subtask-state-label {
+  color: #718782;
+  font-size: 7px;
+  white-space: nowrap;
+}
+
+.subtask-check {
+  position: relative;
+  display: block;
+  width: 17px;
+  height: 17px;
+  border: 1.5px solid #617873;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.025);
+  transition: border-color 180ms ease, background 180ms ease, transform 180ms ease;
+}
+
+.subtask-row.is-running {
+  border-color: rgba(199, 129, 44, 0.28);
+  background: rgba(199, 129, 44, 0.055);
+}
+
+.subtask-row.is-running .subtask-state-label {
+  color: #dba75f;
+}
+
+.subtask-row.is-running .subtask-check {
+  border-color: rgba(199, 129, 44, 0.28);
+  border-top-color: #dba75f;
+  animation: subtask-spin 0.85s linear infinite;
+}
+
+.subtask-row.is-completed,
+.subtask-row.is-empty {
+  border-color: rgba(200, 239, 116, 0.18);
+  background: rgba(200, 239, 116, 0.045);
+}
+
+.subtask-row.is-completed .subtask-state-label,
+.subtask-row.is-empty .subtask-state-label {
+  color: #bddf7e;
+}
+
+.subtask-row.is-completed .subtask-check,
+.subtask-row.is-empty .subtask-check {
+  border-color: var(--lime);
+  background: var(--lime);
+  transform: scale(1.04);
+}
+
+.subtask-row.is-completed .subtask-check::after,
+.subtask-row.is-empty .subtask-check::after {
+  position: absolute;
+  top: 3px;
+  left: 5px;
+  width: 4px;
+  height: 7px;
+  content: "";
+  border: solid #17332b;
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+
+.subtask-row.is-blocked {
+  border-color: rgba(217, 103, 93, 0.24);
+  background: rgba(217, 103, 93, 0.05);
+}
+
+.subtask-row.is-blocked .subtask-state-label {
+  color: #e49a93;
+}
+
+.subtask-row.is-blocked .subtask-check {
+  border-color: #d9675d;
+}
+
+.subtask-row.is-blocked .subtask-check::after {
+  position: absolute;
+  inset: -1px 0 0;
+  display: grid;
+  content: "×";
+  color: #e8867d;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  place-items: center;
+}
+
 .chat-progress {
   display: grid;
   gap: 10px;
@@ -2225,6 +2397,12 @@ footer {
 }
 
 @keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes subtask-spin {
   to {
     transform: rotate(360deg);
   }

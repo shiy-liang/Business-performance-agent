@@ -7,7 +7,7 @@ after discounts and completed refunds as one aggregate for the full dataset or a
 specified scope. Use the generic SQL skill for grouped breakdowns, rankings, or
 time series.
 
-## Dedicated workflow
+## Execution procedure
 
 1. Call `calculate_net_sales` exactly once. Do not retrieve schema, generate SQL,
    or call `execute_finance_sql` for this calculation.
