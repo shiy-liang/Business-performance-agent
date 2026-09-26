@@ -86,7 +86,11 @@ class EntityResolutionInput(BaseModel):
     entity_type: str = Field(
         min_length=2,
         max_length=40,
-        description="One supported entity type returned by the schema tool.",
+        description=(
+            "One supported non-product-name entity type returned by the schema "
+            "tool. Never use entity_type='product' for a product name; resolve "
+            "product names with find_real_name. product_category remains allowed."
+        ),
     )
     user_term: str = Field(
         min_length=1,
@@ -785,8 +789,10 @@ def build_sql_tools(
         args_schema=EntityResolutionInput,
         description=(
             f"Resolve a user term to real values in {agent_name}-authorized columns. "
-            "Use it for products, stores, campaigns, customers, or categorical filters "
-            "when spelling, aliases, or exact database values are uncertain."
+            "Use it for stores, campaigns, customers, product categories, or other "
+            "non-product-name categorical filters when spelling, aliases, or exact "
+            "database values are uncertain. Never use this tool for a product name; "
+            "product names must be resolved with find_real_name."
         ),
     )
     async def resolve_entity(

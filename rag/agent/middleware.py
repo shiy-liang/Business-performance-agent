@@ -482,6 +482,24 @@ class PublicEventMiddleware:
                 "stage": "query_planning",
                 "message": "Canonical product candidates are ready for the specialist.",
             }
+        if name == "find_real_campaign_name":
+            if payload.get("result_status") == "matched":
+                return {
+                    "stage": "query_planning",
+                    "message": "Canonical campaign names are resolved; the specialist is applying the selected names to the query.",
+                }
+            if (
+                payload.get("terminal") is True
+                and payload.get("result_status") == "canonical_campaign_not_found"
+            ):
+                return {
+                    "stage": "evidence_gap",
+                    "message": "No canonical campaign matched after three attempts; the user must provide an exact campaign name.",
+                }
+            return {
+                "stage": "query_planning",
+                "message": "Canonical campaign candidates are ready for the specialist.",
+            }
         if name == "check_purchase_rate":
             if payload.get("result_status") == "ok":
                 return {
@@ -558,6 +576,7 @@ class PublicEventMiddleware:
             "calculate_gross_profit": "Finance is calculating gross profit from recorded transactions.",
             "calculate_gross_margin": "Finance is calculating gross margin from recorded transactions.",
             "find_real_name": "Matching the requested product to canonical database names.",
+            "find_real_campaign_name": "Matching the requested campaign to canonical database names.",
             "check_purchase_rate": "Calculating the product's interest-to-purchase event ratio.",
             "check_like_rate": "Calculating the product's view-to-like event ratio.",
             "check_less_like": "Reading the ten lowest like-rate products from the metrics view.",
@@ -625,6 +644,23 @@ class PublicEventMiddleware:
                 else ""
             )
             return f"{name} returned {count} canonical product names{suffix}."
+        if name == "find_real_campaign_name" and payload is not None:
+            count = len(payload.get("items") or [])
+            call_number = payload.get("call_number")
+            threshold = payload.get("minimum_similarity")
+            if payload.get("result_status") == "matched":
+                return f"{name} resolved {count} canonical campaign name(s)."
+            if (
+                payload.get("terminal") is True
+                and payload.get("result_status") == "canonical_campaign_not_found"
+            ):
+                return f"{name} found no canonical campaign after three attempts; resolution stopped."
+            suffix = (
+                f" on attempt {call_number} at threshold {threshold}"
+                if call_number is not None and threshold is not None
+                else ""
+            )
+            return f"{name} returned {count} canonical campaign names{suffix}."
         if name == "check_purchase_rate" and payload is not None:
             return f"{name} completed with status {payload.get('result_status', 'unknown')}."
         if name == "check_like_rate" and payload is not None:

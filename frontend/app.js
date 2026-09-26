@@ -43,6 +43,7 @@ const elements = {
   chatForm: document.querySelector("#chat-form"),
   chatHistory: document.querySelector("#chat-history"),
   newChatButton: document.querySelector("#new-chat-button"),
+  newChatDialog: document.querySelector("#new-chat-dialog"),
   chatInput: document.querySelector("#chat-input"),
   chatResponse: document.querySelector("#chat-response"),
   chatQuestion: document.querySelector("#chat-question"),
@@ -401,6 +402,12 @@ async function startNewChat() {
   }
 }
 
+function confirmNewChat() {
+  if (elements.newChatButton.disabled || elements.newChatDialog.open) return;
+  elements.newChatDialog.returnValue = "";
+  elements.newChatDialog.showModal();
+}
+
 function renderChatAnswer() {
   state.chatRenderFrame = null;
   if (window.ChatRenderer?.renderMarkdown) {
@@ -648,6 +655,17 @@ function renderSqlApproval(data) {
   decisionStatus.className = "sql-approval-decision-status";
   decisionStatus.setAttribute("role", "status");
 
+  const body = document.createElement("div");
+  body.className = "sql-approval-body";
+  body.append(
+    warning,
+    purpose,
+    sqlLabel,
+    pre,
+    parameterBlock,
+    decisionStatus,
+  );
+
   const actions = document.createElement("div");
   actions.className = "sql-approval-actions";
   const cancel = document.createElement("button");
@@ -664,12 +682,7 @@ function renderSqlApproval(data) {
 
   card.append(
     heading,
-    warning,
-    purpose,
-    sqlLabel,
-    pre,
-    parameterBlock,
-    decisionStatus,
+    body,
     actions,
   );
   elements.chatSqlApprovals.append(card);
@@ -1601,7 +1614,10 @@ elements.knowledgeFileList.addEventListener("click", (event) => {
 });
 
 elements.reviewSyncButton.addEventListener("click", syncCustomerReviews);
-elements.newChatButton.addEventListener("click", startNewChat);
+elements.newChatButton.addEventListener("click", confirmNewChat);
+elements.newChatDialog.addEventListener("close", () => {
+  if (elements.newChatDialog.returnValue === "confirm") startNewChat();
+});
 
 elements.chatInput.addEventListener("input", resizeChatInput);
 elements.chatInput.addEventListener("keydown", (event) => {

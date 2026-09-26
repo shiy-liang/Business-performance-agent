@@ -8,6 +8,7 @@ from typing import Iterable
 from langchain_core.tools import BaseTool
 
 from rag.agent.state import AgentName
+from rag.agent.tools.common.campaigns import find_real_campaign_name
 from rag.agent.tools.common.knowledge import search_knowledge
 from rag.agent.tools.common.product_metrics import check_less_like, check_less_purchase
 from rag.agent.tools.common.products import find_real_name
@@ -97,6 +98,10 @@ default_tool_registry = ToolRegistry(
         ToolRegistration(delegate_finance, frozenset({"supervisor"})),
         ToolRegistration(delegate_operations, frozenset({"supervisor"})),
         ToolRegistration(find_real_name, frozenset({"finance", "operations"})),
+        ToolRegistration(
+            find_real_campaign_name,
+            frozenset({"finance", "operations"}),
+        ),
         ToolRegistration(
             update_sub_task_status,
             frozenset({"finance", "operations"}),

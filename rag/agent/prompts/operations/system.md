@@ -82,8 +82,10 @@ re-split, add, remove, merge, or reroute its `sub_tasks`. You may use up to
 - `find_real_name` permits at most three sequential attempts. Its thresholds are
   enforced as 0.70, then 0.60, then 0.55. When an empty result is retryable,
   reformulate only from the user's original wording; do not add an unmentioned
-  model. When it returns `result_status=matched`, use the returned name and never
-  call `find_real_name` again for the task. When an unmatched result returns
+  model. When it returns `result_status=matched`, use only the exact name or names
+  in the returned `items` and never call `find_real_name` again for the task. Each
+  assigned skill defines whether those names are processed individually. When an
+  unmatched result returns
   `terminal=true`, stop all product queries immediately and tell the Supervisor
   that the user must provide an exact product name.
 - Never call a product metric tool after empty resolver results, and never call
