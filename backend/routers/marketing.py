@@ -18,22 +18,34 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 
 TOP_CAMPAIGNS_SQL = """
+WITH selected_campaigns AS (
+    SELECT
+        c.campaign_id,
+        c.campaign_name,
+        c.campaign_type,
+        c.start_date,
+        c.end_date,
+        c.budget,
+        c.conversions,
+        c.conversion_rate,
+        c.roi,
+        COUNT(*) OVER () AS active_campaign_count
+    FROM campaigns c
+    WHERE c.start_date < %(period_end)s::date
+      AND c.end_date >= %(period_start)s::date
+    ORDER BY c.roi DESC, c.conversions DESC, c.campaign_id
+    LIMIT 5
+)
 SELECT
-    c.campaign_id,
-    c.campaign_name,
-    c.campaign_type,
-    c.start_date,
-    c.end_date,
-    c.budget,
-    c.conversions,
-    c.conversion_rate,
-    c.roi,
-    COUNT(*) OVER () AS active_campaign_count
-FROM campaigns c
-WHERE c.start_date < %(period_end)s::date
-  AND c.end_date >= %(period_start)s::date
-ORDER BY c.roi DESC, c.conversions DESC, c.campaign_id
-LIMIT 5
+    selected_campaigns.*,
+    (
+        SELECT COUNT(*)::bigint
+        FROM transactions t
+        WHERE t.transaction_date >= selected_campaigns.start_date
+          AND t.transaction_date <= selected_campaigns.end_date
+    ) AS transactions_during_campaign
+FROM selected_campaigns
+ORDER BY roi DESC, conversions DESC, campaign_id
 """
 
 
@@ -241,6 +253,7 @@ def analyze_prepared_marketing_performance(
                 "conversions": row["conversions"],
                 "conversion_rate": _number(row["conversion_rate"]),
                 "roi": _number(row["roi"]),
+                "transactions_during_campaign": row["transactions_during_campaign"],
             }
             for row in rows
         ]
@@ -285,6 +298,11 @@ def analyze_prepared_marketing_performance(
                     "Budget, conversions, conversion rate, and reported ROI describe "
                     "each campaign's full lifecycle; the selected month only determines "
                     "which campaigns are included."
+                ),
+                "transaction_count_note": (
+                    "Transactions during a campaign count all company-wide transactions "
+                    "dated inclusively between its start and end dates; they are not "
+                    "necessarily attributable to the campaign."
                 ),
                 "attribution": {
                     "is_synthetic": True,

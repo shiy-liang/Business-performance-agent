@@ -5,6 +5,12 @@ const state = {
   storeId: "",
   activeProductTab: "best_sellers",
   productData: null,
+  campaigns: [],
+  selectedCampaignId: "",
+  reviewProducts: [],
+  reviewSelectedProductId: "",
+  reviewOverviewController: null,
+  reviewDetailController: null,
   runId: null,
   requestController: null,
   filterTimer: null,
@@ -19,34 +25,73 @@ const state = {
 };
 
 const elements = {
+  sidebar: document.querySelector("#sidebar"),
+  sidebarToggle: document.querySelector("#sidebar-toggle"),
+  sidebarBackdrop: document.querySelector("#sidebar-backdrop"),
+  pageTitle: document.querySelector("#page-title"),
+  pageSections: document.querySelectorAll("[data-page]"),
+  pageLinks: document.querySelectorAll("[data-page-link]"),
+  knowledgeOpen: document.querySelector("#knowledge-open"),
+  knowledgeDialog: document.querySelector("#knowledge-dialog"),
+  knowledgeClose: document.querySelector("#knowledge-close"),
+  assistantOpen: document.querySelector("#assistant-open"),
+  assistantPanel: document.querySelector("#assistant-panel"),
+  assistantClose: document.querySelector("#assistant-close"),
+  assistantDockToggle: document.querySelector("#assistant-dock-toggle"),
+  assistantResizeHandle: document.querySelector("#assistant-resize-handle"),
   yearFilter: document.querySelector("#year-filter"),
   monthFilter: document.querySelector("#month-filter"),
   storeFilter: document.querySelector("#store-filter"),
   refreshButton: document.querySelector("#refresh-button"),
   connectionStatus: document.querySelector("#connection-status"),
   globalError: document.querySelector("#global-error"),
-  salesDataThrough: document.querySelector("#sales-data-through"),
-  scopeCaption: document.querySelector("#scope-caption"),
   financePeriod: document.querySelector("#finance-period"),
+  financeStoreLabel: document.querySelector("#finance-store-label"),
+  financePeriodToggle: document.querySelector("#finance-period-toggle"),
+  financeFilters: document.querySelector("#finance-filters"),
   financeMetrics: document.querySelector("#finance-metrics"),
   financeChart: document.querySelector("#finance-chart"),
   businessRiskCount: document.querySelector("#business-risk-count"),
   businessRiskList: document.querySelector("#business-risk-list"),
+  reviewHotspotList: document.querySelector("#review-hotspot-list"),
   inventoryRiskSummary: document.querySelector("#inventory-risk-summary"),
   inventoryList: document.querySelector("#inventory-list"),
-  ticketCount: document.querySelector("#ticket-count"),
-  ticketList: document.querySelector("#ticket-list"),
   productTabs: document.querySelector("#product-tabs"),
   productList: document.querySelector("#product-list"),
-  campaignCount: document.querySelector("#campaign-count"),
+  productChart: document.querySelector("#product-chart"),
+  productChartTitle: document.querySelector("#product-chart-title"),
+  productTable: document.querySelector("#product-table"),
+  productTableNote: document.querySelector("#product-table-note"),
+  productReviews: document.querySelector("#product-reviews"),
+  reviewScopeNote: document.querySelector("#review-scope-note"),
+  reviewProductSelect: document.querySelector("#review-product-select"),
+  reviewRatingFilter: document.querySelector("#review-rating-filter"),
+  reviewProductSummary: document.querySelector("#review-product-summary"),
+  reviewComments: document.querySelector("#review-comments"),
   campaignList: document.querySelector("#campaign-list"),
+  campaignChart: document.querySelector("#campaign-chart"),
+  campaignTable: document.querySelector("#campaign-table"),
+  campaignPanel: document.querySelector("#campaign-performance"),
+  campaignDetail: document.querySelector("#campaign-detail"),
+  campaignDetailTitle: document.querySelector("#campaign-detail-title"),
+  campaignDetailStart: document.querySelector("#campaign-detail-start"),
+  campaignDetailEnd: document.querySelector("#campaign-detail-end"),
+  campaignDetailCount: document.querySelector("#campaign-detail-count"),
+  campaignDetailAxisStart: document.querySelector("#campaign-detail-axis-start"),
+  campaignDetailAxisEnd: document.querySelector("#campaign-detail-axis-end"),
   chatForm: document.querySelector("#chat-form"),
+  chatConversation: document.querySelector("#chat-conversation"),
+  chatWelcome: document.querySelector("#chat-welcome"),
   chatHistory: document.querySelector("#chat-history"),
   newChatButton: document.querySelector("#new-chat-button"),
   newChatDialog: document.querySelector("#new-chat-dialog"),
   chatInput: document.querySelector("#chat-input"),
   chatResponse: document.querySelector("#chat-response"),
   chatQuestion: document.querySelector("#chat-question"),
+  chatTrace: document.querySelector(".chat-trace"),
+  chatTraceSummary: document.querySelector(".chat-trace > summary"),
+  chatTraceContent: document.querySelector(".trace-content"),
+  chatAnswerCard: document.querySelector(".chat-answer-card"),
   chatProgress: document.querySelector("#chat-progress"),
   chatSubtasks: document.querySelector("#chat-subtasks"),
   chatThinking: document.querySelector("#chat-thinking"),
@@ -68,6 +113,86 @@ const elements = {
   reviewSyncStatus: document.querySelector("#review-sync-status"),
 };
 
+const mobileNavigation = window.matchMedia("(max-width: 540px)");
+
+function updateSidebarState() {
+  const isMobile = mobileNavigation.matches;
+  const isOpen = isMobile
+    ? document.body.classList.contains("sidebar-open")
+    : !document.body.classList.contains("sidebar-collapsed");
+  elements.sidebarToggle.setAttribute("aria-expanded", String(isOpen));
+  elements.sidebarToggle.setAttribute(
+    "aria-label",
+    isOpen ? (isMobile ? "Close navigation" : "Collapse navigation") : "Open navigation",
+  );
+  elements.sidebarBackdrop.hidden = !isMobile || !isOpen;
+  elements.sidebar.inert = !isOpen;
+}
+
+elements.sidebarToggle.addEventListener("click", () => {
+  document.body.classList.toggle(
+    mobileNavigation.matches ? "sidebar-open" : "sidebar-collapsed",
+  );
+  updateSidebarState();
+  if (document.body.classList.contains("assistant-docked")) setAssistantDockWidth(assistantDockWidth);
+});
+
+elements.sidebarBackdrop.addEventListener("click", () => {
+  document.body.classList.remove("sidebar-open");
+  updateSidebarState();
+  elements.sidebarToggle.focus();
+});
+
+elements.sidebar.querySelectorAll(".sidebar-link").forEach((link) => {
+  link.addEventListener("click", () => {
+    if (mobileNavigation.matches) {
+      document.body.classList.remove("sidebar-open");
+      updateSidebarState();
+    }
+  });
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && document.body.classList.contains("sidebar-open")) {
+    document.body.classList.remove("sidebar-open");
+    updateSidebarState();
+    elements.sidebarToggle.focus();
+  }
+});
+
+mobileNavigation.addEventListener("change", () => {
+  document.body.classList.remove("sidebar-open");
+  updateSidebarState();
+});
+
+updateSidebarState();
+
+const pageTitles = {
+  overview: "Business overview",
+  "action-center": "Business Action Center",
+  "product-performance": "Product performance",
+  "campaign-performance": "Campaign performance",
+};
+
+function showCurrentPage() {
+  const requestedPage = window.location.hash.slice(1);
+  const currentPage = Object.hasOwn(pageTitles, requestedPage) ? requestedPage : "overview";
+  elements.pageTitle.textContent = pageTitles[currentPage];
+  elements.pageSections.forEach((section) => {
+    section.hidden = section.dataset.page !== currentPage;
+  });
+  elements.pageLinks.forEach((link) => {
+    const isCurrent = link.dataset.pageLink === currentPage;
+    link.classList.toggle("active", isCurrent);
+    if (isCurrent) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  });
+  window.requestAnimationFrame(() => window.scrollTo(0, 0));
+}
+
+window.addEventListener("hashchange", showCurrentPage);
+showCurrentPage();
+
 const moneyFormatter = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
@@ -79,6 +204,9 @@ const numberFormatter = new Intl.NumberFormat("en-US", {
 });
 
 const firstOperatingYear = 2020;
+const narrowChatLayout = window.matchMedia("(max-width: 760px)");
+let activitySizingInitialized = false;
+let activityResizeObserver = null;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -112,6 +240,18 @@ function formatMonth(month) {
   return new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" }).format(
     new Date(Number(year), Number(monthNumber) - 1, 1),
   );
+}
+
+function formatShortDate(value, includeDay = false) {
+  const match = /^(\d{4})-(\d{2})(?:-(\d{2}))?$/.exec(value || "");
+  if (!match) return value || "—";
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3] || 1)));
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    ...(includeDay ? { day: "numeric" } : {}),
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(date);
 }
 
 function endpoint(path, options = {}) {
@@ -317,7 +457,10 @@ function resetConversationUi() {
     state.chatRenderFrame = null;
   }
   elements.chatHistory.replaceChildren();
+  elements.chatWelcome.hidden = false;
   elements.chatResponse.hidden = true;
+  elements.chatAnswerCard.hidden = true;
+  elements.chatAnswerCard.classList.remove("is-approval-only");
   elements.chatQuestion.textContent = "";
   elements.chatProgress.replaceChildren();
   state.chatSubtasks.clear();
@@ -361,7 +504,12 @@ function archiveCompletedTurn() {
 function prepareChatResponse(question) {
   state.chatAnswerText = "";
   state.chatTurnComplete = false;
+  elements.chatTrace.open = true;
+  elements.chatTraceContent.scrollTop = 0;
+  elements.chatWelcome.hidden = true;
   elements.chatResponse.hidden = false;
+  elements.chatAnswerCard.hidden = true;
+  elements.chatAnswerCard.classList.remove("is-approval-only");
   elements.chatQuestion.textContent = question;
   elements.chatProgress.replaceChildren();
   state.chatSubtasks.clear();
@@ -377,6 +525,9 @@ function prepareChatResponse(question) {
   elements.chatAnswerStatus.textContent = "Thinking";
   elements.chatAnswerStatus.classList.add("is-streaming");
   setThinking("Connecting to the model…");
+  window.requestAnimationFrame(() => {
+    elements.chatConversation.scrollTop = elements.chatConversation.scrollHeight;
+  });
 }
 
 async function startNewChat() {
@@ -410,16 +561,83 @@ function confirmNewChat() {
 
 function renderChatAnswer() {
   state.chatRenderFrame = null;
+  if (!state.chatAnswerText.trim()) return;
+  const followAnswer = elements.chatConversation.scrollHeight -
+    elements.chatConversation.scrollTop - elements.chatConversation.clientHeight < 80;
+  elements.chatAnswerCard.hidden = false;
+  elements.chatAnswerCard.classList.remove("is-approval-only");
   if (window.ChatRenderer?.renderMarkdown) {
     elements.chatAnswer.innerHTML = window.ChatRenderer.renderMarkdown(state.chatAnswerText);
-    return;
+  } else {
+    elements.chatAnswer.innerHTML = `<p>${escapeHtml(state.chatAnswerText).replaceAll("\n", "<br>")}</p>`;
   }
-  elements.chatAnswer.innerHTML = `<p>${escapeHtml(state.chatAnswerText).replaceAll("\n", "<br>")}</p>`;
+  if (followAnswer) elements.chatConversation.scrollTop = elements.chatConversation.scrollHeight;
 }
 
 function scheduleChatAnswerRender() {
   if (state.chatRenderFrame !== null) return;
   state.chatRenderFrame = window.requestAnimationFrame(renderChatAnswer);
+}
+
+function isActivityNearBottom() {
+  const distanceFromBottom =
+    elements.chatTraceContent.scrollHeight -
+    elements.chatTraceContent.scrollTop -
+    elements.chatTraceContent.clientHeight;
+  return distanceFromBottom < 64;
+}
+
+function scrollActivityToBottom() {
+  elements.chatTraceContent.scrollTop = elements.chatTraceContent.scrollHeight;
+}
+
+function updateActivityContent(update) {
+  const shouldAutoScroll = isActivityNearBottom();
+
+  update();
+
+  if (shouldAutoScroll) scrollActivityToBottom();
+}
+
+function syncActivityHeight() {
+  const shouldStayAtBottom = isActivityNearBottom();
+
+  if (narrowChatLayout.matches || elements.chatResponse.hidden) {
+    elements.chatTrace.style.removeProperty("--activity-panel-height");
+    elements.chatTrace.style.removeProperty("--activity-content-max-height");
+  } else {
+    const responseHeight = elements.chatAnswerCard.getBoundingClientRect().height;
+    const headerHeight = elements.chatTraceSummary.getBoundingClientRect().height;
+    const traceBorderHeight =
+      elements.chatTrace.offsetHeight - elements.chatTrace.clientHeight;
+    const contentHeight = Math.max(
+      0,
+      Math.floor(responseHeight - headerHeight - traceBorderHeight),
+    );
+
+    elements.chatTrace.style.setProperty(
+      "--activity-panel-height",
+      `${Math.round(responseHeight)}px`,
+    );
+    elements.chatTrace.style.setProperty(
+      "--activity-content-max-height",
+      `${contentHeight}px`,
+    );
+  }
+
+  if (shouldStayAtBottom) scrollActivityToBottom();
+}
+
+function initializeActivitySizing() {
+  if (activitySizingInitialized) return;
+  activitySizingInitialized = true;
+
+  if (typeof ResizeObserver === "function") {
+    activityResizeObserver = new ResizeObserver(syncActivityHeight);
+    activityResizeObserver.observe(elements.chatAnswerCard);
+  }
+  narrowChatLayout.addEventListener("change", syncActivityHeight);
+  syncActivityHeight();
 }
 
 function appendChatActivity(kind, label, message) {
@@ -432,7 +650,7 @@ function appendChatActivity(kind, label, message) {
   heading.textContent = label;
   copy.append(heading, document.createTextNode(String(message || "")));
   item.append(dot, copy);
-  elements.chatProgress.append(item);
+  updateActivityContent(() => elements.chatProgress.append(item));
 }
 
 const SUBTASK_STATUS_LABELS = {
@@ -487,27 +705,29 @@ function renderSubtasks(items) {
   const tasks = Array.isArray(items)
     ? items.filter((item) => item && typeof item === "object" && item.id)
     : [];
-  state.chatSubtasks.clear();
-  tasks.forEach((item) => {
-    const task = { ...item, status: normalizedSubtaskStatus(item.status) };
-    state.chatSubtasks.set(String(task.id), task);
+  updateActivityContent(() => {
+    state.chatSubtasks.clear();
+    tasks.forEach((item) => {
+      const task = { ...item, status: normalizedSubtaskStatus(item.status) };
+      state.chatSubtasks.set(String(task.id), task);
+    });
+    elements.chatSubtasks.replaceChildren();
+    elements.chatSubtasks.hidden = state.chatSubtasks.size === 0;
+    if (!state.chatSubtasks.size) return;
+
+    const heading = document.createElement("div");
+    heading.className = "subtask-heading";
+    const title = document.createElement("strong");
+    title.textContent = "Subtasks";
+    const count = document.createElement("span");
+    heading.append(title, count);
+
+    const list = document.createElement("div");
+    list.className = "subtask-list";
+    state.chatSubtasks.forEach((task) => list.append(buildSubtaskRow(task)));
+    elements.chatSubtasks.append(heading, list);
+    updateSubtaskProgressCount();
   });
-  elements.chatSubtasks.replaceChildren();
-  elements.chatSubtasks.hidden = state.chatSubtasks.size === 0;
-  if (!state.chatSubtasks.size) return;
-
-  const heading = document.createElement("div");
-  heading.className = "subtask-heading";
-  const title = document.createElement("strong");
-  title.textContent = "Subtasks";
-  const count = document.createElement("span");
-  heading.append(title, count);
-
-  const list = document.createElement("div");
-  list.className = "subtask-list";
-  state.chatSubtasks.forEach((task) => list.append(buildSubtaskRow(task)));
-  elements.chatSubtasks.append(heading, list);
-  updateSubtaskProgressCount();
 }
 
 function updateSubtaskStatus(data) {
@@ -529,10 +749,12 @@ function updateSubtaskStatus(data) {
     renderSubtasks([...state.chatSubtasks.values()]);
     return;
   }
-  row.className = `subtask-row is-${status}`;
-  const label = row.querySelector(".subtask-state-label");
-  if (label) label.textContent = SUBTASK_STATUS_LABELS[status];
-  updateSubtaskProgressCount();
+  updateActivityContent(() => {
+    row.className = `subtask-row is-${status}`;
+    const label = row.querySelector(".subtask-state-label");
+    if (label) label.textContent = SUBTASK_STATUS_LABELS[status];
+    updateSubtaskProgressCount();
+  });
 }
 
 function setThinking(message, visible = true) {
@@ -541,12 +763,85 @@ function setThinking(message, visible = true) {
 }
 
 function safeSourceUrl(value) {
+  if (value === null || value === undefined) return null;
+  const candidate = String(value).trim();
+  if (!candidate) return null;
+
   try {
-    const url = new URL(String(value || ""), window.location.origin);
+    const url = new URL(candidate, window.location.origin);
     if (!['http:', 'https:'].includes(url.protocol)) return null;
     return url.href;
   } catch (_error) {
     return null;
+  }
+}
+
+function groupChatSources(sources) {
+  const entries = [];
+  const knowledgeFiles = new Map();
+
+  sources.forEach((source) => {
+    if (!source || typeof source !== "object") return;
+    if (source.file_id === null || source.file_id === undefined) {
+      entries.push({ kind: "source", source });
+      return;
+    }
+
+    const key = String(source.file_id);
+    let group = knowledgeFiles.get(key);
+    if (!group) {
+      group = {
+        kind: "knowledge-file",
+        file_id: source.file_id,
+        filename: source.filename,
+        download_url: source.download_url,
+        chunks: [],
+      };
+      knowledgeFiles.set(key, group);
+      entries.push(group);
+    }
+    if (!group.filename && source.filename) group.filename = source.filename;
+    if (!group.download_url && source.download_url) group.download_url = source.download_url;
+    group.chunks.push({
+      chunk_index: source.chunk_index,
+      citation: source.citation,
+      similarity: source.similarity,
+    });
+  });
+
+  return entries;
+}
+
+async function downloadChatSource(source, trigger, status) {
+  const href = safeSourceUrl(source.download_url);
+  if (!href) return;
+
+  const idleLabel = status.textContent;
+  trigger.disabled = true;
+  status.textContent = "Downloading…";
+  try {
+    const response = await fetch(href, { credentials: "same-origin" });
+    if (!response.ok) throw new Error(`Download failed (${response.status})`);
+
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const download = document.createElement("a");
+    download.href = objectUrl;
+    download.download = String(source.filename || "knowledge-source");
+    download.hidden = true;
+    document.body.append(download);
+    download.click();
+    download.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    status.textContent = "Downloaded";
+    window.setTimeout(() => {
+      if (status.isConnected) status.textContent = idleLabel;
+    }, 1400);
+  } catch (error) {
+    console.error("Reference download failed", error);
+    status.textContent = "Download failed · retry";
+  } finally {
+    trigger.disabled = false;
   }
 }
 
@@ -557,20 +852,24 @@ function renderChatSources(sources) {
     return;
   }
 
+  const entries = groupChatSources(sources);
+
   const heading = document.createElement("div");
   heading.className = "sources-heading";
   const title = document.createElement("strong");
   title.textContent = "References";
   const count = document.createElement("span");
-  count.textContent = `${sources.length} cited source${sources.length === 1 ? "" : "s"}`;
+  count.textContent = `${entries.length} cited source${entries.length === 1 ? "" : "s"}`;
   heading.append(title, count);
 
   const list = document.createElement("div");
   list.className = "source-list";
-  sources.forEach((source, index) => {
+  entries.forEach((entryData, index) => {
+    const isKnowledgeFile = entryData.kind === "knowledge-file";
+    const source = isKnowledgeFile ? entryData : entryData.source;
     const href = safeSourceUrl(source.download_url);
-    const entry = document.createElement(href ? "a" : "div");
-    if (href) entry.href = href;
+    const entry = document.createElement(href ? "button" : "div");
+    if (href) entry.type = "button";
     entry.className = "source-entry";
 
     const number = document.createElement("span");
@@ -581,15 +880,37 @@ function renderChatSources(sources) {
     const filename = document.createElement("strong");
     filename.textContent = source.filename || source.citation || "Knowledge source";
     const detail = document.createElement("small");
-    const similarity = Number(source.similarity);
-    detail.textContent = [
-      source.citation,
-      Number.isFinite(similarity) ? `${Math.round(similarity * 100)}% match` : "",
-    ].filter(Boolean).join(" · ");
+    if (isKnowledgeFile) {
+      const chunkDetails = source.chunks.map((chunk) => {
+        const similarity = Number(chunk.similarity);
+        const chunkLabel = chunk.chunk_index === null || chunk.chunk_index === undefined
+          ? String(chunk.citation || "evidence")
+          : `#${chunk.chunk_index}`;
+        return Number.isFinite(similarity)
+          ? `${chunkLabel} ${Math.round(similarity * 100)}%`
+          : chunkLabel;
+      });
+      detail.textContent = `${source.chunks.length} evidence chunk${source.chunks.length === 1 ? "" : "s"} · ${chunkDetails.join(", ")}`;
+      detail.title = source.chunks
+        .map((chunk) => String(chunk.citation || `#${chunk.chunk_index}`))
+        .join(", ");
+    } else {
+      const similarity = Number(source.similarity);
+      detail.textContent = [
+        source.citation,
+        Number.isFinite(similarity) ? `${Math.round(similarity * 100)}% match` : "",
+      ].filter(Boolean).join(" · ");
+    }
     copy.append(filename, detail);
     const open = document.createElement("span");
     open.className = "source-open";
-    open.textContent = href ? "↗" : "";
+    open.textContent = href ? "Download" : "";
+    if (href) {
+      entry.addEventListener("click", (event) => {
+        event.preventDefault();
+        downloadChatSource(source, entry, open);
+      });
+    }
     entry.append(number, copy, open);
     list.append(entry);
   });
@@ -601,6 +922,11 @@ function renderSqlApproval(data) {
   const approvalId = String(data?.approval_id || "");
   const sql = String(data?.sql || "").trim();
   if (!approvalId || !sql) return;
+
+  if (!state.chatAnswerText.trim()) {
+    elements.chatAnswerCard.hidden = false;
+    elements.chatAnswerCard.classList.add("is-approval-only");
+  }
 
   const card = document.createElement("article");
   card.className = "sql-approval-card";
@@ -777,6 +1103,9 @@ function handleChatEvent(eventName, data) {
     if (typeof data?.answer === "string" && data.answer && !state.chatAnswerText) {
       state.chatAnswerText = data.answer;
     }
+    if (!state.chatAnswerText.trim()) {
+      state.chatAnswerText = "The assistant did not return an answer.";
+    }
     if (state.chatRenderFrame !== null) window.cancelAnimationFrame(state.chatRenderFrame);
     renderChatAnswer();
     renderChatSources(data?.sources);
@@ -899,6 +1228,12 @@ async function loadStores() {
   }
 
   elements.storeFilter.append(fragment);
+  updateFinanceStoreLabel();
+}
+
+function updateFinanceStoreLabel() {
+  elements.financeStoreLabel.textContent =
+    elements.storeFilter.selectedOptions[0]?.textContent?.trim() || "All stores";
 }
 
 function populateOperatingYears(maxYear) {
@@ -994,19 +1329,34 @@ function renderFinance(data) {
       `,
     )
     .join("");
+  updateMetricContextVisibility();
 
   elements.financePeriod.textContent = `${formatMonth(data.period.month)}${
     data.period.is_complete ? " · Complete month" : " · Partial data"
-  }`;
-  elements.salesDataThrough.textContent = data.period.sales_data_through;
-  elements.scopeCaption.textContent = `${data.scope.label} · ${
-    data.period.is_complete ? "Complete calendar month" : "Partial month"
   }`;
 
   state.maxMonth = data.period.sales_data_through.slice(0, 7);
   if (!state.month) state.month = data.period.month;
   syncOperatingMonthFilters();
   renderFinanceChart(data.trend);
+}
+
+function updateMetricContextVisibility() {
+  elements.financeMetrics.querySelectorAll(".metric-context").forEach((context) => {
+    context.hidden = false;
+    context.hidden = context.scrollWidth > context.clientWidth + 1;
+  });
+}
+
+let lastMetricGridWidth = -1;
+if ("ResizeObserver" in window) {
+  new ResizeObserver(([entry]) => {
+    if (entry.contentRect.width === lastMetricGridWidth) return;
+    lastMetricGridWidth = entry.contentRect.width;
+    updateMetricContextVisibility();
+  }).observe(elements.financeMetrics);
+} else {
+  window.addEventListener("resize", updateMetricContextVisibility);
 }
 
 function renderFinanceChart(points) {
@@ -1057,7 +1407,7 @@ function renderFinanceChart(points) {
     .map((item, index) => {
       const label = index % 2 === 0 || index === points.length - 1;
       if (!label) return "";
-      return `<text x="${x(index)}" y="${height - 9}" text-anchor="middle" fill="#66706a" font-size="9">${escapeHtml(item.month.slice(5))}</text>`;
+      return `<text x="${x(index)}" y="${height - 9}" text-anchor="middle" fill="#66706a" font-size="9">${escapeHtml(formatShortDate(item.month).split(" ")[0])}</text>`;
     })
     .join("");
 
@@ -1208,6 +1558,9 @@ function renderDetectedRisks(candidateIssues) {
               .map((line) => `<span>${escapeHtml(line)}</span>`)
               .join("")}
           </div>
+          ${issue.issue_type === "customer_experience_deterioration"
+            ? `<a class="review-investigate" href="#product-performance" data-review-investigate>See products and customer comments</a>`
+            : ""}
         </article>
       `;
     })
@@ -1283,36 +1636,6 @@ function renderInventorySection(inventory, inventoryIssue) {
   `;
 }
 
-function renderSupportTickets(tickets) {
-  const ticketItems = Array.isArray(tickets.oldest) ? tickets.oldest : [];
-  elements.ticketCount.textContent = `${numberFormatter.format(
-    finiteNumber(tickets.unresolved_high_priority_count),
-  )} unresolved`;
-
-  if (ticketItems.length === 0) {
-    renderEmpty(elements.ticketList, "No unresolved high-priority tickets");
-    return;
-  }
-
-  elements.ticketList.className = "ticket-list";
-  elements.ticketList.innerHTML = ticketItems
-    .map(
-      (ticket) => `
-        <article class="ticket-row">
-          <span class="age-box">
-            <strong>${numberFormatter.format(finiteNumber(ticket.open_days))}</strong>
-            <small>days open</small>
-          </span>
-          <div>
-            <span class="row-title">${escapeHtml(ticket.notes || ticket.issue_category || "Support ticket")}</span>
-            <span class="row-subtitle">${escapeHtml(ticket.issue_category || "Uncategorized")} · ${escapeHtml(ticket.resolution_status || "Unknown status")} · ${escapeHtml(ticket.submission_date || "Unknown date")}</span>
-          </div>
-        </article>
-      `,
-    )
-    .join("");
-}
-
 function renderBusinessActionCenter(data, candidateIssues) {
   const actionCenter = data && typeof data === "object" ? data : {};
   const issues = Array.isArray(candidateIssues)
@@ -1324,7 +1647,6 @@ function renderBusinessActionCenter(data, candidateIssues) {
 
   renderDetectedRisks(issues);
   renderInventorySection(actionCenter.inventory || {}, inventoryIssue);
-  renderSupportTickets(actionCenter.support_tickets || {});
 }
 
 const productTabLabels = {
@@ -1358,6 +1680,55 @@ function renderProducts(data) {
   renderProductTab();
 }
 
+function productChartMetric(tab, item) {
+  if (tab === "best_sellers") return { value: finiteNumber(item.net_units), label: `${numberFormatter.format(finiteNumber(item.net_units))} units` };
+  if (tab === "high_return_rate") return { value: finiteNumber(item.return_rate_percent), label: `${fixedNumber(item.return_rate_percent, 1)}%` };
+  return { value: finiteNumber(item.average_rating), label: `${fixedNumber(item.average_rating, 2)} / 5` };
+}
+
+function renderProductInsights(items) {
+  const tab = state.activeProductTab;
+  elements.productChartTitle.textContent = `${elements.productTabs.querySelector(".tab.active")?.textContent || "Products"} comparison`;
+  elements.productTableNote.textContent = tab === "top_rated" || tab === "lowest_rated"
+    ? "Company-wide lifetime reviews"
+    : "Selected sales month and store scope";
+
+  if (!items.length) {
+    renderEmpty(elements.productChart, "No products to compare");
+    renderEmpty(elements.productTable, "No product details available");
+    return;
+  }
+
+  const max = tab === "top_rated" || tab === "lowest_rated"
+    ? 5 : Math.max(1, ...items.map((item) => productChartMetric(tab, item).value));
+  elements.productChart.className = "comparison-chart";
+  elements.productChart.innerHTML = items.map((item) => {
+    const metric = productChartMetric(tab, item);
+    const width = Math.max(0, Math.min(100, metric.value / max * 100));
+    return `<div class="comparison-row">
+      <span class="comparison-name" title="${escapeHtml(item.product_name)}">${escapeHtml(item.product_name)}</span>
+      <span class="comparison-track"><span class="comparison-fill" style="width:${width}%"></span></span>
+      <strong>${escapeHtml(metric.label)}</strong>
+    </div>`;
+  }).join("");
+
+  const columnLabels = tab === "best_sellers"
+    ? ["Net units", "Revenue", "Est. gross profit"]
+    : tab === "high_return_rate"
+      ? ["Return rate", "Returned / sold", "Revenue"]
+      : ["Rating", "Reviews", "Scope"];
+  const cells = (item) => tab === "best_sellers"
+    ? [numberFormatter.format(finiteNumber(item.net_units)), formatMoney(item.refund_adjusted_revenue), formatMoney(item.estimated_gross_profit)]
+    : tab === "high_return_rate"
+      ? [`${fixedNumber(item.return_rate_percent, 1)}%`, `${numberFormatter.format(finiteNumber(item.returned_units))} / ${numberFormatter.format(finiteNumber(item.sold_units))}`, formatMoney(item.refund_adjusted_revenue)]
+      : [`${fixedNumber(item.average_rating, 2)} / 5`, numberFormatter.format(finiteNumber(item.review_count)), "Company-wide"];
+  elements.productTable.className = "table-scroll";
+  elements.productTable.innerHTML = `<table class="insight-table">
+    <thead><tr><th scope="col">Product</th><th scope="col">Category</th>${columnLabels.map((label) => `<th scope="col">${label}</th>`).join("")}</tr></thead>
+    <tbody>${items.map((item) => `<tr><th scope="row"><button class="review-product-link" type="button" data-review-product-id="${escapeHtml(item.product_id)}">${escapeHtml(item.product_name)}</button></th><td>${escapeHtml(item.product_category)}</td>${cells(item).map((value) => `<td>${escapeHtml(value)}</td>`).join("")}</tr>`).join("")}</tbody>
+  </table>`;
+}
+
 function renderProductTab() {
   if (!state.productData) return;
   const items = state.productData[state.activeProductTab] || [];
@@ -1367,6 +1738,8 @@ function renderProductTab() {
     button.classList.toggle("active", isActive);
     button.setAttribute("aria-pressed", String(isActive));
   });
+
+  renderProductInsights(items);
 
   if (items.length === 0) {
     renderEmpty(elements.productList, "Not enough data for this ranking");
@@ -1383,7 +1756,7 @@ function renderProductTab() {
           <article class="rank-row">
             <span class="rank-number">${String(index + 1).padStart(2, "0")}</span>
             <div>
-              <span class="row-title">${escapeHtml(item.product_name)}</span>
+              <button class="review-product-link row-title" type="button" data-review-product-id="${escapeHtml(item.product_id)}">${escapeHtml(item.product_name)}</button>
               <span class="row-subtitle">${escapeHtml(item.product_category)}</span>
             </div>
             <span class="rank-metric">
@@ -1401,12 +1774,150 @@ function renderProductTab() {
   `;
 }
 
+function renderReviewOverview(data) {
+  state.reviewProducts = data.products;
+  elements.reviewScopeNote.textContent = `${formatMonth(data.month)} · company-wide (reviews have no store field)`;
+  const hotspots = data.products.filter((product) => product.low_rating_count > 0).slice(0, 5);
+  if (!hotspots.length) {
+    renderEmpty(elements.reviewHotspotList, "No 1–2 star product reviews in the selected month.");
+  } else {
+    elements.reviewHotspotList.className = "review-hotspot-list";
+    elements.reviewHotspotList.innerHTML = hotspots.map((product) => `
+      <button class="review-hotspot" type="button" data-review-product-id="${escapeHtml(product.product_id)}">
+        <span><strong>${escapeHtml(product.product_name)}</strong><small>${escapeHtml(product.product_category)}</small></span>
+        <span>${numberFormatter.format(product.low_rating_count)} low of ${numberFormatter.format(product.review_count)} reviews <span aria-hidden="true">→</span></span>
+      </button>
+    `).join("");
+  }
+
+  const selected = data.products.some((product) => product.product_id === state.reviewSelectedProductId)
+    ? state.reviewSelectedProductId
+    : (data.products.find((product) => product.low_rating_count > 0)
+      || data.products.find((product) => product.review_count > 0))?.product_id || "";
+  state.reviewSelectedProductId = selected;
+  elements.reviewProductSelect.replaceChildren();
+  if (!data.products.length) {
+    elements.reviewProductSelect.add(new Option("No products available", ""));
+    elements.reviewProductSelect.disabled = true;
+  } else {
+    elements.reviewProductSelect.add(new Option("Choose a product", ""));
+    data.products.forEach((product) => {
+      elements.reviewProductSelect.add(new Option(
+        `${product.product_name} · ${product.product_category}`,
+        product.product_id,
+      ));
+    });
+    elements.reviewProductSelect.disabled = false;
+  }
+  elements.reviewProductSelect.value = selected;
+  loadProductReviews();
+}
+
+async function loadReviewOverview(month) {
+  if (state.reviewOverviewController) state.reviewOverviewController.abort();
+  const controller = new AbortController();
+  state.reviewOverviewController = controller;
+  elements.reviewHotspotList.className = "review-hotspot-list loading-copy";
+  elements.reviewHotspotList.textContent = "Loading product reviews…";
+  try {
+    const data = await fetchJson(`/api/dashboard/product-reviews?month=${encodeURIComponent(month)}`, {
+      signal: controller.signal,
+    });
+    if (controller.signal.aborted || month !== state.month) return;
+    renderReviewOverview(data);
+  } catch (error) {
+    if (controller.signal.aborted) return;
+    renderEmpty(elements.reviewHotspotList, "Product reviews are temporarily unavailable.");
+    renderEmpty(elements.reviewComments, "Could not load customer reviews.");
+  }
+}
+
+async function loadProductReviews() {
+  if (state.reviewDetailController) state.reviewDetailController.abort();
+  const productId = state.reviewSelectedProductId;
+  const product = state.reviewProducts.find((item) => item.product_id === productId);
+  if (!product || !state.month) {
+    elements.reviewProductSummary.textContent = "Choose a product to see its reviews.";
+    elements.reviewComments.replaceChildren();
+    return;
+  }
+
+  elements.reviewProductSummary.textContent =
+    `${numberFormatter.format(product.low_rating_count)} of ${numberFormatter.format(product.review_count)} reviews rated 1–2 stars in ${formatMonth(state.month)}.`;
+  elements.reviewComments.className = "review-comments loading-copy";
+  elements.reviewComments.textContent = "Loading customer comments…";
+  const controller = new AbortController();
+  state.reviewDetailController = controller;
+  const lowOnly = elements.reviewRatingFilter.value === "low";
+  const month = state.month;
+  try {
+    const data = await fetchJson(
+      `/api/dashboard/products/${encodeURIComponent(productId)}/reviews?month=${encodeURIComponent(month)}&low_only=${lowOnly}`,
+      { signal: controller.signal },
+    );
+    if (controller.signal.aborted || state.reviewSelectedProductId !== productId || state.month !== month) return;
+    if (!data.reviews.length) {
+      renderEmpty(elements.reviewComments, lowOnly
+        ? "No 1–2 star comments for this product this month. Try All ratings."
+        : "No reviews for this product this month.");
+      return;
+    }
+    elements.reviewComments.className = "review-comments";
+    elements.reviewComments.innerHTML = data.reviews.map((review) => `
+      <article class="review-comment">
+        <div class="review-comment-meta"><strong aria-label="${review.rating} out of 5 stars">${"★".repeat(review.rating)}${"☆".repeat(5 - review.rating)}</strong><span>${escapeHtml(formatShortDate(review.review_date, true))}</span></div>
+        <strong>${escapeHtml(review.review_title || "Customer review")}</strong>
+        <p>${escapeHtml(review.review_text || "No written comment provided.")}</p>
+      </article>
+    `).join("");
+  } catch (error) {
+    if (controller.signal.aborted) return;
+    renderEmpty(elements.reviewComments, "Could not load customer comments.");
+  }
+}
+
+function openProductReviews(productId) {
+  if (productId) state.reviewSelectedProductId = productId;
+  elements.reviewRatingFilter.value = "low";
+  elements.reviewProductSelect.value = state.reviewSelectedProductId;
+  loadProductReviews();
+  window.location.hash = "product-performance";
+  window.setTimeout(() => {
+    elements.productReviews.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, 80);
+}
+
+function renderCampaignInsights(campaigns) {
+  if (!campaigns.length) {
+    renderEmpty(elements.campaignChart, "No campaigns to compare");
+    renderEmpty(elements.campaignTable, "No campaign details available");
+    return;
+  }
+
+  const maxAbsRoi = Math.max(1, ...campaigns.map((campaign) => Math.abs(finiteNumber(campaign.roi))));
+  elements.campaignChart.className = "comparison-chart";
+  elements.campaignChart.innerHTML = campaigns.map((campaign) => {
+    const roi = finiteNumber(campaign.roi);
+    const width = Math.min(50, Math.abs(roi) / maxAbsRoi * 50);
+    return `<div class="comparison-row">
+      <span class="comparison-name" title="${escapeHtml(campaign.campaign_name)}">${escapeHtml(campaign.campaign_name)}</span>
+      <span class="roi-track"><span class="roi-fill ${roi < 0 ? "negative" : "positive"}" style="width:${width}%;${roi < 0 ? `left:${50 - width}%` : "left:50%"}"></span></span>
+      <strong class="${roi < 0 ? "roi-negative" : "roi-positive"}">${roi > 0 ? "+" : ""}${escapeHtml(roi.toFixed(0))}%</strong>
+    </div>`;
+  }).join("");
+
+  elements.campaignTable.className = "table-scroll";
+  elements.campaignTable.innerHTML = `<table class="insight-table"><thead><tr><th scope="col">Campaign</th><th scope="col">Type</th><th scope="col">Budget</th><th scope="col">Conversions</th><th scope="col">Conversion rate</th><th scope="col">Reported ROI</th><th scope="col">Dates</th></tr></thead>
+    <tbody>${campaigns.map((campaign) => `<tr><th scope="row"><button class="campaign-select" type="button" data-campaign-id="${escapeHtml(campaign.campaign_id)}" aria-controls="campaign-detail" aria-expanded="false">${escapeHtml(campaign.campaign_name)}</button></th><td>${escapeHtml(campaign.campaign_type)}</td><td>${escapeHtml(formatMoney(campaign.budget))}</td><td>${escapeHtml(numberFormatter.format(finiteNumber(campaign.conversions)))}</td><td>${escapeHtml(fixedNumber(campaign.conversion_rate, 1))}%</td><td class="${finiteNumber(campaign.roi) < 0 ? "roi-negative" : "roi-positive"}">${finiteNumber(campaign.roi) > 0 ? "+" : ""}${escapeHtml(fixedNumber(campaign.roi, 0))}%</td><td>${escapeHtml(campaign.start_date)} – ${escapeHtml(campaign.end_date)}</td></tr>`).join("")}</tbody></table>`;
+}
+
 function renderMarketing(data) {
-  elements.campaignCount.textContent = `${numberFormatter.format(
-    data.active_campaign_count,
-  )} campaigns`;
+  state.campaigns = data.campaigns;
+  renderCampaignInsights(data.campaigns);
 
   if (!data.campaigns.length) {
+    state.selectedCampaignId = "";
+    elements.campaignDetail.hidden = true;
     renderEmpty(elements.campaignList, "No active campaigns overlap the selected month");
     return;
   }
@@ -1418,7 +1929,7 @@ function renderMarketing(data) {
       return `
         <article class="campaign-row">
           <div>
-            <span class="row-title">${escapeHtml(campaign.campaign_name)}</span>
+            <button class="campaign-select row-title" type="button" data-campaign-id="${escapeHtml(campaign.campaign_id)}" aria-controls="campaign-detail" aria-expanded="false">${escapeHtml(campaign.campaign_name)}</button>
             <span class="row-subtitle">${escapeHtml(campaign.campaign_type)} · Budget ${escapeHtml(formatMoney(campaign.budget))}</span>
           </div>
           <span aria-label="Conversion rate ${escapeHtml(campaign.conversion_rate)}%">
@@ -1431,30 +1942,61 @@ function renderMarketing(data) {
       `;
     })
     .join("");
+  showCampaignDetail(state.selectedCampaignId);
+}
+
+function showCampaignDetail(campaignId, scrollIntoView = false) {
+  const campaign = state.campaigns.find((item) => String(item.campaign_id) === campaignId);
+  state.selectedCampaignId = campaign ? campaignId : "";
+  elements.campaignPanel.querySelectorAll("[data-campaign-id]").forEach((button) => {
+    const isSelected = Boolean(campaign) && button.dataset.campaignId === campaignId;
+    button.setAttribute("aria-expanded", String(isSelected));
+    button.classList.toggle("active", isSelected);
+  });
+  elements.campaignDetail.hidden = !campaign;
+  if (!campaign) return;
+
+  const start = formatShortDate(campaign.start_date, true);
+  const end = formatShortDate(campaign.end_date, true);
+  elements.campaignDetailTitle.textContent = campaign.campaign_name;
+  elements.campaignDetailStart.textContent = start;
+  elements.campaignDetailEnd.textContent = end;
+  elements.campaignDetailCount.textContent = numberFormatter.format(
+    finiteNumber(campaign.transactions_during_campaign),
+  );
+  elements.campaignDetailAxisStart.textContent = start;
+  elements.campaignDetailAxisEnd.textContent = end;
+  if (scrollIntoView) {
+    window.requestAnimationFrame(() => {
+      elements.campaignDetail.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+  }
 }
 
 function panelError(panel, message) {
   if (panel === "finance") {
     elements.financePeriod.textContent = "—";
-    elements.salesDataThrough.textContent = "—";
-    elements.scopeCaption.textContent = "—";
     elements.financeMetrics.innerHTML = "";
     renderEmpty(elements.financeMetrics, message);
     renderEmpty(elements.financeChart, "The trend chart is temporarily unavailable");
   } else if (panel === "action") {
     elements.businessRiskCount.className = "soft-badge";
     elements.businessRiskCount.textContent = "Unavailable";
-    elements.ticketCount.textContent = "—";
     renderEmpty(elements.businessRiskList, message);
     renderEmpty(elements.inventoryRiskSummary, "Inventory summary is temporarily unavailable");
     renderEmpty(elements.inventoryList, "Inventory data is temporarily unavailable");
-    renderEmpty(elements.ticketList, "Ticket data is temporarily unavailable");
   } else if (panel === "products") {
     state.productData = null;
     renderEmpty(elements.productList, message);
+    renderEmpty(elements.productChart, message);
+    renderEmpty(elements.productTable, message);
   } else if (panel === "marketing") {
-    elements.campaignCount.textContent = "—";
+    state.campaigns = [];
+    state.selectedCampaignId = "";
+    elements.campaignDetail.hidden = true;
     renderEmpty(elements.campaignList, message);
+    renderEmpty(elements.campaignChart, message);
+    renderEmpty(elements.campaignTable, message);
   }
 }
 
@@ -1507,8 +2049,9 @@ async function loadDashboard() {
     );
     renderProducts(data.result.products);
     renderMarketing(data.result.marketing);
+    loadReviewOverview(state.month);
 
-    setConnectionStatus("ok", "Supabase connected");
+    setConnectionStatus("ok", "Database connected");
   } catch (error) {
     if (!responseAccepted && isStale()) return;
     if (signal.aborted || state.requestController.signal !== signal) return;
@@ -1548,8 +2091,39 @@ elements.productTabs.addEventListener("click", (event) => {
   renderProductTab();
 });
 
+document.querySelector("#product-performance").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-review-product-id]");
+  if (button) openProductReviews(button.dataset.reviewProductId);
+});
+
+elements.reviewHotspotList.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-review-product-id]");
+  if (button) openProductReviews(button.dataset.reviewProductId);
+});
+
+elements.businessRiskList.addEventListener("click", (event) => {
+  if (event.target.closest("[data-review-investigate]")) {
+    event.preventDefault();
+    openProductReviews();
+  }
+});
+
+elements.reviewProductSelect.addEventListener("change", () => {
+  state.reviewSelectedProductId = elements.reviewProductSelect.value;
+  loadProductReviews();
+});
+
+elements.reviewRatingFilter.addEventListener("change", loadProductReviews);
+
+elements.campaignPanel.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-campaign-id]");
+  if (!button || !elements.campaignPanel.contains(button)) return;
+  showCampaignDetail(button.dataset.campaignId, true);
+});
+
 elements.storeFilter.addEventListener("change", () => {
   state.storeId = elements.storeFilter.value;
+  updateFinanceStoreLabel();
   scheduleDashboardLoad();
 });
 
@@ -1557,6 +2131,128 @@ elements.yearFilter.addEventListener("change", updateOperatingMonthFromFilters);
 elements.monthFilter.addEventListener("change", updateOperatingMonthFromFilters);
 
 elements.refreshButton.addEventListener("click", loadDashboard);
+
+elements.financePeriodToggle.addEventListener("click", () => {
+  const willOpen = elements.financeFilters.hidden;
+  elements.financeFilters.hidden = !willOpen;
+  elements.financePeriodToggle.setAttribute("aria-expanded", String(willOpen));
+  if (willOpen && !elements.yearFilter.disabled) elements.yearFilter.focus();
+});
+
+elements.financeFilters.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  elements.financeFilters.hidden = true;
+  elements.financePeriodToggle.setAttribute("aria-expanded", "false");
+  elements.financePeriodToggle.focus();
+});
+
+elements.knowledgeOpen.addEventListener("click", () => {
+  elements.knowledgeDialog.showModal();
+  loadKnowledgeFiles();
+});
+
+elements.knowledgeClose.addEventListener("click", () => elements.knowledgeDialog.close());
+elements.knowledgeDialog.addEventListener("close", () => elements.knowledgeOpen.focus());
+elements.knowledgeDialog.addEventListener("click", (event) => {
+  if (event.target !== elements.knowledgeDialog) return;
+  const bounds = elements.knowledgeDialog.getBoundingClientRect();
+  if (
+    event.clientX < bounds.left || event.clientX > bounds.right ||
+    event.clientY < bounds.top || event.clientY > bounds.bottom
+  ) elements.knowledgeDialog.close();
+});
+
+function setAssistantOpen(isOpen) {
+  if (!isOpen) setAssistantDocked(false);
+  elements.assistantPanel.hidden = !isOpen;
+  elements.assistantOpen.setAttribute("aria-expanded", String(isOpen));
+  elements.assistantOpen.setAttribute(
+    "aria-label",
+    isOpen ? "Close business assistant" : "Open business assistant",
+  );
+  if (isOpen) {
+    elements.chatInput.focus();
+    window.requestAnimationFrame(() => {
+      elements.chatConversation.scrollTop = elements.chatConversation.scrollHeight;
+    });
+  } else {
+    elements.assistantOpen.focus();
+  }
+}
+
+let assistantDockWidth = 520;
+
+function assistantDockWidthBounds() {
+  const viewportWidth = document.documentElement.clientWidth;
+  const availableWidth = viewportWidth > 1100
+    ? viewportWidth - (document.body.classList.contains("sidebar-collapsed") ? 0 : 244) - 320
+    : viewportWidth - 16;
+  const max = Math.max(280, Math.min(900, availableWidth));
+  return { min: Math.min(320, max), max };
+}
+
+function setAssistantDockWidth(width) {
+  const { min, max } = assistantDockWidthBounds();
+  assistantDockWidth = Math.max(min, Math.min(max, Math.round(width)));
+  document.body.style.setProperty("--assistant-dock-width", `${assistantDockWidth}px`);
+  elements.assistantResizeHandle.setAttribute("aria-valuemin", String(min));
+  elements.assistantResizeHandle.setAttribute("aria-valuemax", String(max));
+  elements.assistantResizeHandle.setAttribute("aria-valuenow", String(assistantDockWidth));
+}
+
+function setAssistantDocked(isDocked) {
+  document.body.classList.toggle("assistant-docked", isDocked);
+  elements.assistantDockToggle.setAttribute("aria-pressed", String(isDocked));
+  const label = isDocked ? "Shrink chat to floating window" : "Expand chat to side panel";
+  elements.assistantDockToggle.setAttribute("aria-label", label);
+  elements.assistantDockToggle.title = label;
+  elements.assistantResizeHandle.tabIndex = isDocked ? 0 : -1;
+  if (isDocked) setAssistantDockWidth(assistantDockWidth);
+}
+
+elements.assistantDockToggle.addEventListener("click", () => {
+  setAssistantDocked(!document.body.classList.contains("assistant-docked"));
+});
+
+elements.assistantResizeHandle.addEventListener("pointerdown", (event) => {
+  if (!document.body.classList.contains("assistant-docked")) return;
+  event.preventDefault();
+  elements.assistantResizeHandle.setPointerCapture(event.pointerId);
+});
+
+elements.assistantResizeHandle.addEventListener("pointermove", (event) => {
+  if (elements.assistantResizeHandle.hasPointerCapture(event.pointerId)) {
+    setAssistantDockWidth(document.documentElement.clientWidth - event.clientX);
+  }
+});
+
+elements.assistantResizeHandle.addEventListener("pointerup", (event) => {
+  if (elements.assistantResizeHandle.hasPointerCapture(event.pointerId)) {
+    elements.assistantResizeHandle.releasePointerCapture(event.pointerId);
+  }
+});
+
+elements.assistantResizeHandle.addEventListener("keydown", (event) => {
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+  event.preventDefault();
+  setAssistantDockWidth(assistantDockWidth + (event.key === "ArrowLeft" ? 24 : -24));
+});
+
+window.addEventListener("resize", () => {
+  if (document.body.classList.contains("assistant-docked")) setAssistantDockWidth(assistantDockWidth);
+});
+
+setAssistantDocked(false);
+
+elements.assistantOpen.addEventListener("click", () => {
+  setAssistantOpen(elements.assistantPanel.hidden);
+});
+elements.assistantClose.addEventListener("click", () => setAssistantOpen(false));
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !elements.assistantPanel.hidden && !elements.knowledgeDialog.open) {
+    setAssistantOpen(false);
+  }
+});
 
 elements.knowledgeDropZone.addEventListener("click", () => {
   elements.knowledgeFileInput.click();
@@ -1600,7 +2296,7 @@ elements.knowledgeDropZone.addEventListener("paste", (event) => {
 });
 
 document.addEventListener("paste", (event) => {
-  if (event.defaultPrevented) return;
+  if (event.defaultPrevented || !elements.knowledgeDialog.open) return;
   const files = event.clipboardData?.files;
   if (files?.length) {
     event.preventDefault();
@@ -1664,6 +2360,7 @@ elements.chatCopyButton.addEventListener("click", async () => {
 });
 
 async function initialise() {
+  initializeActivitySizing();
   try {
     await createChatSession({ clearUi: true });
   } catch (error) {
