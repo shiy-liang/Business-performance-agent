@@ -37,6 +37,42 @@ LIMIT 5
 """
 
 
+CAMPAIGN_RISK_SUMMARY_SQL = """
+SELECT
+    COUNT(*)::bigint AS active_campaign_count,
+    COUNT(*) FILTER (WHERE c.roi < 0)::bigint AS negative_roi_campaign_count,
+    CASE
+        WHEN COUNT(*) = 0 THEN 0::numeric
+        ELSE ROUND(
+            100.0 * COUNT(*) FILTER (WHERE c.roi < 0) / COUNT(*),
+            2
+        )
+    END AS negative_roi_ratio,
+    MIN(c.roi) FILTER (WHERE c.roi < 0) AS lowest_reported_roi
+FROM campaigns c
+WHERE c.start_date < %(period_end)s::date
+  AND c.end_date >= %(period_start)s::date
+"""
+
+
+LOWEST_NEGATIVE_ROI_CAMPAIGNS_SQL = """
+SELECT
+    c.campaign_id,
+    c.campaign_name,
+    c.start_date,
+    c.end_date,
+    c.budget,
+    c.conversion_rate,
+    c.roi AS reported_roi
+FROM campaigns c
+WHERE c.start_date < %(period_end)s::date
+  AND c.end_date >= %(period_start)s::date
+  AND c.roi < 0
+ORDER BY c.roi, c.campaign_id
+LIMIT 3
+"""
+
+
 def _next_month(month_start: date) -> date:
     if month_start.month == 12:
         return date(month_start.year + 1, 1, 1)
@@ -181,14 +217,18 @@ def analyze_prepared_marketing_performance(
                 )
                 marketing_analysis_started = True
 
-            cursor.execute(
-                TOP_CAMPAIGNS_SQL,
-                {
-                    "period_start": selected_month,
-                    "period_end": period_end,
-                },
-            )
+            parameters = {
+                "period_start": selected_month,
+                "period_end": period_end,
+            }
+            cursor.execute(TOP_CAMPAIGNS_SQL, parameters)
             rows = cursor.fetchall()
+
+            cursor.execute(CAMPAIGN_RISK_SUMMARY_SQL, parameters)
+            risk_summary_row = cursor.fetchone()
+
+            cursor.execute(LOWEST_NEGATIVE_ROI_CAMPAIGNS_SQL, parameters)
+            representative_rows = cursor.fetchall()
 
         campaigns = [
             {
@@ -204,6 +244,23 @@ def analyze_prepared_marketing_performance(
             }
             for row in rows
         ]
+        representative_campaigns = [
+            {
+                "campaign_id": row["campaign_id"],
+                "campaign_name": row["campaign_name"],
+                "start_date": row["start_date"].isoformat(),
+                "end_date": row["end_date"].isoformat(),
+                "budget": _number(row["budget"]),
+                "conversion_rate": _number(row["conversion_rate"]),
+                "reported_roi": _number(row["reported_roi"]),
+            }
+            for row in representative_rows
+        ]
+        lowest_reported_roi = (
+            _number(risk_summary_row["lowest_reported_roi"])
+            if risk_summary_row["lowest_reported_roi"] is not None
+            else None
+        )
 
         response = {
             "scope": {
@@ -238,6 +295,19 @@ def analyze_prepared_marketing_performance(
                 rows[0]["active_campaign_count"] if rows else 0
             ),
             "campaigns": campaigns,
+            "risk_summary": {
+                "active_campaign_count": risk_summary_row[
+                    "active_campaign_count"
+                ],
+                "negative_roi_campaign_count": risk_summary_row[
+                    "negative_roi_campaign_count"
+                ],
+                "negative_roi_ratio": _number(
+                    risk_summary_row["negative_roi_ratio"]
+                ),
+                "lowest_reported_roi": lowest_reported_roi,
+                "representative_campaigns": representative_campaigns,
+            },
         }
 
         if run_id is not None:

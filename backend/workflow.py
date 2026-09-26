@@ -6,6 +6,7 @@ from uuid import UUID
 
 import psycopg
 
+from backend.issue_detection import detect_candidate_issues
 from backend.routers.action_center import (
     analyze_prepared_action_center,
     prepare_action_center,
@@ -21,6 +22,10 @@ from backend.routers.marketing import (
 from backend.routers.products import (
     analyze_prepared_product_performance,
     prepare_product_performance,
+)
+from backend.review_analytics import (
+    analyze_prepared_review_experience,
+    prepare_review_experience,
 )
 from backend.runtime import (
     RunNotFoundError,
@@ -81,6 +86,9 @@ def run_business_performance_workflow(
     action_center_prepared = prepare_action_center(store_id=store_id)
     products_prepared = prepare_product_performance(month=month, store_id=store_id)
     marketing_prepared = prepare_marketing_performance(month=month)
+    review_prepared = prepare_review_experience(
+        selected_month=finance_prepared["selected_month"],
+    )
 
     mark_run_running(run_id)
 
@@ -101,6 +109,16 @@ def run_business_performance_workflow(
             prepared=marketing_prepared,
             run_id=run_id,
         )
+        reviews_result = analyze_prepared_review_experience(
+            prepared=review_prepared,
+            run_id=run_id,
+        )
+        candidate_issues = detect_candidate_issues(
+            finance_result=finance_result,
+            action_center_result=action_center_result,
+            marketing_result=marketing_result,
+            reviews_result=reviews_result,
+        )
     except Exception as exc:
         _mark_run_failed_preserving_original_exception(run_id, exc)
         raise
@@ -118,4 +136,6 @@ def run_business_performance_workflow(
         "action_center": action_center_result,
         "products": products_result,
         "marketing": marketing_result,
+        "reviews": reviews_result,
+        "candidate_issues": candidate_issues,
     }

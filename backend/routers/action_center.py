@@ -202,11 +202,22 @@ def analyze_prepared_action_center(
 
             cursor.execute(
                 """
+                WITH latest_snapshot AS (
+                    SELECT MAX(snapshot_date) AS snapshot_date
+                    FROM inventory
+                )
                 SELECT
-                    MAX(snapshot_date) AS snapshot_date,
-                    COALESCE(BOOL_OR(is_synthetic), FALSE) AS is_synthetic
-                FROM inventory
-                WHERE (%(store_id)s::text IS NULL OR store_id = %(store_id)s::text)
+                    latest.snapshot_date,
+                    COALESCE(BOOL_OR(i.is_synthetic), FALSE) AS is_synthetic,
+                    COUNT(i.inventory_id)::bigint AS total_inventory_count
+                FROM latest_snapshot latest
+                LEFT JOIN inventory i
+                  ON i.snapshot_date = latest.snapshot_date
+                 AND (
+                     %(store_id)s::text IS NULL
+                     OR i.store_id = %(store_id)s::text
+                 )
+                GROUP BY latest.snapshot_date
                 """,
                 {"store_id": store_id},
             )
@@ -240,6 +251,20 @@ def analyze_prepared_action_center(
             inventory_is_synthetic = bool(
                 inventory_metadata and inventory_metadata["is_synthetic"]
             )
+            total_inventory_count = int(
+                inventory_metadata["total_inventory_count"]
+                if inventory_metadata
+                else 0
+            )
+            affected_inventory_count = len(inventory_rows)
+            affected_ratio = (
+                round(
+                    affected_inventory_count / total_inventory_count * 100,
+                    2,
+                )
+                if total_inventory_count > 0
+                else 0.0
+            )
 
             cursor.execute(OLDEST_TICKETS_SQL)
             ticket_rows = cursor.fetchall()
@@ -270,8 +295,10 @@ def analyze_prepared_action_center(
                 "scope": inventory_scope,
                 "snapshot_date": inventory_snapshot,
                 "is_synthetic": inventory_is_synthetic,
+                "total_inventory_count": total_inventory_count,
                 "critical_count": critical_count,
                 "additional_reorder_count": len(inventory_rows) - critical_count,
+                "affected_ratio": affected_ratio,
                 "top_items": top_inventory,
             },
             "support_tickets": {
