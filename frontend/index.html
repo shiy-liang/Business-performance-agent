@@ -29,9 +29,28 @@
 
         <div class="topbar-actions">
           <span id="connection-status" class="live-pill"><i></i> Connecting to database</span>
-          <label class="filter-control">
+          <label class="filter-control year-control">
+            <span>Operating year</span>
+            <select id="year-filter" aria-label="Select operating year" disabled>
+              <option value="">Year</option>
+            </select>
+          </label>
+          <label class="filter-control month-control">
             <span>Operating month</span>
-            <input id="month-filter" type="month" aria-label="Select operating month" />
+            <select id="month-filter" aria-label="Select operating month" disabled>
+              <option value="01">January</option>
+              <option value="02">February</option>
+              <option value="03">March</option>
+              <option value="04">April</option>
+              <option value="05">May</option>
+              <option value="06">June</option>
+              <option value="07">July</option>
+              <option value="08">August</option>
+              <option value="09">September</option>
+              <option value="10">October</option>
+              <option value="11">November</option>
+              <option value="12">December</option>
+            </select>
           </label>
           <label class="filter-control store-control">
             <span>Business scope</span>
@@ -109,28 +128,46 @@
           <section class="panel action-panel" aria-labelledby="action-title">
             <div class="panel-header">
               <div>
-                <p class="panel-kicker">02 · Action center</p>
-                <h2 id="action-title">Urgent action center</h2>
+                <p class="panel-kicker">02 · Actions and risks</p>
+                <h2 id="action-title">Business Action Center</h2>
               </div>
-              <span class="alert-badge">Needs attention</span>
+              <span id="business-risk-count" class="soft-badge">Loading</span>
             </div>
 
-            <div id="inventory-summary" class="action-summary skeleton-line"></div>
-            <div id="inventory-list" class="compact-list loading-copy">Loading inventory…</div>
-
-            <div class="section-divider"></div>
-
-            <div class="subsection-heading">
-              <div>
-                <strong>Oldest high-priority tickets</strong>
-                <span>Top 3 only</span>
+            <div class="action-panel-scroll">
+              <div class="subsection-heading action-section-heading">
+                <div>
+                  <strong>Detected risks</strong>
+                  <span>Deterministic signals for the selected operating period</span>
+                </div>
               </div>
-              <span id="ticket-count" class="count-chip">—</span>
+              <div id="business-risk-list" class="risk-list loading-copy">Loading risks…</div>
+
+              <div class="section-divider"></div>
+
+              <div class="subsection-heading action-section-heading">
+                <div>
+                  <strong>Current inventory replenishment</strong>
+                  <span>Latest available snapshot · independent of selected month</span>
+                </div>
+              </div>
+              <div id="inventory-risk-summary" class="inventory-risk-summary skeleton-line"></div>
+              <div id="inventory-list" class="compact-list loading-copy">Loading inventory…</div>
+
+              <div class="section-divider"></div>
+
+              <div class="subsection-heading">
+                <div>
+                  <strong>Other action items</strong>
+                  <span>Oldest high-priority tickets · Company-wide · Top 3 only</span>
+                </div>
+                <span id="ticket-count" class="count-chip">—</span>
+              </div>
+              <div id="ticket-list" class="ticket-list loading-copy">Loading tickets…</div>
+              <p class="data-note compact">
+                Tickets have no store field; open age is measured from submission date.
+              </p>
             </div>
-            <div id="ticket-list" class="ticket-list loading-copy">Loading tickets…</div>
-            <p class="data-note compact">
-              Tickets have no store field; open age is measured from submission date.
-            </p>
           </section>
 
           <section class="panel assistant-panel" aria-labelledby="assistant-title">

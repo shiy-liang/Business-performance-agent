@@ -8,6 +8,7 @@ const state = {
   runId: null,
   requestController: null,
   filterTimer: null,
+  maxMonth: "",
   knowledgeAllowedExtensions: [],
   chatController: null,
   chatSessionId: "",
@@ -17,6 +18,7 @@ const state = {
 };
 
 const elements = {
+  yearFilter: document.querySelector("#year-filter"),
   monthFilter: document.querySelector("#month-filter"),
   storeFilter: document.querySelector("#store-filter"),
   refreshButton: document.querySelector("#refresh-button"),
@@ -27,7 +29,9 @@ const elements = {
   financePeriod: document.querySelector("#finance-period"),
   financeMetrics: document.querySelector("#finance-metrics"),
   financeChart: document.querySelector("#finance-chart"),
-  inventorySummary: document.querySelector("#inventory-summary"),
+  businessRiskCount: document.querySelector("#business-risk-count"),
+  businessRiskList: document.querySelector("#business-risk-list"),
+  inventoryRiskSummary: document.querySelector("#inventory-risk-summary"),
   inventoryList: document.querySelector("#inventory-list"),
   ticketCount: document.querySelector("#ticket-count"),
   ticketList: document.querySelector("#ticket-list"),
@@ -70,6 +74,8 @@ const moneyFormatter = new Intl.NumberFormat("en-US", {
 const numberFormatter = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 0,
 });
+
+const firstOperatingYear = 2020;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -768,6 +774,64 @@ async function loadStores() {
   elements.storeFilter.append(fragment);
 }
 
+function populateOperatingYears(maxYear) {
+  const fragment = document.createDocumentFragment();
+  for (let year = maxYear; year >= firstOperatingYear; year -= 1) {
+    const option = document.createElement("option");
+    option.value = String(year);
+    option.textContent = String(year);
+    fragment.append(option);
+  }
+  elements.yearFilter.replaceChildren(fragment);
+}
+
+function constrainOperatingMonth(year, preferredMonth) {
+  const [maxYearText, maxMonthText] = state.maxMonth.split("-");
+  const maxYear = Number(maxYearText);
+  const maxMonth = Number(maxMonthText);
+  const selectedYear = Number(year);
+  const preferredMonthNumber = Number(preferredMonth);
+  const allowedMonth =
+    selectedYear === maxYear && preferredMonthNumber > maxMonth
+      ? String(maxMonth).padStart(2, "0")
+      : preferredMonth;
+
+  for (const option of elements.monthFilter.options) {
+    option.disabled = selectedYear === maxYear && Number(option.value) > maxMonth;
+  }
+
+  elements.monthFilter.value = allowedMonth;
+  return allowedMonth;
+}
+
+function syncOperatingMonthFilters() {
+  const selectedMatch = /^(\d{4})-(\d{2})$/.exec(state.month);
+  const maximumMatch = /^(\d{4})-(\d{2})$/.exec(state.maxMonth);
+  if (!selectedMatch || !maximumMatch) return;
+
+  const selectedYear = selectedMatch[1];
+  const selectedMonth = selectedMatch[2];
+  const maxYear = Number(maximumMatch[1]);
+
+  populateOperatingYears(maxYear);
+  elements.yearFilter.value = selectedYear;
+  constrainOperatingMonth(selectedYear, selectedMonth);
+  elements.yearFilter.disabled = false;
+  elements.monthFilter.disabled = false;
+}
+
+function updateOperatingMonthFromFilters() {
+  const year = elements.yearFilter.value;
+  const month = constrainOperatingMonth(year, elements.monthFilter.value);
+  if (!year || !month) return;
+
+  const selectedMonth = `${year}-${month}`;
+  if (selectedMonth === state.month) return;
+
+  state.month = selectedMonth;
+  scheduleDashboardLoad();
+}
+
 function renderFinance(data) {
   const metrics = data.metrics;
   const metricCards = [
@@ -812,11 +876,9 @@ function renderFinance(data) {
     data.period.is_complete ? "Complete calendar month" : "Partial month"
   }`;
 
-  if (!state.month) {
-    state.month = data.period.month;
-    elements.monthFilter.value = data.period.month;
-  }
-  elements.monthFilter.max = data.period.sales_data_through.slice(0, 7);
+  state.maxMonth = data.period.sales_data_through.slice(0, 7);
+  if (!state.month) state.month = data.period.month;
+  syncOperatingMonthFilters();
   renderFinanceChart(data.trend);
 }
 
@@ -906,66 +968,236 @@ function renderFinanceChart(points) {
   `;
 }
 
-function renderActionCenter(data) {
-  const inventory = data.inventory;
-  const tickets = data.support_tickets;
+function finiteNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
 
-  elements.inventorySummary.className = "action-summary";
-  elements.inventorySummary.innerHTML = `
-    <strong>${numberFormatter.format(inventory.critical_count)}</strong>
-    <span>critical items</span>
-    <strong>${numberFormatter.format(inventory.additional_reorder_count)}</strong>
-    <span>items need replenishment</span>
-  `;
+function fixedNumber(value, digits = 2) {
+  return finiteNumber(value).toFixed(digits);
+}
 
-  if (inventory.top_items.length === 0) {
-    renderEmpty(elements.inventoryList, "No urgent inventory items in this scope");
+function issueContext(issue) {
+  const scope = issue && typeof issue.scope === "object" ? issue.scope : {};
+  const period = issue && typeof issue.period === "object" ? issue.period : {};
+  const scopeLabel = scope.label ||
+    (scope.type === "company" ? "Company-wide" : scope.store_id || "Current scope");
+  const periodLabel = period.snapshot_date
+    ? `Snapshot ${period.snapshot_date}`
+    : period.month || "Current period";
+  return `${scopeLabel} · ${periodLabel}`;
+}
+
+function genericEvidence(evidence) {
+  if (!evidence || typeof evidence !== "object") {
+    return ["Structured evidence is unavailable"];
+  }
+  const labels = {
+    current_value: "Current value",
+    baseline_value: "Baseline value",
+    change_pct: "Change",
+    affected_ratio: "Affected",
+    critical_count: "Critical",
+  };
+  const items = Object.entries(evidence)
+    .filter(([, value]) => ["string", "number", "boolean"].includes(typeof value))
+    .slice(0, 3)
+    .map(([key, value]) => `${labels[key] || key.replaceAll("_", " ")}: ${value}`);
+  return items.length ? items : ["Structured evidence is available"];
+}
+
+function issueEvidenceLines(issue) {
+  const evidence = issue && typeof issue.evidence === "object" ? issue.evidence : {};
+  if (issue.issue_type === "profit_deterioration") {
+    return [
+      `Gross profit decreased ${Math.abs(finiteNumber(evidence.change_pct)).toFixed(2)}%`,
+      `${formatMoney(evidence.baseline_value)} → ${formatMoney(evidence.current_value)}`,
+      `vs ${evidence.baseline_period || "previous period"}`,
+    ];
+  }
+  if (issue.issue_type === "refund_pressure") {
+    return [
+      `Completed refunds increased ${fixedNumber(evidence.change_pct)}%`,
+      `+${formatMoney(Math.abs(finiteNumber(evidence.absolute_increase)))}`,
+      `${formatMoney(evidence.baseline_value)} → ${formatMoney(evidence.current_value)}`,
+    ];
+  }
+  if (issue.issue_type === "campaign_inefficiency") {
+    return [
+      `${numberFormatter.format(finiteNumber(evidence.negative_roi_campaign_count))} of ${numberFormatter.format(finiteNumber(evidence.active_campaign_count))} active campaigns have negative reported ROI`,
+      `${fixedNumber(evidence.negative_roi_ratio, 1)}% affected`,
+      `Lowest reported lifecycle ROI: ${fixedNumber(evidence.lowest_reported_roi)}%`,
+    ];
+  }
+  if (issue.issue_type === "customer_experience_deterioration") {
+    const ratingChange = finiteNumber(evidence.average_rating_change);
+    const ratioChange = finiteNumber(evidence.low_rating_ratio_change_pp);
+    return [
+      `Average rating: ${fixedNumber(evidence.previous_average_rating)} → ${fixedNumber(evidence.average_rating)} (${ratingChange > 0 ? "+" : ""}${ratingChange.toFixed(2)})`,
+      `1–2 star share: ${fixedNumber(evidence.previous_low_rating_ratio)}% → ${fixedNumber(evidence.low_rating_ratio)}% (${ratioChange > 0 ? "+" : ""}${ratioChange.toFixed(2)}pp)`,
+      `${numberFormatter.format(finiteNumber(evidence.review_count))} reviews`,
+    ];
+  }
+  return genericEvidence(evidence);
+}
+
+function renderDetectedRisks(candidateIssues) {
+  const hasInventoryIssue = candidateIssues.some(
+    (issue) => issue.issue_type === "inventory_replenishment_risk",
+  );
+  const visibleIssues = candidateIssues.filter(
+    (issue) => issue.issue_type !== "inventory_replenishment_risk",
+  );
+  elements.businessRiskCount.className = candidateIssues.length
+    ? "alert-badge"
+    : "soft-badge";
+  elements.businessRiskCount.textContent = candidateIssues.length
+    ? `${candidateIssues.length} total ${candidateIssues.length === 1 ? "risk" : "risks"}`
+    : "No material risks";
+
+  if (visibleIssues.length === 0) {
+    renderEmpty(
+      elements.businessRiskList,
+      hasInventoryIssue
+        ? "Inventory risk is summarized below; no additional risks were detected."
+        : "No material business risks detected for the selected period.",
+    );
+    return;
+  }
+
+  elements.businessRiskList.className = "risk-list";
+  elements.businessRiskList.innerHTML = visibleIssues
+    .map((issue) => {
+      const severity = issue.severity === "high" ? "high" : "medium";
+      return `
+        <article class="risk-card ${severity}">
+          <div class="risk-card-header">
+            <span class="severity-badge ${severity}">${escapeHtml(severity.toUpperCase())}</span>
+            <span class="risk-context">${escapeHtml(issueContext(issue))}</span>
+          </div>
+          <strong class="risk-title">${escapeHtml(issue.title || issue.issue_type || "Business risk")}</strong>
+          <div class="risk-evidence">
+            ${issueEvidenceLines(issue)
+              .map((line) => `<span>${escapeHtml(line)}</span>`)
+              .join("")}
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+function renderInventorySection(inventory, inventoryIssue) {
+  const criticalCount = finiteNumber(inventory.critical_count);
+  const additionalCount = finiteNumber(inventory.additional_reorder_count);
+  const affectedCount = criticalCount + additionalCount;
+  const totalCount = finiteNumber(inventory.total_inventory_count);
+  const affectedRatio = finiteNumber(inventory.affected_ratio);
+  const topItems = Array.isArray(inventory.top_items) ? inventory.top_items : [];
+
+  if (inventoryIssue) {
+    const severity = inventoryIssue.severity === "high" ? "high" : "medium";
+    elements.inventoryRiskSummary.className = `risk-card ${severity} inventory-risk-card`;
+    elements.inventoryRiskSummary.innerHTML = `
+      <div class="risk-card-header">
+        <span class="severity-badge ${severity}">${escapeHtml(severity.toUpperCase())}</span>
+        <span class="risk-context">${escapeHtml(issueContext(inventoryIssue))}</span>
+      </div>
+      <strong class="risk-title">${escapeHtml(inventoryIssue.title || "Inventory replenishment risk")}</strong>
+      <div class="inventory-risk-metrics">
+        <span><strong>${numberFormatter.format(affectedCount)} / ${numberFormatter.format(totalCount)}</strong> records</span>
+        <span><strong>${fixedNumber(affectedRatio)}%</strong> affected</span>
+        <span><strong>${numberFormatter.format(criticalCount)}</strong> critical</span>
+      </div>
+    `;
+  } else if (affectedCount > 0) {
+    elements.inventoryRiskSummary.className = "inventory-risk-summary";
+    elements.inventoryRiskSummary.innerHTML = `
+      <div class="inventory-replenishment-copy">
+        <strong>${numberFormatter.format(affectedCount)} items need replenishment</strong>
+        <span>${fixedNumber(affectedRatio)}% affected · No portfolio-level inventory risk detected</span>
+      </div>
+    `;
   } else {
-    elements.inventoryList.className = "compact-list";
-    elements.inventoryList.innerHTML = inventory.top_items
+    elements.inventoryRiskSummary.className = "inventory-risk-summary";
+    elements.inventoryRiskSummary.innerHTML = `
+      <div class="inventory-replenishment-copy">
+        <strong>No inventory replenishment items detected</strong>
+        <span>${numberFormatter.format(totalCount)} inventory records checked</span>
+      </div>
+    `;
+  }
+
+  if (affectedCount === 0 || topItems.length === 0) {
+    renderEmpty(elements.inventoryList, "No inventory replenishment items detected.");
+    return;
+  }
+
+  elements.inventoryList.className = "compact-list";
+  elements.inventoryList.innerHTML = `
+    <p class="inventory-list-label">Top affected items</p>
+    ${topItems
       .map(
         (item) => `
           <article class="inventory-row">
             <i class="severity-dot ${escapeHtml(item.severity)}" aria-hidden="true"></i>
             <div>
-              <span class="row-title">${escapeHtml(item.product_name)}</span>
-              <span class="row-subtitle">${escapeHtml(item.store_location)} · ${escapeHtml({ critical: "Critical", high: "High", warning: "Warning" }[item.severity] || item.severity)}</span>
+              <span class="row-title">${escapeHtml(item.product_name || "Unknown product")}</span>
+              <span class="row-subtitle">${escapeHtml(item.store_location || "Unknown location")} · ${escapeHtml({ critical: "Critical", high: "High", warning: "Warning" }[item.severity] || item.severity || "Needs replenishment")}</span>
             </div>
             <span class="stock-value">
-              <strong>${numberFormatter.format(item.stock_quantity)}</strong>
-              Reorder level ${numberFormatter.format(item.reorder_level)}
+              <strong>Stock: ${numberFormatter.format(finiteNumber(item.stock_quantity))}</strong>
+              Reorder level ${numberFormatter.format(finiteNumber(item.reorder_level))}
             </span>
           </article>
         `,
       )
-      .join("");
-  }
+      .join("")}
+  `;
+}
 
+function renderSupportTickets(tickets) {
+  const ticketItems = Array.isArray(tickets.oldest) ? tickets.oldest : [];
   elements.ticketCount.textContent = `${numberFormatter.format(
-    tickets.unresolved_high_priority_count,
+    finiteNumber(tickets.unresolved_high_priority_count),
   )} unresolved`;
 
-  if (tickets.oldest.length === 0) {
+  if (ticketItems.length === 0) {
     renderEmpty(elements.ticketList, "No unresolved high-priority tickets");
-  } else {
-    elements.ticketList.className = "ticket-list";
-    elements.ticketList.innerHTML = tickets.oldest
-      .map(
-        (ticket) => `
-          <article class="ticket-row">
-            <span class="age-box">
-              <strong>${numberFormatter.format(ticket.open_days)}</strong>
-              <small>days open</small>
-            </span>
-            <div>
-              <span class="row-title">${escapeHtml(ticket.notes || ticket.issue_category)}</span>
-              <span class="row-subtitle">${escapeHtml(ticket.issue_category)} · ${escapeHtml(ticket.resolution_status)} · ${escapeHtml(ticket.submission_date)}</span>
-            </div>
-          </article>
-        `,
-      )
-      .join("");
+    return;
   }
+
+  elements.ticketList.className = "ticket-list";
+  elements.ticketList.innerHTML = ticketItems
+    .map(
+      (ticket) => `
+        <article class="ticket-row">
+          <span class="age-box">
+            <strong>${numberFormatter.format(finiteNumber(ticket.open_days))}</strong>
+            <small>days open</small>
+          </span>
+          <div>
+            <span class="row-title">${escapeHtml(ticket.notes || ticket.issue_category || "Support ticket")}</span>
+            <span class="row-subtitle">${escapeHtml(ticket.issue_category || "Uncategorized")} · ${escapeHtml(ticket.resolution_status || "Unknown status")} · ${escapeHtml(ticket.submission_date || "Unknown date")}</span>
+          </div>
+        </article>
+      `,
+    )
+    .join("");
+}
+
+function renderBusinessActionCenter(data, candidateIssues) {
+  const actionCenter = data && typeof data === "object" ? data : {};
+  const issues = Array.isArray(candidateIssues)
+    ? candidateIssues.filter((issue) => issue && typeof issue === "object")
+    : [];
+  const inventoryIssue = issues.find(
+    (issue) => issue.issue_type === "inventory_replenishment_risk",
+  );
+
+  renderDetectedRisks(issues);
+  renderInventorySection(actionCenter.inventory || {}, inventoryIssue);
+  renderSupportTickets(actionCenter.support_tickets || {});
 }
 
 const productTabLabels = {
@@ -1083,8 +1315,11 @@ function panelError(panel, message) {
     renderEmpty(elements.financeMetrics, message);
     renderEmpty(elements.financeChart, "The trend chart is temporarily unavailable");
   } else if (panel === "action") {
+    elements.businessRiskCount.className = "soft-badge";
+    elements.businessRiskCount.textContent = "Unavailable";
     elements.ticketCount.textContent = "—";
-    renderEmpty(elements.inventorySummary, message);
+    renderEmpty(elements.businessRiskList, message);
+    renderEmpty(elements.inventoryRiskSummary, "Inventory summary is temporarily unavailable");
     renderEmpty(elements.inventoryList, "Inventory data is temporarily unavailable");
     renderEmpty(elements.ticketList, "Ticket data is temporarily unavailable");
   } else if (panel === "products") {
@@ -1139,7 +1374,10 @@ async function loadDashboard() {
     responseAccepted = true;
 
     renderFinance(data.result.finance);
-    renderActionCenter(data.result.action_center);
+    renderBusinessActionCenter(
+      data.result.action_center,
+      Array.isArray(data.result.candidate_issues) ? data.result.candidate_issues : [],
+    );
     renderProducts(data.result.products);
     renderMarketing(data.result.marketing);
 
@@ -1188,10 +1426,8 @@ elements.storeFilter.addEventListener("change", () => {
   scheduleDashboardLoad();
 });
 
-elements.monthFilter.addEventListener("change", () => {
-  state.month = elements.monthFilter.value;
-  scheduleDashboardLoad();
-});
+elements.yearFilter.addEventListener("change", updateOperatingMonthFromFilters);
+elements.monthFilter.addEventListener("change", updateOperatingMonthFromFilters);
 
 elements.refreshButton.addEventListener("click", loadDashboard);
 

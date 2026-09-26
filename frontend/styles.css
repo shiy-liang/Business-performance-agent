@@ -195,6 +195,19 @@ button {
   min-width: 180px;
 }
 
+.year-control {
+  min-width: 104px;
+}
+
+.month-control {
+  min-width: 132px;
+}
+
+.filter-control select:disabled {
+  cursor: wait;
+  color: var(--muted);
+}
+
 .icon-button {
   display: grid;
   width: 42px;
@@ -347,6 +360,37 @@ h1 {
 
 .action-panel {
   grid-column: span 4;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+  contain: size;
+  flex-direction: column;
+}
+
+.action-panel > .panel-header {
+  flex: 0 0 auto;
+}
+
+.action-panel-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-right: 6px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-color: #b7c1b9 transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.action-panel-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.action-panel-scroll::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: #b7c1b9;
+  background-clip: padding-box;
 }
 
 .assistant-panel {
@@ -742,24 +786,137 @@ h2 {
   margin-top: 10px;
 }
 
-.action-summary {
-  display: flex;
-  gap: 10px;
-  align-items: baseline;
-  min-height: 49px;
-  padding: 13px 15px;
+.action-section-heading {
+  margin-bottom: 9px;
+}
+
+.risk-list {
+  display: grid;
+  gap: 9px;
+  min-height: 76px;
+}
+
+.risk-card {
+  padding: 13px 14px;
+  border: 1px solid #ead5bb;
+  border-left: 4px solid var(--amber);
   border-radius: 13px;
+  background: #fffaf0;
+}
+
+.risk-card.high {
+  border-color: #e8c3bf;
+  border-left-color: var(--red);
+  background: #fff8f6;
+}
+
+.risk-card-header {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.severity-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  padding: 4px 7px;
+  border-radius: 999px;
+  color: #79440f;
+  background: var(--amber-soft);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.severity-badge.high {
+  color: #8d332e;
   background: var(--red-soft);
 }
 
-.action-summary strong {
-  color: #9b352f;
-  font-size: 24px;
+.risk-context {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.action-summary span {
-  color: #854b47;
-  font-size: 11px;
+.risk-title {
+  display: block;
+  margin-top: 9px;
+  font-size: 13px;
+}
+
+.risk-evidence {
+  display: grid;
+  gap: 3px;
+  margin-top: 6px;
+  color: #59635d;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.inventory-risk-summary {
+  min-height: 67px;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface-strong);
+}
+
+.inventory-replenishment-copy {
+  min-width: 0;
+}
+
+.inventory-replenishment-copy strong,
+.inventory-replenishment-copy span {
+  display: block;
+}
+
+.inventory-replenishment-copy strong {
+  font-size: 12px;
+}
+
+.inventory-replenishment-copy span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.inventory-risk-metrics {
+  display: grid;
+  grid-template-columns: 1.5fr 0.8fr 0.7fr;
+  gap: 8px;
+  margin-top: 11px;
+}
+
+.inventory-risk-metrics span {
+  color: #79440f;
+  font-size: 9px;
+}
+
+.inventory-risk-metrics strong {
+  display: block;
+  margin-bottom: 2px;
+  color: #79440f;
+  font-size: 12px;
+}
+
+.inventory-risk-card.high .inventory-risk-metrics span,
+.inventory-risk-card.high .inventory-risk-metrics strong {
+  color: #8d332e;
+}
+
+.inventory-list-label {
+  margin: 0;
+  padding: 3px 1px 6px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .compact-list,
@@ -2105,6 +2262,21 @@ footer {
     grid-column: span 12;
   }
 
+  .action-panel {
+    display: block;
+    height: auto;
+    min-height: auto;
+    overflow: visible;
+    contain: none;
+  }
+
+  .action-panel-scroll {
+    height: auto;
+    min-height: auto;
+    padding-right: 0;
+    overflow: visible;
+  }
+
   .assistant-panel {
     grid-column: span 12;
   }
@@ -2132,6 +2304,23 @@ footer {
     display: grid;
     grid-template-columns: 1fr 1fr auto;
     width: min(100%, 470px);
+  }
+
+  .year-control {
+    grid-column: 1;
+  }
+
+  .month-control {
+    grid-column: 2;
+  }
+
+  .store-control {
+    grid-column: 1 / 3;
+  }
+
+  .topbar-actions .icon-button {
+    grid-column: 3;
+    grid-row: 2;
   }
 
   .filter-control,
