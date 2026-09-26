@@ -193,7 +193,7 @@ def _blocked_payload(error_type: str) -> str:
     if error_type == "concurrent_query_blocked":
         error = "Another concrete-problem retrieval is already running."
     else:
-        error = "check_concrete_problem may be called only once per Operations run."
+        error = "check_concrete_problem may be called only once per subtask."
     return json.dumps(
         {
             "success": False,
