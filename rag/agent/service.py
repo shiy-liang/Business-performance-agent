@@ -11,11 +11,18 @@ from langchain_core.messages import AnyMessage, HumanMessage
 
 from model.config import load_model_config
 from observability import logger
+from rag.agent.bootstrap import initialize_agent_runtime
 from rag.agent.graph import build_supervisor_graph
 from rag.agent.middleware import AgentLoggingCallback, PublicEventMiddleware
 from rag.agent.run_store import RunRecorder
+from rag.agent.sql_approval import (
+    SqlApprovalAlreadyDecidedError,
+    SqlApprovalNotFoundError,
+    sql_approval_manager,
+)
 from rag.agent.state import PublicAgentEvent
 from rag.agent.tools.registry import ToolRegistry, default_tool_registry
+from rag.agent.workflows import load_agent_runtime_config
 
 
 async def stream_supervisor(
@@ -24,6 +31,7 @@ async def stream_supervisor(
     conversation_messages: list[AnyMessage] | None = None,
     graph: Any | None = None,
     tool_registry: ToolRegistry | None = None,
+    auto_execute_sql: bool = False,
 ) -> AsyncIterator[PublicAgentEvent]:
     """Yield safe progress, tool, citation, and answer-token events."""
 
@@ -38,9 +46,15 @@ async def stream_supervisor(
     )
     run_id = str(uuid4())
     started_at = perf_counter()
-    registry = tool_registry or default_tool_registry
-    active_graph = graph or build_supervisor_graph(tool_registry=registry)
+    if graph is None and tool_registry is None:
+        runtime = initialize_agent_runtime()
+        registry = runtime.tool_registry
+        active_graph = runtime.supervisor_graph
+    else:
+        registry = tool_registry or default_tool_registry
+        active_graph = graph or build_supervisor_graph(tool_registry=registry)
     middleware = PublicEventMiddleware(registry.all_tool_names())
+    agent_runtime = load_agent_runtime_config()
     recorder = RunRecorder(run_id)
     context_token = logger.bind_context(run_id=run_id, agent_name="supervisor")
     logger.info("agent.started", component="agent")
@@ -72,8 +86,15 @@ async def stream_supervisor(
         skills_event: PublicAgentEvent = {
             "event": "skills",
             "data": {
-                "items": ["Business Diagnosis", "Evidence Policy"],
-                "message": "Business Diagnosis and Evidence Policy skills were applied.",
+                "items": [
+                    "Business Diagnosis",
+                    "Supervisor Task Decomposition",
+                    "Evidence Policy",
+                ],
+                "message": (
+                    "Business Diagnosis, Supervisor Task Decomposition, and "
+                    "Evidence Policy skills were applied."
+                ),
             },
         }
         await recorder.record(skills_event)
@@ -86,11 +107,18 @@ async def stream_supervisor(
                 "messages": messages,
             },
             config={
-                "recursion_limit": 10,
+                "recursion_limit": agent_runtime.supervisor.recursion_limit,
                 "run_name": "business-supervisor",
                 "callbacks": [AgentLoggingCallback()],
                 "configurable": {
+                    "run_id": run_id,
                     "delegation_runtime_state": {},
+                    "subtask_plan_runtime_state": {
+                        "formatted": False,
+                        "sub_tasks": [],
+                        "groups": {},
+                    },
+                    "auto_execute_sql": auto_execute_sql,
                 },
             },
             version="v2",
@@ -146,7 +174,16 @@ async def run_supervisor(question: str, **kwargs: Any) -> dict[str, Any]:
 
     final: dict[str, Any] = {}
     async for event in stream_supervisor(question, **kwargs):
-        if event["event"] == "done":
+        if event["event"] == "sql_approval":
+            # A collected (non-streaming) client cannot display an interactive
+            # approval while the request is open. Fail closed instead of running
+            # model-generated SQL without explicit consent.
+            approval_id = str(event["data"].get("approval_id") or "")
+            try:
+                await sql_approval_manager.decide(approval_id, "cancel")
+            except (SqlApprovalNotFoundError, SqlApprovalAlreadyDecidedError):
+                pass
+        elif event["event"] == "done":
             final = event["data"]
         elif event["event"] == "error":
             raise RuntimeError(str(event["data"].get("message")))

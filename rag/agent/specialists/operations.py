@@ -11,7 +11,7 @@ async def run_operations_agent(
     task: str,
     config: RunnableConfig | None = None,
 ) -> dict[str, object]:
-    """Answer an operations task using Operations-authorized SQL tools."""
+    """Answer an operations task using Operations-authorized domain tools."""
 
     return await run_specialist_agent("operations", task, config=config)
 

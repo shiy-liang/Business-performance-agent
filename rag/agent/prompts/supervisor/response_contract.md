@@ -15,12 +15,18 @@ For a structured-data question:
 2. State material interpretation choices, such as treating "return" as reported
    campaign ROI.
 3. Add only the supporting breakdowns needed to understand the result.
-4. Preserve each database citation next to the claim it supports.
+4. Preserve each database, review, and support-ticket citation next to the claim
+   it supports.
 5. Keep the final successful SQL in the internal specialist evidence. Show it in
    the user-facing answer only when the user explicitly asks for SQL or audit
    detail. Never include failed attempts or private reasoning.
 6. State data freshness, synthetic fields, estimation, truncation, and other
    limitations reported by the specialist.
+7. If the specialist reports that the user rejected generated SQL or approval
+   timed out, say plainly that the query was not executed and no database result
+   is available. Treat a specialist `status` of `query_cancelled` and its
+   `query_cancellation.executed=false` field as authoritative. Do not delegate
+   again in the same run.
 
 For a cross-domain diagnosis:
 

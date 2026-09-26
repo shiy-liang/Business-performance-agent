@@ -11,21 +11,35 @@ from langchain_core.runnables import RunnableConfig
 
 from observability import logger
 from rag.agent.middleware import content_text
-from rag.agent.specialists.graph import SpecialistName, build_specialist_graph
+from rag.agent.specialists.graph import (
+    SpecialistName,
+    build_specialist_graph,
+    get_default_specialist_graph,
+)
 from rag.agent.tools.registry import ToolRegistry, default_tool_registry
 from rag.agent.validation import validate_specialist_evidence
+from rag.agent.workflows import load_agent_runtime_config
 
 
 def _collect_tool_payloads(messages: list[Any]) -> list[dict[str, Any]]:
     payloads: list[dict[str, Any]] = []
     for message in messages:
-        if not isinstance(message, ToolMessage) or not isinstance(message.content, str):
+        if not isinstance(message, ToolMessage):
             continue
-        try:
-            payload = json.loads(message.content)
-        except json.JSONDecodeError:
+        artifact = getattr(message, "artifact", None)
+        if isinstance(artifact, dict):
+            payload = dict(artifact)
+        elif isinstance(message.content, str):
+            try:
+                payload = json.loads(message.content)
+            except json.JSONDecodeError:
+                continue
+        else:
             continue
         if isinstance(payload, dict):
+            tool_name = getattr(message, "name", None)
+            if isinstance(tool_name, str) and tool_name:
+                payload.setdefault("tool", tool_name)
             payloads.append(payload)
     return payloads
 
@@ -51,6 +65,30 @@ def _final_answer(messages: list[Any]) -> str:
     return ""
 
 
+def _assigned_sub_tasks(task: str, agent_name: SpecialistName) -> list[dict[str, str]]:
+    """Read the immutable Supervisor task packet passed through delegation."""
+
+    try:
+        packet = json.loads(task)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(packet, dict) or packet.get("agent") != agent_name:
+        return []
+    items = packet.get("sub_tasks")
+    if not isinstance(items, list):
+        return []
+    return [
+        {
+            "id": str(item.get("id") or ""),
+            "question": str(item.get("question") or ""),
+            "agent": str(item.get("agent") or ""),
+            "skill": str(item.get("skill") or ""),
+        }
+        for item in items
+        if isinstance(item, dict)
+    ]
+
+
 async def run_specialist_agent(
     agent_name: SpecialistName,
     task: str,
@@ -63,13 +101,30 @@ async def run_specialist_agent(
 
     started_at = perf_counter()
     registry = tool_registry or default_tool_registry
-    active_graph = graph or build_specialist_graph(
-        agent_name,
-        tool_registry=registry,
+    if graph is not None:
+        active_graph = graph
+    elif tool_registry is None or registry is default_tool_registry:
+        active_graph = get_default_specialist_graph(agent_name)
+    else:
+        active_graph = build_specialist_graph(agent_name, tool_registry=registry)
+    runtime_config = load_agent_runtime_config()
+    assigned_sub_tasks = _assigned_sub_tasks(task, agent_name)
+    assigned_skills = list(
+        dict.fromkeys(
+            item["skill"] for item in assigned_sub_tasks if item.get("skill")
+        )
     )
+    progress_items = {
+        item["id"]: {
+            **item,
+            "status": "pending",
+        }
+        for item in assigned_sub_tasks
+        if item.get("id")
+    }
     child_config: RunnableConfig = dict(config or {})
     child_config["run_name"] = f"{agent_name}-agent"
-    child_config["recursion_limit"] = 16
+    child_config["recursion_limit"] = runtime_config.specialist.recursion_limit
     child_config["tags"] = [agent_name, "specialist"]
     configurable = dict(child_config.get("configurable") or {})
     configurable.update(
@@ -79,6 +134,40 @@ async def run_specialist_agent(
                 "attempts": 0,
                 "in_flight": False,
                 "succeeded": False,
+                "approval_denied": False,
+            },
+            "review_runtime_state": {
+                "semantic_calls": 0,
+                "semantic_in_flight": False,
+                "other_comment_calls": 0,
+                "other_comment_in_flight": False,
+                "review_ids": [],
+                "primary_product_name": None,
+                "primary_product_category": None,
+                "comparison_mode": False,
+            },
+            "ticket_problem_runtime_state": {
+                "calls": 0,
+                "in_flight": False,
+            },
+            "finance_metric_runtime_state": {
+                "calls": {},
+                "in_flight": [],
+            },
+            "product_resolution_runtime_state": {
+                "attempts": 0,
+                "in_flight": False,
+                "resolved": False,
+                "accepted_product_names": [],
+            },
+            "skill_runtime_state": {
+                "selected_skills": [],
+                "assigned_skills": assigned_skills,
+                "loaded": False,
+            },
+            "subtask_progress_runtime_state": {
+                "order": list(progress_items),
+                "items": progress_items,
             },
         }
     )
@@ -105,11 +194,20 @@ async def run_specialist_agent(
     answer = _final_answer(messages)
     tool_payloads = _collect_tool_payloads(messages)
     sources = _collect_sources(tool_payloads)
+    cancelled_query = next(
+        (
+            payload
+            for payload in tool_payloads
+            if payload.get("error_type") in {"user_rejected", "approval_timeout"}
+        ),
+        None,
+    )
     validation = validate_specialist_evidence(
         agent_name,
         answer,
         tool_payloads,
         sources,
+        assigned_sub_tasks=assigned_sub_tasks,
     )
     duration_ms = round((perf_counter() - started_at) * 1000, 2)
     logger.info(
@@ -122,11 +220,27 @@ async def run_specialist_agent(
         validation_error_count=len(validation["errors"]),
     )
     return {
-        "status": "completed" if validation["valid"] else "invalid_evidence",
+        "status": (
+            "completed"
+            if validation["valid"]
+            else "query_cancelled"
+            if cancelled_query is not None
+            else "invalid_evidence"
+        ),
         "agent": agent_name,
         "answer": answer,
+        "assigned_sub_tasks": assigned_sub_tasks,
         "sources": sources,
         "validation": validation,
+        "query_cancellation": (
+            {
+                "error_type": cancelled_query.get("error_type"),
+                "message": cancelled_query.get("error"),
+                "executed": False,
+            }
+            if cancelled_query is not None
+            else None
+        ),
         "duration_ms": duration_ms,
     }
 

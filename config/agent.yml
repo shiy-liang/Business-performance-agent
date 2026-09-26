@@ -1,0 +1,17 @@
+runtime:
+  supervisor:
+    # Maximum LangGraph steps for the top-level supervisor graph.
+    recursion_limit: 10
+  specialist:
+    # Supports per-subtask running/terminal status events plus evidence calls.
+    recursion_limit: 64
+
+finance:
+  # Maximum number of distinct skills that one delegated task packet may load.
+  # sql_query may coexist with dedicated skills only for different subtasks.
+  max_skills_per_task: 3
+
+operations:
+  # Maximum number of distinct skills that one delegated task packet may load.
+  # sql_query may coexist with dedicated skills only for different subtasks.
+  max_skills_per_task: 3

@@ -6,6 +6,13 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Mapping
 
+from rag.agent.workflows import (
+    build_finance_skill_catalog,
+    build_operations_skill_catalog,
+    load_finance_skill_config,
+    load_operations_skill_config,
+)
+
 
 AGENT_ROOT = Path(__file__).resolve().parent
 PROMPT_ROOT = AGENT_ROOT / "prompts"
@@ -45,6 +52,9 @@ def load_supervisor_components() -> dict[str, str]:
         "business_diagnosis": _read(
             SKILL_ROOT / "supervisor" / "business_diagnosis.md"
         ),
+        "task_decomposition": _read(
+            SKILL_ROOT / "supervisor" / "task_decomposition.md"
+        ),
         "evidence_policy": _read(SKILL_ROOT / "common" / "evidence_policy.md"),
     }
 
@@ -57,9 +67,17 @@ def build_supervisor_prompt(
     """Compose the injectable supervisor system prompt for one user turn."""
 
     components = load_supervisor_components()
+    task_decomposition = inject_template(
+        components["task_decomposition"],
+        {
+            "operations_skill_catalog": build_operations_skill_catalog(),
+            "finance_skill_catalog": build_finance_skill_catalog(),
+        },
+    )
     skills = "\n\n".join(
         (
             components["business_diagnosis"],
+            task_decomposition,
             components["evidence_policy"],
         )
     )
@@ -77,15 +95,18 @@ def build_supervisor_prompt(
 
 @lru_cache(maxsize=2)
 def load_specialist_components(agent_name: str) -> dict[str, str]:
-    """Load one specialist's prompt, response contract, and SQL skill."""
+    """Load static prompt parts and each specialist's routing catalog."""
 
     if agent_name not in {"finance", "operations"}:
         raise PromptTemplateError(f"Unsupported specialist: {agent_name}")
     return {
         "system": _read(PROMPT_ROOT / agent_name / "system.md"),
         "response_contract": _read(PROMPT_ROOT / agent_name / "response_contract.md"),
-        "sql_skill": _read(SKILL_ROOT / agent_name / "sql_query.md"),
-        "sql_safety": _read(SKILL_ROOT / "common" / "sql_safety.md"),
+        "skill_catalog": (
+            build_finance_skill_catalog()
+            if agent_name == "finance"
+            else build_operations_skill_catalog()
+        ),
     }
 
 
@@ -98,14 +119,24 @@ def build_specialist_prompt(
     """Compose a domain specialist prompt with injectable SQL instructions."""
 
     components = load_specialist_components(agent_name)
-    skills = "\n\n".join((components["sql_skill"], components["sql_safety"]))
+    # Specialists use progressive disclosure: only routing metadata is in the
+    # system prompt; complete selected bodies arrive later through a ToolMessage.
+    settings = (
+        load_finance_skill_config()
+        if agent_name == "finance"
+        else load_operations_skill_config()
+    )
+    extra_values = {
+        "skill_catalog": components["skill_catalog"],
+        "max_skills_per_task": str(settings.max_skills_per_task),
+    }
     return inject_template(
         components["system"],
         {
             "task": task,
             "available_tools": available_tools,
             "response_contract": components["response_contract"],
-            "skills": skills,
+            **extra_values,
         },
     )
 

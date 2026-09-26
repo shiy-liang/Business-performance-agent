@@ -5,17 +5,21 @@ const state = {
   storeId: "",
   activeProductTab: "best_sellers",
   productData: null,
+  runId: null,
   requestController: null,
   filterTimer: null,
+  maxMonth: "",
   knowledgeAllowedExtensions: [],
   chatController: null,
   chatSessionId: "",
   chatAnswerText: "",
   chatRenderFrame: null,
   chatTurnComplete: false,
+  chatSubtasks: new Map(),
 };
 
 const elements = {
+  yearFilter: document.querySelector("#year-filter"),
   monthFilter: document.querySelector("#month-filter"),
   storeFilter: document.querySelector("#store-filter"),
   refreshButton: document.querySelector("#refresh-button"),
@@ -26,7 +30,9 @@ const elements = {
   financePeriod: document.querySelector("#finance-period"),
   financeMetrics: document.querySelector("#finance-metrics"),
   financeChart: document.querySelector("#finance-chart"),
-  inventorySummary: document.querySelector("#inventory-summary"),
+  businessRiskCount: document.querySelector("#business-risk-count"),
+  businessRiskList: document.querySelector("#business-risk-list"),
+  inventoryRiskSummary: document.querySelector("#inventory-risk-summary"),
   inventoryList: document.querySelector("#inventory-list"),
   ticketCount: document.querySelector("#ticket-count"),
   ticketList: document.querySelector("#ticket-list"),
@@ -41,13 +47,16 @@ const elements = {
   chatResponse: document.querySelector("#chat-response"),
   chatQuestion: document.querySelector("#chat-question"),
   chatProgress: document.querySelector("#chat-progress"),
+  chatSubtasks: document.querySelector("#chat-subtasks"),
   chatThinking: document.querySelector("#chat-thinking"),
   chatThinkingLabel: document.querySelector("#chat-thinking-label"),
   chatAnswer: document.querySelector("#chat-answer"),
+  chatSqlApprovals: document.querySelector("#chat-sql-approvals"),
   chatAnswerStatus: document.querySelector("#chat-answer-status"),
   chatCopyButton: document.querySelector("#chat-copy-button"),
   chatSources: document.querySelector("#chat-sources"),
   chatSubmitLabel: document.querySelector("#chat-submit-label"),
+  sqlAutoExecute: document.querySelector("#sql-auto-execute"),
   knowledgeDropZone: document.querySelector("#knowledge-drop-zone"),
   knowledgeFileInput: document.querySelector("#knowledge-file-input"),
   knowledgeFileCount: document.querySelector("#knowledge-file-count"),
@@ -67,6 +76,8 @@ const moneyFormatter = new Intl.NumberFormat("en-US", {
 const numberFormatter = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 0,
 });
+
+const firstOperatingYear = 2020;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -273,16 +284,17 @@ async function syncCustomerReviews() {
   elements.reviewSyncButton.disabled = true;
   elements.reviewSyncStatus.hidden = false;
   elements.reviewSyncStatus.className = "upload-status loading";
-  elements.reviewSyncStatus.textContent = "Synchronizing customer reviews…";
+  elements.reviewSyncStatus.textContent = "Synchronizing customer reviews and support tickets…";
 
   try {
     const data = await fetchJson("/api/knowledge/reviews/sync", { method: "POST" });
     elements.reviewSyncStatus.className = "upload-status success";
     elements.reviewSyncStatus.textContent =
-      `Synced ${data.synced_count} customer reviews into the knowledge base`;
+      `Synced ${data.reviews_synced_count} customer reviews and ` +
+      `${data.tickets_synced_count} support tickets into the knowledge base`;
   } catch (error) {
     elements.reviewSyncStatus.className = "upload-status error";
-    elements.reviewSyncStatus.textContent = `Review synchronization failed: ${error.message}`;
+    elements.reviewSyncStatus.textContent = `Synchronization failed: ${error.message}`;
   } finally {
     elements.reviewSyncButton.disabled = false;
   }
@@ -306,7 +318,12 @@ function resetConversationUi() {
   elements.chatResponse.hidden = true;
   elements.chatQuestion.textContent = "";
   elements.chatProgress.replaceChildren();
+  state.chatSubtasks.clear();
+  elements.chatSubtasks.replaceChildren();
+  elements.chatSubtasks.hidden = true;
   elements.chatAnswer.replaceChildren();
+  elements.chatSqlApprovals.replaceChildren();
+  elements.chatSqlApprovals.hidden = true;
   elements.chatSources.replaceChildren();
   elements.chatSources.hidden = true;
   elements.chatCopyButton.hidden = true;
@@ -345,8 +362,13 @@ function prepareChatResponse(question) {
   elements.chatResponse.hidden = false;
   elements.chatQuestion.textContent = question;
   elements.chatProgress.replaceChildren();
+  state.chatSubtasks.clear();
+  elements.chatSubtasks.replaceChildren();
+  elements.chatSubtasks.hidden = true;
   elements.chatAnswer.replaceChildren();
   elements.chatAnswer.classList.remove("is-streaming");
+  elements.chatSqlApprovals.replaceChildren();
+  elements.chatSqlApprovals.hidden = true;
   elements.chatSources.replaceChildren();
   elements.chatSources.hidden = true;
   elements.chatCopyButton.hidden = true;
@@ -403,6 +425,106 @@ function appendChatActivity(kind, label, message) {
   copy.append(heading, document.createTextNode(String(message || "")));
   item.append(dot, copy);
   elements.chatProgress.append(item);
+}
+
+const SUBTASK_STATUS_LABELS = {
+  pending: "Pending",
+  running: "In progress",
+  completed: "Completed",
+  blocked: "Blocked",
+  empty: "Completed · no data",
+};
+
+function normalizedSubtaskStatus(value) {
+  const status = String(value || "pending");
+  return Object.hasOwn(SUBTASK_STATUS_LABELS, status) ? status : "pending";
+}
+
+function buildSubtaskRow(task) {
+  const status = normalizedSubtaskStatus(task.status);
+  const row = document.createElement("div");
+  row.className = `subtask-row is-${status}`;
+  row.dataset.subtaskId = task.id;
+
+  const copy = document.createElement("span");
+  copy.className = "subtask-copy";
+  const title = document.createElement("strong");
+  title.textContent = task.question || task.id;
+  const meta = document.createElement("small");
+  meta.textContent = [task.id, task.agent, task.skill].filter(Boolean).join(" · ");
+  copy.append(title, meta);
+
+  const stateCopy = document.createElement("span");
+  stateCopy.className = "subtask-state";
+  const label = document.createElement("small");
+  label.className = "subtask-state-label";
+  label.textContent = SUBTASK_STATUS_LABELS[status];
+  const indicator = document.createElement("span");
+  indicator.className = "subtask-check";
+  indicator.setAttribute("aria-hidden", "true");
+  stateCopy.append(label, indicator);
+  row.append(copy, stateCopy);
+  return row;
+}
+
+function updateSubtaskProgressCount() {
+  const finished = [...state.chatSubtasks.values()].filter((task) =>
+    ["completed", "blocked", "empty"].includes(normalizedSubtaskStatus(task.status)),
+  ).length;
+  const count = elements.chatSubtasks.querySelector(".subtask-heading span");
+  if (count) count.textContent = `${finished}/${state.chatSubtasks.size} finished`;
+}
+
+function renderSubtasks(items) {
+  const tasks = Array.isArray(items)
+    ? items.filter((item) => item && typeof item === "object" && item.id)
+    : [];
+  state.chatSubtasks.clear();
+  tasks.forEach((item) => {
+    const task = { ...item, status: normalizedSubtaskStatus(item.status) };
+    state.chatSubtasks.set(String(task.id), task);
+  });
+  elements.chatSubtasks.replaceChildren();
+  elements.chatSubtasks.hidden = state.chatSubtasks.size === 0;
+  if (!state.chatSubtasks.size) return;
+
+  const heading = document.createElement("div");
+  heading.className = "subtask-heading";
+  const title = document.createElement("strong");
+  title.textContent = "Subtasks";
+  const count = document.createElement("span");
+  heading.append(title, count);
+
+  const list = document.createElement("div");
+  list.className = "subtask-list";
+  state.chatSubtasks.forEach((task) => list.append(buildSubtaskRow(task)));
+  elements.chatSubtasks.append(heading, list);
+  updateSubtaskProgressCount();
+}
+
+function updateSubtaskStatus(data) {
+  const taskId = String(data?.subtask_id || "");
+  if (!taskId) return;
+  const previous = state.chatSubtasks.get(taskId) || {
+    id: taskId,
+    question: String(data?.question || taskId),
+    agent: String(data?.agent || ""),
+    skill: String(data?.skill || ""),
+  };
+  const status = normalizedSubtaskStatus(data?.status);
+  const task = { ...previous, status };
+  state.chatSubtasks.set(taskId, task);
+
+  const row = [...elements.chatSubtasks.querySelectorAll(".subtask-row")]
+    .find((item) => item.dataset.subtaskId === taskId);
+  if (!row) {
+    renderSubtasks([...state.chatSubtasks.values()]);
+    return;
+  }
+  row.className = `subtask-row is-${status}`;
+  const label = row.querySelector(".subtask-state-label");
+  if (label) label.textContent = SUBTASK_STATUS_LABELS[status];
+  updateSubtaskProgressCount();
 }
 
 function setThinking(message, visible = true) {
@@ -467,6 +589,129 @@ function renderChatSources(sources) {
   elements.chatSources.hidden = false;
 }
 
+function renderSqlApproval(data) {
+  const approvalId = String(data?.approval_id || "");
+  const sql = String(data?.sql || "").trim();
+  if (!approvalId || !sql) return;
+
+  const card = document.createElement("article");
+  card.className = "sql-approval-card";
+  card.dataset.approvalId = approvalId;
+  card.dataset.runId = String(data?.run_id || "");
+
+  const heading = document.createElement("div");
+  heading.className = "sql-approval-heading";
+  const title = document.createElement("strong");
+  title.textContent = "SQL query approval required";
+  const agent = document.createElement("span");
+  agent.textContent = `${String(data?.agent || "specialist").toUpperCase()} AGENT`;
+  heading.append(title, agent);
+
+  const warning = document.createElement("p");
+  warning.className = "sql-approval-warning";
+  warning.textContent = String(
+    data?.message ||
+      "No dedicated skill matched this request. The Agent-generated query may fail, take a long time, or consume additional tokens.",
+  );
+
+  const purpose = document.createElement("p");
+  purpose.className = "sql-approval-purpose";
+  purpose.textContent = data?.purpose ? `Purpose: ${String(data.purpose)}` : "";
+  purpose.hidden = !data?.purpose;
+
+  const sqlLabel = document.createElement("span");
+  sqlLabel.className = "sql-approval-label";
+  sqlLabel.textContent = "Complete SQL to execute (including the row-limit guard)";
+  const pre = document.createElement("pre");
+  const code = document.createElement("code");
+  code.textContent = sql;
+  pre.append(code);
+
+  const parameters = data?.parameters && typeof data.parameters === "object"
+    ? data.parameters
+    : {};
+  const parameterKeys = Object.keys(parameters);
+  const parameterBlock = document.createElement("div");
+  parameterBlock.className = "sql-approval-parameters";
+  parameterBlock.hidden = parameterKeys.length === 0;
+  const parameterLabel = document.createElement("span");
+  parameterLabel.className = "sql-approval-label";
+  parameterLabel.textContent = "Bound parameters";
+  const parameterPre = document.createElement("pre");
+  const parameterCode = document.createElement("code");
+  parameterCode.textContent = JSON.stringify(parameters, null, 2);
+  parameterPre.append(parameterCode);
+  parameterBlock.append(parameterLabel, parameterPre);
+
+  const decisionStatus = document.createElement("p");
+  decisionStatus.className = "sql-approval-decision-status";
+  decisionStatus.setAttribute("role", "status");
+
+  const actions = document.createElement("div");
+  actions.className = "sql-approval-actions";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "sql-approval-cancel";
+  cancel.dataset.sqlDecision = "cancel";
+  cancel.textContent = "Cancel";
+  const execute = document.createElement("button");
+  execute.type = "button";
+  execute.className = "sql-approval-execute";
+  execute.dataset.sqlDecision = "execute";
+  execute.textContent = "Execute";
+  actions.append(cancel, execute);
+
+  card.append(
+    heading,
+    warning,
+    purpose,
+    sqlLabel,
+    pre,
+    parameterBlock,
+    decisionStatus,
+    actions,
+  );
+  elements.chatSqlApprovals.append(card);
+  elements.chatSqlApprovals.hidden = false;
+  elements.chatAnswerStatus.textContent = "Awaiting approval";
+  elements.chatAnswerStatus.classList.remove("is-streaming");
+  setThinking("Waiting for your SQL execution decision…");
+  appendChatActivity("approval", "SQL approval", "Waiting for approval of the Agent-generated read-only query");
+}
+
+async function submitSqlApproval(card, decision) {
+  const approvalId = String(card?.dataset?.approvalId || "");
+  const runId = String(card?.dataset?.runId || "");
+  if (!approvalId || !runId || !["execute", "cancel"].includes(decision)) return;
+  const buttons = [...card.querySelectorAll("button[data-sql-decision]")];
+  const status = card.querySelector(".sql-approval-decision-status");
+  buttons.forEach((button) => { button.disabled = true; });
+  if (status) status.textContent = decision === "execute" ? "Submitting approval…" : "Cancelling the query…";
+  try {
+    await fetchJson(`/api/chat/sql-approvals/${encodeURIComponent(approvalId)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision, run_id: runId }),
+    });
+    card.classList.add(decision === "execute" ? "is-approved" : "is-cancelled");
+    if (status) {
+      status.textContent = decision === "execute"
+        ? "Approved. The read-only query is now running."
+        : "Cancelled. The database query will not be executed.";
+    }
+    elements.chatAnswerStatus.textContent = decision === "execute" ? "Querying" : "Query cancelled";
+    setThinking(decision === "execute" ? "Running the approved SQL…" : "Supervisor is preparing the cancellation response…");
+    appendChatActivity(
+      decision === "execute" ? "tool-start" : "approval",
+      "SQL approval",
+      decision === "execute" ? "The user approved execution" : "The user declined execution",
+    );
+  } catch (error) {
+    buttons.forEach((button) => { button.disabled = false; });
+    if (status) status.textContent = `Could not submit the decision: ${error.message}`;
+  }
+}
+
 function handleChatEvent(eventName, data) {
   const message = String(data?.message || "");
   if (eventName === "status") {
@@ -483,6 +728,11 @@ function handleChatEvent(eventName, data) {
     } else {
       appendChatActivity("skill", "Skills", message);
     }
+  } else if (eventName === "subtasks") {
+    renderSubtasks(data?.items);
+  } else if (eventName === "subtask_status") {
+    updateSubtaskStatus(data);
+    if (message) setThinking(message, data?.status === "running");
   } else if (eventName === "tool_start") {
     appendChatActivity("tool-start", "Tool call", message || String(data?.name || "Tool started"));
   } else if (eventName === "tool_end") {
@@ -493,6 +743,13 @@ function handleChatEvent(eventName, data) {
     appendChatActivity("validation", `${agent} · ${label}`, message);
   } else if (eventName === "sources") {
     renderChatSources(data?.items);
+  } else if (eventName === "sql_approval") {
+    renderSqlApproval(data);
+  } else if (eventName === "sql_auto_execute") {
+    const detail = message || "Running validated SQL automatically without an approval prompt.";
+    elements.chatAnswerStatus.textContent = "Querying";
+    setThinking(detail);
+    appendChatActivity("tool-start", "Automatic SQL execution", detail);
   } else if (eventName === "token") {
     const text = String(data?.text || "");
     if (!text) return;
@@ -535,6 +792,7 @@ function parseSseFrame(frame) {
 async function submitChat(question) {
   const cleanQuestion = String(question || "").trim();
   if (!cleanQuestion) return;
+  const autoExecuteSql = elements.sqlAutoExecute.checked;
   try {
     await ensureChatSession();
   } catch (error) {
@@ -549,6 +807,7 @@ async function submitChat(question) {
 
   const submitButton = elements.chatForm.querySelector('button[type="submit"]');
   submitButton.disabled = true;
+  elements.sqlAutoExecute.disabled = true;
   elements.chatSubmitLabel.textContent = "Working";
 
   try {
@@ -560,6 +819,7 @@ async function submitChat(question) {
         body: JSON.stringify({
           session_id: state.chatSessionId,
           message: cleanQuestion,
+          auto_execute_sql: autoExecuteSql,
         }),
         signal: controller.signal,
       });
@@ -604,6 +864,7 @@ async function submitChat(question) {
     if (state.chatController === controller) {
       state.chatController = null;
       submitButton.disabled = false;
+      elements.sqlAutoExecute.disabled = false;
       elements.chatSubmitLabel.textContent = "Send";
     }
   }
@@ -624,6 +885,64 @@ async function loadStores() {
   }
 
   elements.storeFilter.append(fragment);
+}
+
+function populateOperatingYears(maxYear) {
+  const fragment = document.createDocumentFragment();
+  for (let year = maxYear; year >= firstOperatingYear; year -= 1) {
+    const option = document.createElement("option");
+    option.value = String(year);
+    option.textContent = String(year);
+    fragment.append(option);
+  }
+  elements.yearFilter.replaceChildren(fragment);
+}
+
+function constrainOperatingMonth(year, preferredMonth) {
+  const [maxYearText, maxMonthText] = state.maxMonth.split("-");
+  const maxYear = Number(maxYearText);
+  const maxMonth = Number(maxMonthText);
+  const selectedYear = Number(year);
+  const preferredMonthNumber = Number(preferredMonth);
+  const allowedMonth =
+    selectedYear === maxYear && preferredMonthNumber > maxMonth
+      ? String(maxMonth).padStart(2, "0")
+      : preferredMonth;
+
+  for (const option of elements.monthFilter.options) {
+    option.disabled = selectedYear === maxYear && Number(option.value) > maxMonth;
+  }
+
+  elements.monthFilter.value = allowedMonth;
+  return allowedMonth;
+}
+
+function syncOperatingMonthFilters() {
+  const selectedMatch = /^(\d{4})-(\d{2})$/.exec(state.month);
+  const maximumMatch = /^(\d{4})-(\d{2})$/.exec(state.maxMonth);
+  if (!selectedMatch || !maximumMatch) return;
+
+  const selectedYear = selectedMatch[1];
+  const selectedMonth = selectedMatch[2];
+  const maxYear = Number(maximumMatch[1]);
+
+  populateOperatingYears(maxYear);
+  elements.yearFilter.value = selectedYear;
+  constrainOperatingMonth(selectedYear, selectedMonth);
+  elements.yearFilter.disabled = false;
+  elements.monthFilter.disabled = false;
+}
+
+function updateOperatingMonthFromFilters() {
+  const year = elements.yearFilter.value;
+  const month = constrainOperatingMonth(year, elements.monthFilter.value);
+  if (!year || !month) return;
+
+  const selectedMonth = `${year}-${month}`;
+  if (selectedMonth === state.month) return;
+
+  state.month = selectedMonth;
+  scheduleDashboardLoad();
 }
 
 function renderFinance(data) {
@@ -670,11 +989,9 @@ function renderFinance(data) {
     data.period.is_complete ? "Complete calendar month" : "Partial month"
   }`;
 
-  if (!state.month) {
-    state.month = data.period.month;
-    elements.monthFilter.value = data.period.month;
-  }
-  elements.monthFilter.max = data.period.sales_data_through.slice(0, 7);
+  state.maxMonth = data.period.sales_data_through.slice(0, 7);
+  if (!state.month) state.month = data.period.month;
+  syncOperatingMonthFilters();
   renderFinanceChart(data.trend);
 }
 
@@ -764,66 +1081,236 @@ function renderFinanceChart(points) {
   `;
 }
 
-function renderActionCenter(data) {
-  const inventory = data.inventory;
-  const tickets = data.support_tickets;
+function finiteNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
 
-  elements.inventorySummary.className = "action-summary";
-  elements.inventorySummary.innerHTML = `
-    <strong>${numberFormatter.format(inventory.critical_count)}</strong>
-    <span>critical items</span>
-    <strong>${numberFormatter.format(inventory.additional_reorder_count)}</strong>
-    <span>items need replenishment</span>
-  `;
+function fixedNumber(value, digits = 2) {
+  return finiteNumber(value).toFixed(digits);
+}
 
-  if (inventory.top_items.length === 0) {
-    renderEmpty(elements.inventoryList, "No urgent inventory items in this scope");
+function issueContext(issue) {
+  const scope = issue && typeof issue.scope === "object" ? issue.scope : {};
+  const period = issue && typeof issue.period === "object" ? issue.period : {};
+  const scopeLabel = scope.label ||
+    (scope.type === "company" ? "Company-wide" : scope.store_id || "Current scope");
+  const periodLabel = period.snapshot_date
+    ? `Snapshot ${period.snapshot_date}`
+    : period.month || "Current period";
+  return `${scopeLabel} · ${periodLabel}`;
+}
+
+function genericEvidence(evidence) {
+  if (!evidence || typeof evidence !== "object") {
+    return ["Structured evidence is unavailable"];
+  }
+  const labels = {
+    current_value: "Current value",
+    baseline_value: "Baseline value",
+    change_pct: "Change",
+    affected_ratio: "Affected",
+    critical_count: "Critical",
+  };
+  const items = Object.entries(evidence)
+    .filter(([, value]) => ["string", "number", "boolean"].includes(typeof value))
+    .slice(0, 3)
+    .map(([key, value]) => `${labels[key] || key.replaceAll("_", " ")}: ${value}`);
+  return items.length ? items : ["Structured evidence is available"];
+}
+
+function issueEvidenceLines(issue) {
+  const evidence = issue && typeof issue.evidence === "object" ? issue.evidence : {};
+  if (issue.issue_type === "profit_deterioration") {
+    return [
+      `Gross profit decreased ${Math.abs(finiteNumber(evidence.change_pct)).toFixed(2)}%`,
+      `${formatMoney(evidence.baseline_value)} → ${formatMoney(evidence.current_value)}`,
+      `vs ${evidence.baseline_period || "previous period"}`,
+    ];
+  }
+  if (issue.issue_type === "refund_pressure") {
+    return [
+      `Completed refunds increased ${fixedNumber(evidence.change_pct)}%`,
+      `+${formatMoney(Math.abs(finiteNumber(evidence.absolute_increase)))}`,
+      `${formatMoney(evidence.baseline_value)} → ${formatMoney(evidence.current_value)}`,
+    ];
+  }
+  if (issue.issue_type === "campaign_inefficiency") {
+    return [
+      `${numberFormatter.format(finiteNumber(evidence.negative_roi_campaign_count))} of ${numberFormatter.format(finiteNumber(evidence.active_campaign_count))} active campaigns have negative reported ROI`,
+      `${fixedNumber(evidence.negative_roi_ratio, 1)}% affected`,
+      `Lowest reported lifecycle ROI: ${fixedNumber(evidence.lowest_reported_roi)}%`,
+    ];
+  }
+  if (issue.issue_type === "customer_experience_deterioration") {
+    const ratingChange = finiteNumber(evidence.average_rating_change);
+    const ratioChange = finiteNumber(evidence.low_rating_ratio_change_pp);
+    return [
+      `Average rating: ${fixedNumber(evidence.previous_average_rating)} → ${fixedNumber(evidence.average_rating)} (${ratingChange > 0 ? "+" : ""}${ratingChange.toFixed(2)})`,
+      `1–2 star share: ${fixedNumber(evidence.previous_low_rating_ratio)}% → ${fixedNumber(evidence.low_rating_ratio)}% (${ratioChange > 0 ? "+" : ""}${ratioChange.toFixed(2)}pp)`,
+      `${numberFormatter.format(finiteNumber(evidence.review_count))} reviews`,
+    ];
+  }
+  return genericEvidence(evidence);
+}
+
+function renderDetectedRisks(candidateIssues) {
+  const hasInventoryIssue = candidateIssues.some(
+    (issue) => issue.issue_type === "inventory_replenishment_risk",
+  );
+  const visibleIssues = candidateIssues.filter(
+    (issue) => issue.issue_type !== "inventory_replenishment_risk",
+  );
+  elements.businessRiskCount.className = candidateIssues.length
+    ? "alert-badge"
+    : "soft-badge";
+  elements.businessRiskCount.textContent = candidateIssues.length
+    ? `${candidateIssues.length} total ${candidateIssues.length === 1 ? "risk" : "risks"}`
+    : "No material risks";
+
+  if (visibleIssues.length === 0) {
+    renderEmpty(
+      elements.businessRiskList,
+      hasInventoryIssue
+        ? "Inventory risk is summarized below; no additional risks were detected."
+        : "No material business risks detected for the selected period.",
+    );
+    return;
+  }
+
+  elements.businessRiskList.className = "risk-list";
+  elements.businessRiskList.innerHTML = visibleIssues
+    .map((issue) => {
+      const severity = issue.severity === "high" ? "high" : "medium";
+      return `
+        <article class="risk-card ${severity}">
+          <div class="risk-card-header">
+            <span class="severity-badge ${severity}">${escapeHtml(severity.toUpperCase())}</span>
+            <span class="risk-context">${escapeHtml(issueContext(issue))}</span>
+          </div>
+          <strong class="risk-title">${escapeHtml(issue.title || issue.issue_type || "Business risk")}</strong>
+          <div class="risk-evidence">
+            ${issueEvidenceLines(issue)
+              .map((line) => `<span>${escapeHtml(line)}</span>`)
+              .join("")}
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+function renderInventorySection(inventory, inventoryIssue) {
+  const criticalCount = finiteNumber(inventory.critical_count);
+  const additionalCount = finiteNumber(inventory.additional_reorder_count);
+  const affectedCount = criticalCount + additionalCount;
+  const totalCount = finiteNumber(inventory.total_inventory_count);
+  const affectedRatio = finiteNumber(inventory.affected_ratio);
+  const topItems = Array.isArray(inventory.top_items) ? inventory.top_items : [];
+
+  if (inventoryIssue) {
+    const severity = inventoryIssue.severity === "high" ? "high" : "medium";
+    elements.inventoryRiskSummary.className = `risk-card ${severity} inventory-risk-card`;
+    elements.inventoryRiskSummary.innerHTML = `
+      <div class="risk-card-header">
+        <span class="severity-badge ${severity}">${escapeHtml(severity.toUpperCase())}</span>
+        <span class="risk-context">${escapeHtml(issueContext(inventoryIssue))}</span>
+      </div>
+      <strong class="risk-title">${escapeHtml(inventoryIssue.title || "Inventory replenishment risk")}</strong>
+      <div class="inventory-risk-metrics">
+        <span><strong>${numberFormatter.format(affectedCount)} / ${numberFormatter.format(totalCount)}</strong> records</span>
+        <span><strong>${fixedNumber(affectedRatio)}%</strong> affected</span>
+        <span><strong>${numberFormatter.format(criticalCount)}</strong> critical</span>
+      </div>
+    `;
+  } else if (affectedCount > 0) {
+    elements.inventoryRiskSummary.className = "inventory-risk-summary";
+    elements.inventoryRiskSummary.innerHTML = `
+      <div class="inventory-replenishment-copy">
+        <strong>${numberFormatter.format(affectedCount)} items need replenishment</strong>
+        <span>${fixedNumber(affectedRatio)}% affected · No portfolio-level inventory risk detected</span>
+      </div>
+    `;
   } else {
-    elements.inventoryList.className = "compact-list";
-    elements.inventoryList.innerHTML = inventory.top_items
+    elements.inventoryRiskSummary.className = "inventory-risk-summary";
+    elements.inventoryRiskSummary.innerHTML = `
+      <div class="inventory-replenishment-copy">
+        <strong>No inventory replenishment items detected</strong>
+        <span>${numberFormatter.format(totalCount)} inventory records checked</span>
+      </div>
+    `;
+  }
+
+  if (affectedCount === 0 || topItems.length === 0) {
+    renderEmpty(elements.inventoryList, "No inventory replenishment items detected.");
+    return;
+  }
+
+  elements.inventoryList.className = "compact-list";
+  elements.inventoryList.innerHTML = `
+    <p class="inventory-list-label">Top affected items</p>
+    ${topItems
       .map(
         (item) => `
           <article class="inventory-row">
             <i class="severity-dot ${escapeHtml(item.severity)}" aria-hidden="true"></i>
             <div>
-              <span class="row-title">${escapeHtml(item.product_name)}</span>
-              <span class="row-subtitle">${escapeHtml(item.store_location)} · ${escapeHtml({ critical: "Critical", high: "High", warning: "Warning" }[item.severity] || item.severity)}</span>
+              <span class="row-title">${escapeHtml(item.product_name || "Unknown product")}</span>
+              <span class="row-subtitle">${escapeHtml(item.store_location || "Unknown location")} · ${escapeHtml({ critical: "Critical", high: "High", warning: "Warning" }[item.severity] || item.severity || "Needs replenishment")}</span>
             </div>
             <span class="stock-value">
-              <strong>${numberFormatter.format(item.stock_quantity)}</strong>
-              Reorder level ${numberFormatter.format(item.reorder_level)}
+              <strong>Stock: ${numberFormatter.format(finiteNumber(item.stock_quantity))}</strong>
+              Reorder level ${numberFormatter.format(finiteNumber(item.reorder_level))}
             </span>
           </article>
         `,
       )
-      .join("");
-  }
+      .join("")}
+  `;
+}
 
+function renderSupportTickets(tickets) {
+  const ticketItems = Array.isArray(tickets.oldest) ? tickets.oldest : [];
   elements.ticketCount.textContent = `${numberFormatter.format(
-    tickets.unresolved_high_priority_count,
+    finiteNumber(tickets.unresolved_high_priority_count),
   )} unresolved`;
 
-  if (tickets.oldest.length === 0) {
+  if (ticketItems.length === 0) {
     renderEmpty(elements.ticketList, "No unresolved high-priority tickets");
-  } else {
-    elements.ticketList.className = "ticket-list";
-    elements.ticketList.innerHTML = tickets.oldest
-      .map(
-        (ticket) => `
-          <article class="ticket-row">
-            <span class="age-box">
-              <strong>${numberFormatter.format(ticket.open_days)}</strong>
-              <small>days open</small>
-            </span>
-            <div>
-              <span class="row-title">${escapeHtml(ticket.notes || ticket.issue_category)}</span>
-              <span class="row-subtitle">${escapeHtml(ticket.issue_category)} · ${escapeHtml(ticket.resolution_status)} · ${escapeHtml(ticket.submission_date)}</span>
-            </div>
-          </article>
-        `,
-      )
-      .join("");
+    return;
   }
+
+  elements.ticketList.className = "ticket-list";
+  elements.ticketList.innerHTML = ticketItems
+    .map(
+      (ticket) => `
+        <article class="ticket-row">
+          <span class="age-box">
+            <strong>${numberFormatter.format(finiteNumber(ticket.open_days))}</strong>
+            <small>days open</small>
+          </span>
+          <div>
+            <span class="row-title">${escapeHtml(ticket.notes || ticket.issue_category || "Support ticket")}</span>
+            <span class="row-subtitle">${escapeHtml(ticket.issue_category || "Uncategorized")} · ${escapeHtml(ticket.resolution_status || "Unknown status")} · ${escapeHtml(ticket.submission_date || "Unknown date")}</span>
+          </div>
+        </article>
+      `,
+    )
+    .join("");
+}
+
+function renderBusinessActionCenter(data, candidateIssues) {
+  const actionCenter = data && typeof data === "object" ? data : {};
+  const issues = Array.isArray(candidateIssues)
+    ? candidateIssues.filter((issue) => issue && typeof issue === "object")
+    : [];
+  const inventoryIssue = issues.find(
+    (issue) => issue.issue_type === "inventory_replenishment_risk",
+  );
+
+  renderDetectedRisks(issues);
+  renderInventorySection(actionCenter.inventory || {}, inventoryIssue);
+  renderSupportTickets(actionCenter.support_tickets || {});
 }
 
 const productTabLabels = {
@@ -934,16 +1421,25 @@ function renderMarketing(data) {
 
 function panelError(panel, message) {
   if (panel === "finance") {
+    elements.financePeriod.textContent = "—";
+    elements.salesDataThrough.textContent = "—";
+    elements.scopeCaption.textContent = "—";
     elements.financeMetrics.innerHTML = "";
     renderEmpty(elements.financeMetrics, message);
     renderEmpty(elements.financeChart, "The trend chart is temporarily unavailable");
   } else if (panel === "action") {
-    renderEmpty(elements.inventorySummary, message);
+    elements.businessRiskCount.className = "soft-badge";
+    elements.businessRiskCount.textContent = "Unavailable";
+    elements.ticketCount.textContent = "—";
+    renderEmpty(elements.businessRiskList, message);
+    renderEmpty(elements.inventoryRiskSummary, "Inventory summary is temporarily unavailable");
     renderEmpty(elements.inventoryList, "Inventory data is temporarily unavailable");
     renderEmpty(elements.ticketList, "Ticket data is temporarily unavailable");
   } else if (panel === "products") {
+    state.productData = null;
     renderEmpty(elements.productList, message);
   } else if (panel === "marketing") {
+    elements.campaignCount.textContent = "—";
     renderEmpty(elements.campaignList, message);
   }
 }
@@ -954,55 +1450,73 @@ async function loadDashboard() {
   const { signal } = state.requestController;
   const requestedMonth = state.month;
   const requestedStore = state.storeId;
+  const isStale = () =>
+    signal.aborted ||
+    requestedMonth !== state.month ||
+    requestedStore !== state.storeId ||
+    state.requestController.signal !== signal;
+  let responseAccepted = false;
 
   clearGlobalError();
   elements.refreshButton.classList.add("is-loading");
   elements.refreshButton.disabled = true;
   setConnectionStatus("loading", "Refreshing data");
+  state.runId = null;
 
-  const requests = [
-    fetchJson(endpoint("/api/dashboard/financial-pulse", { month: true, store: true }), { signal }),
-    fetchJson(endpoint("/api/dashboard/action-center", { store: true }), { signal }),
-    fetchJson(endpoint("/api/dashboard/product-performance", { month: true, store: true }), { signal }),
-    fetchJson(endpoint("/api/dashboard/marketing-performance", { month: true }), { signal }),
-  ];
+  try {
+    const createdRun = await fetchJson("/api/runs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ run_type: "business_performance" }),
+      signal,
+    });
+    if (isStale()) return;
 
-  const [finance, action, products, marketing] = await Promise.allSettled(requests);
-  if (signal.aborted || requestedMonth !== state.month || requestedStore !== state.storeId) {
-    return;
-  }
+    state.runId = createdRun.run_id;
+    const data = await fetchJson(`/api/runs/${state.runId}/execute`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        month: state.month || null,
+        store_id: state.storeId || null,
+      }),
+      signal,
+    });
+    if (isStale()) return;
 
-  const failures = [];
-  if (finance.status === "fulfilled") renderFinance(finance.value);
-  else {
-    failures.push(finance.reason.message);
-    panelError("finance", "Financial data is temporarily unavailable");
-  }
-  if (action.status === "fulfilled") renderActionCenter(action.value);
-  else {
-    failures.push(action.reason.message);
-    panelError("action", "Action data is temporarily unavailable");
-  }
-  if (products.status === "fulfilled") renderProducts(products.value);
-  else {
-    failures.push(products.reason.message);
-    panelError("products", "Product rankings are temporarily unavailable");
-  }
-  if (marketing.status === "fulfilled") renderMarketing(marketing.value);
-  else {
-    failures.push(marketing.reason.message);
-    panelError("marketing", "Campaign data is temporarily unavailable");
-  }
+    responseAccepted = true;
 
-  if (failures.length) {
-    setConnectionStatus("error", "Some data failed to load");
-    showGlobalError(`Some dashboard sections failed: ${[...new Set(failures)].join("; ")}`);
-  } else {
+    renderFinance(data.result.finance);
+    renderBusinessActionCenter(
+      data.result.action_center,
+      Array.isArray(data.result.candidate_issues) ? data.result.candidate_issues : [],
+    );
+    renderProducts(data.result.products);
+    renderMarketing(data.result.marketing);
+
     setConnectionStatus("ok", "Supabase connected");
-  }
+  } catch (error) {
+    if (!responseAccepted && isStale()) return;
+    if (signal.aborted || state.requestController.signal !== signal) return;
 
-  elements.refreshButton.classList.remove("is-loading");
-  elements.refreshButton.disabled = false;
+    const message = error instanceof Error ? error.message : String(error);
+
+    setConnectionStatus("error", "Business analysis failed");
+    showGlobalError(`Business analysis failed: ${message}`);
+
+    panelError("finance", "Financial data is temporarily unavailable");
+    panelError("action", "Action data is temporarily unavailable");
+    panelError("products", "Product rankings are temporarily unavailable");
+    panelError("marketing", "Campaign data is temporarily unavailable");
+  } finally {
+    if (
+      responseAccepted ||
+      (!isStale() && state.requestController.signal === signal)
+    ) {
+      elements.refreshButton.classList.remove("is-loading");
+      elements.refreshButton.disabled = false;
+    }
+  }
 }
 
 function scheduleDashboardLoad() {
@@ -1025,10 +1539,8 @@ elements.storeFilter.addEventListener("change", () => {
   scheduleDashboardLoad();
 });
 
-elements.monthFilter.addEventListener("change", () => {
-  state.month = elements.monthFilter.value;
-  scheduleDashboardLoad();
-});
+elements.yearFilter.addEventListener("change", updateOperatingMonthFromFilters);
+elements.monthFilter.addEventListener("change", updateOperatingMonthFromFilters);
 
 elements.refreshButton.addEventListener("click", loadDashboard);
 
@@ -1113,6 +1625,13 @@ document.querySelectorAll(".prompt-chip").forEach((button) => {
     resizeChatInput();
     elements.chatForm.requestSubmit();
   });
+});
+
+elements.chatSqlApprovals.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-sql-decision]");
+  if (!button) return;
+  const card = button.closest(".sql-approval-card");
+  submitSqlApproval(card, String(button.dataset.sqlDecision || ""));
 });
 
 elements.chatCopyButton.addEventListener("click", async () => {
