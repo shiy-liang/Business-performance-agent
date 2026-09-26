@@ -284,14 +284,15 @@ async function syncCustomerReviews() {
   elements.reviewSyncButton.disabled = true;
   elements.reviewSyncStatus.hidden = false;
   elements.reviewSyncStatus.className = "upload-status loading";
-  elements.reviewSyncStatus.textContent = "Synchronizing customer reviews and support tickets…";
+  elements.reviewSyncStatus.textContent = "Synchronizing customer reviews, support tickets and campaigns…";
 
   try {
     const data = await fetchJson("/api/knowledge/reviews/sync", { method: "POST" });
     elements.reviewSyncStatus.className = "upload-status success";
     elements.reviewSyncStatus.textContent =
-      `Synced ${data.reviews_synced_count} customer reviews and ` +
-      `${data.tickets_synced_count} support tickets into the knowledge base`;
+      `Synced ${data.reviews_synced_count} customer reviews, ` +
+      `${data.tickets_synced_count} support tickets and ` +
+      `${data.campaigns_synced_count} campaigns into the knowledge base`;
   } catch (error) {
     elements.reviewSyncStatus.className = "upload-status error";
     elements.reviewSyncStatus.textContent = `Synchronization failed: ${error.message}`;
