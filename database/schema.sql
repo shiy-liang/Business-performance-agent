@@ -31,7 +31,8 @@ CREATE TABLE IF NOT EXISTS campaigns (
   clicks BIGINT NOT NULL CHECK (clicks >= 0 AND clicks <= impressions),
   conversions BIGINT NOT NULL CHECK (conversions >= 0 AND conversions <= clicks),
   conversion_rate NUMERIC(8,2) NOT NULL CHECK (conversion_rate BETWEEN 0 AND 100),
-  roi NUMERIC(14,2) NOT NULL, CHECK (end_date >= start_date)
+  roi NUMERIC(14,2) NOT NULL, embedding extensions.vector,
+  CHECK (end_date >= start_date)
 );
 CREATE TABLE IF NOT EXISTS transactions (
   transaction_id TEXT PRIMARY KEY,
@@ -230,6 +231,8 @@ CREATE INDEX IF NOT EXISTS idx_run_events_run_created
 CREATE INDEX IF NOT EXISTS idx_customer_reviews_embedding_hnsw ON customer_reviews
   USING hnsw (embedding extensions.vector_cosine_ops);
 CREATE INDEX IF NOT EXISTS idx_products_embedding_hnsw ON products
+  USING hnsw (embedding extensions.vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS idx_campaigns_embedding_hnsw ON campaigns
   USING hnsw (embedding extensions.vector_cosine_ops);
 CREATE INDEX IF NOT EXISTS idx_documents_embedding_hnsw ON business_documents
   USING hnsw (embedding extensions.vector_cosine_ops);

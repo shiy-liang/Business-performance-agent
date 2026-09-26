@@ -133,8 +133,10 @@ async def run_specialist_agent(
             "sql_runtime_state": {
                 "attempts": 0,
                 "in_flight": False,
-                "succeeded": False,
                 "approval_denied": False,
+                "successful_queries": 0,
+                "successful_rows": 0,
+                "successful_result_chars": 0,
             },
             "review_runtime_state": {
                 "semantic_calls": 0,

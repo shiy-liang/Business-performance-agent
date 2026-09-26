@@ -34,6 +34,13 @@ class SupportTicketSyncResult:
     embedding_model: str
 
 
+@dataclass(frozen=True, slots=True)
+class CampaignSyncResult:
+    synced_count: int
+    embedding_dimensions: int | None
+    embedding_model: str
+
+
 def _review_embedding_text(review: Mapping[str, Any]) -> str:
     title = review.get("review_title") or "Not provided"
     text = review.get("review_text") or "Not provided"
@@ -293,10 +300,128 @@ async def sync_support_ticket_embeddings(
     )
 
 
+def _campaign_embedding_text(campaign: Mapping[str, Any]) -> str:
+    return "\n".join(
+        (
+            f"campaign_name: {campaign['campaign_name']}",
+            f"campaign_type: {campaign['campaign_type']}",
+        )
+    )
+
+
+def _fetch_pending_campaigns(connection: psycopg.Connection) -> list[dict[str, Any]]:
+    with connection.cursor(row_factory=dict_row) as cursor:
+        cursor.execute(
+            """
+            SELECT campaign_id, campaign_name, campaign_type,
+                   start_date, end_date, target_segment, budget,
+                   impressions, clicks, conversions, conversion_rate, roi
+            FROM public.campaigns
+            WHERE embedding IS NULL
+            ORDER BY campaign_id
+            FOR UPDATE
+            """
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def _store_campaign_vectors(
+    connection: psycopg.Connection,
+    campaigns: list[dict[str, Any]],
+    vectors: list[list[float]],
+) -> int:
+    register_vector(connection)
+    rows = [
+        (Vector(vector), campaign["campaign_id"])
+        for campaign, vector in zip(campaigns, vectors, strict=True)
+    ]
+    with connection.cursor() as cursor:
+        cursor.executemany(
+            """
+            UPDATE public.campaigns
+            SET embedding = %s
+            WHERE campaign_id = %s AND embedding IS NULL
+            """,
+            rows,
+        )
+        updated_count = cursor.rowcount
+    if updated_count != len(rows):
+        raise StructuredVectorStoreError(
+            "The updated campaign count does not match the embedding count"
+        )
+    return updated_count
+
+
+async def sync_campaign_embeddings(
+    connection: psycopg.Connection,
+    *,
+    embedding_client: Any | None = None,
+) -> CampaignSyncResult:
+    """Embed every campaign whose embedding column is currently null."""
+
+    started_at = perf_counter()
+    active_embedding_model = embedding_client or embedding_model
+    model_name = str(active_embedding_model.settings.model)
+    logger.info(
+        "campaign_sync.started",
+        component="structured_vector_store",
+        embedding_model=model_name,
+    )
+
+    try:
+        campaigns = await asyncio.to_thread(_fetch_pending_campaigns, connection)
+        if not campaigns:
+            dimensions = getattr(active_embedding_model.settings, "dimensions", None)
+            synced_count = 0
+        else:
+            texts = [_campaign_embedding_text(campaign) for campaign in campaigns]
+            vectors = await active_embedding_model.aembed_documents(texts)
+            if len(vectors) != len(campaigns):
+                raise StructuredVectorStoreError(
+                    "The campaign embedding count does not match the campaign count"
+                )
+            expected_dimensions = getattr(
+                active_embedding_model.settings,
+                "dimensions",
+                None,
+            )
+            dimensions = _vector_dimensions(vectors, expected_dimensions)
+            synced_count = await asyncio.to_thread(
+                _store_campaign_vectors,
+                connection,
+                campaigns,
+                vectors,
+            )
+    except Exception as error:
+        logger.exception(
+            "campaign_sync.failed",
+            error,
+            component="structured_vector_store",
+            embedding_model=model_name,
+        )
+        raise
+
+    logger.info(
+        "campaign_sync.completed",
+        component="structured_vector_store",
+        synced_count=synced_count,
+        embedding_dimensions=dimensions,
+        embedding_model=model_name,
+        duration_ms=round((perf_counter() - started_at) * 1000, 2),
+    )
+    return CampaignSyncResult(
+        synced_count=synced_count,
+        embedding_dimensions=dimensions,
+        embedding_model=model_name,
+    )
+
+
 __all__ = [
+    "CampaignSyncResult",
     "CustomerReviewSyncResult",
     "StructuredVectorStoreError",
     "SupportTicketSyncResult",
+    "sync_campaign_embeddings",
     "sync_customer_review_embeddings",
     "sync_support_ticket_embeddings",
 ]
