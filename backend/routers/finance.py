@@ -122,6 +122,7 @@ months AS (
 sales AS (
     SELECT
         DATE_TRUNC('month', t.transaction_date)::date AS month_start,
+        COUNT(DISTINCT t.transaction_id) AS transaction_count,
         SUM(t.net_sales) AS net_sales,
         COALESCE(
             SUM(t.net_sales) FILTER (WHERE p.unit_cost IS NOT NULL),
@@ -160,7 +161,9 @@ SELECT
         - COALESCE(r.completed_refunds, 0) AS refund_adjusted_revenue,
     COALESCE(s.costed_net_sales, 0)
         - COALESCE(r.costed_completed_refunds, 0)
-        - COALESCE(s.cost_of_goods_sold, 0) AS estimated_gross_profit
+        - COALESCE(s.cost_of_goods_sold, 0) AS estimated_gross_profit,
+    COALESCE(s.transaction_count, 0) AS transaction_count,
+    COALESCE(r.completed_refunds, 0) AS completed_refunds
 FROM months m
 LEFT JOIN sales s USING (month_start)
 LEFT JOIN refunds r USING (month_start)
@@ -416,6 +419,8 @@ def analyze_prepared_financial_pulse(
                         "estimated_gross_profit": _money(
                             row["estimated_gross_profit"]
                         ),
+                        "transaction_count": int(row["transaction_count"] or 0),
+                        "completed_refunds": _money(row["completed_refunds"]),
                     }
                     for row in cursor.fetchall()
                 ]
