@@ -41,6 +41,7 @@ const elements = {
   chatForm: document.querySelector("#chat-form"),
   chatHistory: document.querySelector("#chat-history"),
   newChatButton: document.querySelector("#new-chat-button"),
+  newChatDialog: document.querySelector("#new-chat-dialog"),
   chatInput: document.querySelector("#chat-input"),
   chatResponse: document.querySelector("#chat-response"),
   chatQuestion: document.querySelector("#chat-question"),
@@ -289,14 +290,15 @@ async function syncCustomerReviews() {
   elements.reviewSyncButton.disabled = true;
   elements.reviewSyncStatus.hidden = false;
   elements.reviewSyncStatus.className = "upload-status loading";
-  elements.reviewSyncStatus.textContent = "Synchronizing customer reviews and support tickets…";
+  elements.reviewSyncStatus.textContent = "Synchronizing customer reviews, support tickets and campaigns…";
 
   try {
     const data = await fetchJson("/api/knowledge/reviews/sync", { method: "POST" });
     elements.reviewSyncStatus.className = "upload-status success";
     elements.reviewSyncStatus.textContent =
-      `Synced ${data.reviews_synced_count} customer reviews and ` +
-      `${data.tickets_synced_count} support tickets into the knowledge base`;
+      `Synced ${data.reviews_synced_count} customer reviews, ` +
+      `${data.tickets_synced_count} support tickets and ` +
+      `${data.campaigns_synced_count} campaigns into the knowledge base`;
   } catch (error) {
     elements.reviewSyncStatus.className = "upload-status error";
     elements.reviewSyncStatus.textContent = `Synchronization failed: ${error.message}`;
@@ -405,6 +407,12 @@ async function startNewChat() {
   } finally {
     elements.newChatButton.disabled = false;
   }
+}
+
+function confirmNewChat() {
+  if (elements.newChatButton.disabled || elements.newChatDialog.open) return;
+  elements.newChatDialog.returnValue = "";
+  elements.newChatDialog.showModal();
 }
 
 function renderChatAnswer() {
@@ -818,6 +826,17 @@ function renderSqlApproval(data) {
   decisionStatus.className = "sql-approval-decision-status";
   decisionStatus.setAttribute("role", "status");
 
+  const body = document.createElement("div");
+  body.className = "sql-approval-body";
+  body.append(
+    warning,
+    purpose,
+    sqlLabel,
+    pre,
+    parameterBlock,
+    decisionStatus,
+  );
+
   const actions = document.createElement("div");
   actions.className = "sql-approval-actions";
   const cancel = document.createElement("button");
@@ -834,12 +853,7 @@ function renderSqlApproval(data) {
 
   card.append(
     heading,
-    warning,
-    purpose,
-    sqlLabel,
-    pre,
-    parameterBlock,
-    decisionStatus,
+    body,
     actions,
   );
   elements.chatSqlApprovals.append(card);
@@ -1738,7 +1752,10 @@ elements.knowledgeFileList.addEventListener("click", (event) => {
 });
 
 elements.reviewSyncButton.addEventListener("click", syncCustomerReviews);
-elements.newChatButton.addEventListener("click", startNewChat);
+elements.newChatButton.addEventListener("click", confirmNewChat);
+elements.newChatDialog.addEventListener("close", () => {
+  if (elements.newChatDialog.returnValue === "confirm") startNewChat();
+});
 
 elements.chatInput.addEventListener("input", resizeChatInput);
 elements.chatInput.addEventListener("keydown", (event) => {

@@ -277,7 +277,10 @@ def _blocked_payload(tool_name: str, error_type: str, maximum: int) -> str:
     if error_type == "concurrent_query_blocked":
         error = "Another customer-review retrieval is already running; parallel calls are not allowed."
     elif error_type == "attempt_limit":
-        error = f"The maximum of {maximum} calls for this customer-review retrieval step was reached."
+        error = (
+            f"The maximum of {maximum} calls for this customer-review retrieval "
+            "step in the current subtask was reached."
+        )
     elif error_type == "comparison_not_authorized":
         error = "Additional products cannot be queried because the original request did not ask for a comparison."
     else:

@@ -51,6 +51,10 @@ re-split, add, remove, merge, or reroute its `sub_tasks`. You may use up to
      trustworthy result.
    Never claim or begin another subtask before recording the current terminal
    status. Status messages must be short public progress summaries, not reasoning.
+   Recording a terminal status resets every tool-call limit, retry counter,
+   product-resolution scope, and retrieval scope. The next subtask therefore
+   starts with fresh constraints and must not inherit an exhausted allowance or
+   resolved product from the previous subtask.
 5. Dedicated skills and `sql_query` may be loaded together only because they own
    different subtasks. Use generic SQL solely for subtasks assigned to
    `sql_query`; never use it to answer, verify, enrich, or retry a dedicated-skill

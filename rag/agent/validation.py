@@ -24,6 +24,7 @@ FINANCE_METRIC_TOOL_NAMES = frozenset(
     {"calculate_net_sales", "calculate_gross_profit", "calculate_gross_margin"}
 )
 PRODUCT_RESOLUTION_TOOL_NAMES = frozenset({"find_real_name"})
+CAMPAIGN_RESOLUTION_TOOL_NAMES = frozenset({"find_real_campaign_name"})
 SUBTASK_STATUS_TOOL_NAMES = frozenset({"update_sub_task_status"})
 GENERIC_OPERATIONS_TOOL_NAMES = frozenset(
     {
@@ -93,6 +94,7 @@ def validate_specialist_evidence(
         and payload.get("tool") not in TICKET_PROBLEM_TOOL_NAMES
         and payload.get("tool") not in FINANCE_METRIC_TOOL_NAMES
         and payload.get("tool") not in PRODUCT_RESOLUTION_TOOL_NAMES
+        and payload.get("tool") not in CAMPAIGN_RESOLUTION_TOOL_NAMES
         and payload.get("tool") not in SUBTASK_STATUS_TOOL_NAMES
         and payload.get("error_type")
         not in {
@@ -134,6 +136,16 @@ def validate_specialist_evidence(
             for payload in tool_payloads
             if payload.get("tool") in PRODUCT_RESOLUTION_TOOL_NAMES
             and payload.get("error_type") == "canonical_product_not_found"
+            and payload.get("terminal") is True
+        ),
+        None,
+    )
+    terminal_campaign_resolution = next(
+        (
+            payload
+            for payload in tool_payloads
+            if payload.get("tool") in CAMPAIGN_RESOLUTION_TOOL_NAMES
+            and payload.get("error_type") == "canonical_campaign_not_found"
             and payload.get("terminal") is True
         ),
         None,
@@ -316,6 +328,7 @@ def validate_specialist_evidence(
         and not successful_review_retrievals
         and not successful_ticket_problem_retrievals
         and terminal_product_resolution is None
+        and terminal_campaign_resolution is None
     ):
         errors.append("No successful specialist evidence was returned.")
 
@@ -405,6 +418,7 @@ def validate_specialist_evidence(
         "successful_review_tool_count": len(successful_review_retrievals),
         "successful_ticket_tool_count": len(successful_ticket_problem_retrievals),
         "terminal_product_resolution": terminal_product_resolution is not None,
+        "terminal_campaign_resolution": terminal_campaign_resolution is not None,
         "skill_count": len(skill_names),
         "skills": sorted(skill_names),
         "assigned_subtask_count": len(assigned),
