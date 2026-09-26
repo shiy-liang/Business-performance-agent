@@ -669,6 +669,19 @@ h1 {
   grid-template-columns: minmax(0, 1fr);
 }
 
+.assistant-panel .chat-trace[open] {
+  height: auto;
+}
+
+.assistant-panel .trace-content {
+  height: auto;
+  max-height: min(240px, 40vh);
+}
+
+.assistant-panel .source-list {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .assistant-panel .chat-form {
   flex: 0 0 auto;
 }

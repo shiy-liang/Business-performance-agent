@@ -19,6 +19,7 @@ RESETTABLE_CONSTRAINT_STATES = (
     "ticket_problem_runtime_state",
     "finance_metric_runtime_state",
     "product_resolution_runtime_state",
+    "campaign_resolution_runtime_state",
 )
 
 
@@ -129,6 +130,12 @@ def _reset_specialist_constraints(config: RunnableConfig) -> list[str]:
         "in_flight": False,
         "resolved": False,
         "accepted_product_names": [],
+    }
+    configurable["campaign_resolution_runtime_state"] = {
+        "attempts": 0,
+        "in_flight": False,
+        "resolved": False,
+        "accepted_campaign_names": [],
     }
     return list(RESETTABLE_CONSTRAINT_STATES)
 
