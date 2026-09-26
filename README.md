@@ -125,7 +125,7 @@ python database/update_expenses.py
 | `GET` | `/api/knowledge/files` | List registered knowledge-base source files |
 | `GET` | `/api/knowledge/files/{file_id}/download` | Download a managed source file |
 | `DELETE` | `/api/knowledge/files/{file_id}` | Delete a source file, its record, and its vector chunks |
-| `POST` | `/api/knowledge/reviews/sync` | Embed customer reviews whose embedding value is null |
+| `POST` | `/api/knowledge/reviews/sync` | Embed customer reviews and support tickets whose embedding value is null |
 
 The month-based endpoints accept `month=YYYY-MM`. Finance, inventory and product
 sales also accept `store_id`; campaign and support-ticket source data do not have
@@ -141,7 +141,8 @@ persisted and disappear whenever the FastAPI process restarts.
 
 `database/schema.sql` creates the PostgreSQL schema and pgvector extension.
 Uploaded file chunks are indexed in `unstructured_knowledge_chunks`, while the
-review sync endpoint populates row-level embeddings in `customer_reviews`.
+review sync endpoint populates row-level embeddings in `customer_reviews` and
+`support_tickets`.
 
 Product costs, inventory, expenses, returns/refunds and campaign attribution are
 synthetic prototype data. Financial metrics that depend on them are labelled as
@@ -172,9 +173,9 @@ failure rolls them back and removes the newly stored file.
 
 The chat panel is connected to a three-agent LangGraph runtime under `rag/agent/`.
 The user-facing Supervisor routes structured questions to Finance or Operations.
-High-frequency product-review questions use a dedicated deterministic retrieval
-workflow, while other specialist questions use governed PostgreSQL generation as
-a long-tail fallback. All models use `langchain-openai` with the OpenAI Responses API. Tool permissions are
+High-frequency review, support-ticket, and financial calculations use dedicated
+deterministic workflows, while other specialist questions use governed PostgreSQL
+generation as a long-tail fallback. All models use `langchain-openai` with the OpenAI Responses API. Tool permissions are
 enforced centrally in `rag/agent/tools/registry.py`, and safe public progress is
 streamed through `/api/chat/stream`.
 
@@ -187,8 +188,22 @@ The current tools are:
 - `search_knowledge`: semantic pgvector retrieval with file and chunk citations.
 - `delegate_finance`: runs the Finance specialist graph.
 - `delegate_operations`: runs the Operations specialist graph.
+- `find_real_name`: shared by Finance and Operations; maps a fuzzy or
+  cross-language product phrase to ranked exact `public.products.product_name`
+  values using a fixed Top-5 pgvector query, a 0.70 minimum similarity, and a
+  0.20 absolute adjacent-score gap cutoff.
 - `search_finance_schema`, `resolve_finance_entity`, `execute_finance_sql`:
   Finance-only schema, entity, and read-only SQL capabilities.
+- `load_finance_skills`: loads only the Finance workflow bodies selected from the
+  compact routing catalog; full Finance skills are not placed in the initial
+  specialist prompt.
+- `calculate_net_sales`: Finance-only fixed query over `transactions` and
+  completed `returns_refunds`, returning sales after discounts and completed
+  refunds for one optional date/entity scope.
+- `calculate_gross_profit`, `calculate_gross_margin`: Finance-only fixed queries
+  over `transactions`, completed `returns_refunds`, and `products`, returning
+  cost-covered recognized revenue, COGS, gross profit, gross-margin percentage,
+  and cost coverage. They calculate recorded-data metrics and do not forecast.
 - `search_operations_schema`, `resolve_operations_entity`,
   `execute_operations_sql`: Operations-only equivalents.
 - `search_customer_reviews`: Operations-only semantic review retrieval with date,
@@ -198,9 +213,26 @@ The current tools are:
 - `find_other_comment_product`, `find_other_comment_category`: Operations-only
   fixed-query expansion tools. They exclude reviews already returned in the run,
   return at most ten rows each, and share a two-call limit.
+- `check_concrete_problem`: Operations-only semantic retrieval over concrete
+  descriptions in `support_tickets.notes`, with optional submission-date,
+  category, priority, and resolution-status filters. It is limited to one call
+  per Operations run and returns at most ten ticket examples.
+- `check_purchase_rate`: Operations-only fixed-query tool for the ratio of
+  `purchase` events to combined `checkout`, `wishlist_add`, and `add_to_cart`
+  events for one canonical product name.
+- `check_like_rate`: Operations-only fixed-query tool for the ratio of combined
+  `wishlist_add` and `add_to_cart` events to `product_view` events for one
+  canonical product name.
+- `check_less_like`: Operations-only fixed-view Tool returning up to ten products
+  with their precomputed `like_rate`, ordered ascending.
+- `check_less_purchase`: shared by Operations and Finance; returns up to ten
+  products with their precomputed `purchase_rate`, ordered ascending.
+- `check_most_interact`: Operations-only fixed-query Tool returning up to ten
+  products with total duration, average duration, interaction count, and ranking
+  fields, with a minimum sample of 20 interaction rows per product.
 
 Finance and Operations share a reusable specialist graph but have independent
-prompts, skills, table permissions, and tool instances. Their handlers register
+prompts, progressively loaded skills, table permissions, and tool instances. Their handlers register
 with `specialist_dispatcher` when the Supervisor graph is built. Prompts and skills
 are Markdown files under `rag/agent/prompts/` and `rag/agent/skills/` and are
 injected at runtime.
@@ -212,6 +244,20 @@ system schemas, then executes inside a read-only transaction with a timeout and
 result cap. Configure a database role with SELECT-only grants through
 `AGENT_READONLY_DATABASE_URL`; `DATABASE_URL` is a development fallback.
 
+After local validation and before any database access, every model-generated SQL
+query pauses for explicit user approval. The chat UI shows the complete
+parameterized SQL and its bound parameter values with **Execute** and **Cancel**
+actions. Execute resumes the same Agent run; Cancel returns a `user_rejected`
+result to the specialist and Supervisor without opening a database connection.
+Pending approvals expire after `AGENT_SQL_APPROVAL_TIMEOUT_SECONDS` (15 minutes by
+default) and fail closed. Dedicated fixed-query and semantic-retrieval skills do
+not use this generic-SQL approval step.
+
+The chat composer includes an **Automatically execute SQL** checkbox, which is off
+by default. When enabled for a request, validated model-generated read-only SQL
+runs without creating an approval prompt; all table allow-lists, timeouts, row
+limits, and other SQL safety controls remain in force.
+
 Every SQL attempt writes a structured `sql.generated` log event containing the
 Agent-generated query text but not its parameter values. Local validation failures
 retain `error_type=validation_error` and add a stable `validation_error_type` plus
@@ -222,9 +268,14 @@ Every specialist result passes a deterministic evidence check before the
 Supervisor may use it. Generic workflows require a successful domain-matching SQL
 result. The dedicated product-review workflow instead requires a successful
 `search_customer_reviews` call, forbids mixing in generic SQL tools, and validates
-the returned review citations. Validation outcomes are emitted as public `validation` events.
-`AGENT_KNOWLEDGE_MIN_SIMILARITY` and `AGENT_REVIEW_MIN_SIMILARITY` suppress weak
-vector matches.
+the returned review citations. The dedicated support-ticket problem workflow
+accepts `check_concrete_problem` evidence and validates `[ticket:...]` citations.
+Finance net-sales, gross-profit, and gross-margin workflows use fixed
+parameterized queries and validate their `[db:finance:...]` evidence without
+entering generated SQL approval.
+Validation outcomes are emitted as public `validation` events.
+`AGENT_KNOWLEDGE_MIN_SIMILARITY`, `AGENT_REVIEW_MIN_SIMILARITY`, and
+`AGENT_TICKET_MIN_SIMILARITY` suppress weak vector matches.
 
 Specialists return compact internal evidence summaries. Only the Supervisor emits
 the user-facing answer; Supervisor routing output is not streamed as answer text.

@@ -18,16 +18,23 @@ from rag.agent.specialists.graph import (
 )
 from rag.agent.tools.registry import ToolRegistry, default_tool_registry
 from rag.agent.validation import validate_specialist_evidence
+from rag.agent.workflows import load_agent_runtime_config
 
 
 def _collect_tool_payloads(messages: list[Any]) -> list[dict[str, Any]]:
     payloads: list[dict[str, Any]] = []
     for message in messages:
-        if not isinstance(message, ToolMessage) or not isinstance(message.content, str):
+        if not isinstance(message, ToolMessage):
             continue
-        try:
-            payload = json.loads(message.content)
-        except json.JSONDecodeError:
+        artifact = getattr(message, "artifact", None)
+        if isinstance(artifact, dict):
+            payload = dict(artifact)
+        elif isinstance(message.content, str):
+            try:
+                payload = json.loads(message.content)
+            except json.JSONDecodeError:
+                continue
+        else:
             continue
         if isinstance(payload, dict):
             tool_name = getattr(message, "name", None)
@@ -76,9 +83,10 @@ async def run_specialist_agent(
         active_graph = get_default_specialist_graph(agent_name)
     else:
         active_graph = build_specialist_graph(agent_name, tool_registry=registry)
+    runtime_config = load_agent_runtime_config()
     child_config: RunnableConfig = dict(config or {})
     child_config["run_name"] = f"{agent_name}-agent"
-    child_config["recursion_limit"] = 16
+    child_config["recursion_limit"] = runtime_config.specialist.recursion_limit
     child_config["tags"] = [agent_name, "specialist"]
     configurable = dict(child_config.get("configurable") or {})
     configurable.update(
@@ -88,6 +96,7 @@ async def run_specialist_agent(
                 "attempts": 0,
                 "in_flight": False,
                 "succeeded": False,
+                "approval_denied": False,
             },
             "review_runtime_state": {
                 "semantic_calls": 0,
@@ -98,6 +107,25 @@ async def run_specialist_agent(
                 "primary_product_name": None,
                 "primary_product_category": None,
                 "comparison_mode": False,
+            },
+            "ticket_problem_runtime_state": {
+                "calls": 0,
+                "in_flight": False,
+            },
+            "finance_metric_runtime_state": {
+                "calls": {},
+                "in_flight": [],
+            },
+            "product_resolution_runtime_state": {
+                "attempts": 0,
+                "in_flight": False,
+                "resolved": False,
+                "accepted_product_names": [],
+            },
+            "workflow_runtime_state": {
+                "selected_skills": [],
+                "loaded": False,
+                "generic_workflow_started": False,
             },
         }
     )
@@ -124,6 +152,14 @@ async def run_specialist_agent(
     answer = _final_answer(messages)
     tool_payloads = _collect_tool_payloads(messages)
     sources = _collect_sources(tool_payloads)
+    cancelled_query = next(
+        (
+            payload
+            for payload in tool_payloads
+            if payload.get("error_type") in {"user_rejected", "approval_timeout"}
+        ),
+        None,
+    )
     validation = validate_specialist_evidence(
         agent_name,
         answer,
@@ -141,11 +177,24 @@ async def run_specialist_agent(
         validation_error_count=len(validation["errors"]),
     )
     return {
-        "status": "completed" if validation["valid"] else "invalid_evidence",
+        "status": (
+            "query_cancelled"
+            if cancelled_query is not None
+            else "completed" if validation["valid"] else "invalid_evidence"
+        ),
         "agent": agent_name,
         "answer": answer,
         "sources": sources,
         "validation": validation,
+        "query_cancellation": (
+            {
+                "error_type": cancelled_query.get("error_type"),
+                "message": cancelled_query.get("error"),
+                "executed": False,
+            }
+            if cancelled_query is not None
+            else None
+        ),
         "duration_ms": duration_ms,
     }
 

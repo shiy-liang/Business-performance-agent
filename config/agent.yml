@@ -1,0 +1,17 @@
+runtime:
+  supervisor:
+    # Maximum LangGraph steps for the top-level supervisor graph.
+    recursion_limit: 10
+  specialist:
+    # Maximum LangGraph steps for each delegated specialist graph.
+    recursion_limit: 16
+
+finance:
+  # Maximum number of dedicated skill workflows that one delegated task may load.
+  # The generic sql_query fallback is mutually exclusive with dedicated workflows.
+  max_workflows_per_task: 3
+
+operations:
+  # Maximum number of dedicated skill workflows that one delegated task may load.
+  # The generic sql_query fallback is mutually exclusive with dedicated workflows.
+  max_workflows_per_task: 3

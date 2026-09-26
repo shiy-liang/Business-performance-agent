@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS products (
   cost_ratio NUMERIC(6,4) NOT NULL CHECK (cost_ratio BETWEEN 0 AND 1),
   unit_cost NUMERIC(14,2) NOT NULL CHECK (unit_cost >= 0),
   is_cost_synthetic BOOLEAN NOT NULL DEFAULT TRUE,
+  embedding extensions.vector,
   CHECK (unit_cost <= average_selling_price),
   UNIQUE (product_name, product_category)
 );
@@ -59,7 +60,8 @@ CREATE TABLE IF NOT EXISTS support_tickets (
   resolution_date DATE, resolution_status TEXT NOT NULL,
   resolution_time_hours NUMERIC(12,2) CHECK (resolution_time_hours >= 0),
   customer_satisfaction_score INTEGER CHECK (customer_satisfaction_score BETWEEN 1 AND 5),
-  notes TEXT, CHECK (resolution_date IS NULL OR resolution_date >= submission_date),
+  notes TEXT, embedding extensions.vector,
+  CHECK (resolution_date IS NULL OR resolution_date >= submission_date),
   CHECK (resolution_status <> 'resolved' OR resolution_date IS NOT NULL)
 );
 CREATE TABLE IF NOT EXISTS customer_reviews (
@@ -219,11 +221,15 @@ CREATE INDEX IF NOT EXISTS idx_transactions_product ON transactions(product_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_store ON transactions(store_id);
 CREATE INDEX IF NOT EXISTS idx_interactions_customer ON interactions(customer_id);
 CREATE INDEX IF NOT EXISTS idx_support_customer ON support_tickets(customer_id);
+CREATE INDEX IF NOT EXISTS idx_support_tickets_embedding_hnsw ON support_tickets
+  USING hnsw (embedding extensions.vector_cosine_ops);
 CREATE INDEX IF NOT EXISTS idx_reviews_customer ON customer_reviews(customer_id);
 CREATE INDEX IF NOT EXISTS idx_run_events_run_created
   ON run_events(run_id, created_at, event_id);
 
 CREATE INDEX IF NOT EXISTS idx_customer_reviews_embedding_hnsw ON customer_reviews
+  USING hnsw (embedding extensions.vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS idx_products_embedding_hnsw ON products
   USING hnsw (embedding extensions.vector_cosine_ops);
 CREATE INDEX IF NOT EXISTS idx_documents_embedding_hnsw ON business_documents
   USING hnsw (embedding extensions.vector_cosine_ops);

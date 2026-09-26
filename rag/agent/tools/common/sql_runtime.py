@@ -15,6 +15,7 @@ from typing import Any, Literal
 import psycopg
 import sqlglot
 from dotenv import load_dotenv
+from langchain_core.callbacks.manager import adispatch_custom_event
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, tool
 from psycopg import sql as psycopg_sql
@@ -24,8 +25,10 @@ from sqlglot import exp
 
 from model.config import PROJECT_ROOT
 from observability import logger
+from rag.agent.sql_approval import sql_approval_manager
 from rag.agent.tools.common.schema_catalog import (
     AGENT_TABLES,
+    COLUMN_DETAILS,
     ENTITY_FIELDS,
     PROHIBITED_COLUMNS,
     SCHEMA_CATALOG,
@@ -67,7 +70,7 @@ def sql_max_result_chars() -> int:
 
 
 def sql_max_attempts() -> int:
-    return _positive_env("AGENT_SQL_MAX_ATTEMPTS", DEFAULT_MAX_ATTEMPTS, 5)
+    return _positive_env("AGENT_SQL_MAX_ATTEMPTS", DEFAULT_MAX_ATTEMPTS, 3)
 
 
 class SchemaSearchInput(BaseModel):
@@ -91,6 +94,14 @@ class EntityResolutionInput(BaseModel):
         description="The user's entity phrase or a careful translated candidate.",
     )
     limit: int = Field(default=8, ge=1, le=10)
+
+
+class ColumnDetailInput(BaseModel):
+    table_name: str = Field(
+        min_length=1,
+        max_length=63,
+        description="One authorized table name returned by the schema search tool.",
+    )
 
 
 SqlParameter = str | int | float | bool | None
@@ -403,7 +414,7 @@ def search_schema_catalog(
         "supported_entity_types": sorted(
             entity_type
             for entity_type, (_, _, agents) in ENTITY_FIELDS.items()
-            if agent_name in agents
+            if agent_name in agents and entity_type != "product"
         ),
         "rules": [
             "Use only returned table and column names.",
@@ -412,6 +423,72 @@ def search_schema_catalog(
             "Fields marked synthetic or estimated must be labeled in the answer.",
         ],
     }
+
+
+@tool(args_schema=ColumnDetailInput)
+async def get_columns_detail(
+    table_name: str,
+    config: RunnableConfig,
+) -> str:
+    """Get one authorized table's column types, meanings, examples, and categories.
+
+    Call only when a column's type, meaning, or allowed values are unclear before
+    generating SQL; do not call it for every table.
+    """
+
+    configurable = config.get("configurable")
+    agent_name = (
+        configurable.get("agent_name")
+        if isinstance(configurable, dict)
+        else None
+    )
+    normalized_table = table_name.strip().lower()
+    if agent_name not in AGENT_TABLES:
+        return json.dumps(
+            {
+                "success": False,
+                "tool": "get_columns_detail",
+                "error_type": "missing_agent_scope",
+                "error": "The current agent scope is unavailable.",
+            },
+            ensure_ascii=False,
+        )
+    if normalized_table not in AGENT_TABLES[agent_name]:
+        return json.dumps(
+            {
+                "success": False,
+                "agent": agent_name,
+                "tool": "get_columns_detail",
+                "error_type": "unauthorized_table",
+                "error": f"{agent_name} is not authorized to inspect: {normalized_table}",
+                "columns": {},
+            },
+            ensure_ascii=False,
+        )
+    details = COLUMN_DETAILS.get(normalized_table)
+    if details is None:
+        return json.dumps(
+            {
+                "success": False,
+                "agent": agent_name,
+                "tool": "get_columns_detail",
+                "error_type": "column_details_unavailable",
+                "error": f"No curated column details are available for: {normalized_table}",
+                "columns": {},
+            },
+            ensure_ascii=False,
+        )
+    return json.dumps(
+        {
+            "success": True,
+            "agent": agent_name,
+            "tool": "get_columns_detail",
+            "table_name": normalized_table,
+            "columns": details,
+        },
+        ensure_ascii=False,
+        default=str,
+    )
 
 
 def readonly_database_url() -> str:
@@ -492,9 +569,10 @@ def _execute_sql_sync(
     query: str,
     parameters: dict[str, SqlParameter],
     purpose: str,
+    maximum_rows: int,
+    maximum_result_chars: int,
 ) -> dict[str, Any]:
     validated_sql, tables = validate_readonly_sql(query, parameters, agent_name)
-    maximum_rows = sql_max_rows()
     executable = (
         f"SELECT * FROM ({validated_sql}) AS agent_query "
         f"LIMIT {maximum_rows + 1}"
@@ -521,7 +599,7 @@ def _execute_sql_sync(
     for raw_row in raw_rows[:maximum_rows]:
         row = _json_value(dict(raw_row))
         row_chars = len(json.dumps(row, ensure_ascii=False, default=str))
-        if rows and result_chars + row_chars > sql_max_result_chars():
+        if result_chars + row_chars > maximum_result_chars:
             truncated = True
             break
         rows.append(row)
@@ -542,6 +620,7 @@ def _execute_sql_sync(
         "columns": columns,
         "rows": rows,
         "row_count": len(rows),
+        "result_chars": result_chars,
         "truncated": truncated,
         "fetched_row_count": min(len(raw_rows), maximum_rows),
         "error": None,
@@ -560,7 +639,13 @@ def _sql_runtime_state(config: RunnableConfig) -> dict[str, Any]:
         config["configurable"] = configurable
     runtime_state = configurable.get("sql_runtime_state")
     if not isinstance(runtime_state, dict):
-        runtime_state = {"attempts": 0, "in_flight": False, "succeeded": False}
+        runtime_state = {
+            "attempts": 0,
+            "in_flight": False,
+            "successful_queries": 0,
+            "successful_rows": 0,
+            "successful_result_chars": 0,
+        }
         configurable["sql_runtime_state"] = runtime_state
     return runtime_state
 
@@ -568,8 +653,8 @@ def _sql_runtime_state(config: RunnableConfig) -> dict[str, Any]:
 def _claim_attempt(config: RunnableConfig) -> tuple[str, int]:
     runtime_state = _sql_runtime_state(config)
     attempts = int(runtime_state.get("attempts", 0))
-    if runtime_state.get("succeeded") is True:
-        return "already_succeeded", attempts
+    if runtime_state.get("approval_denied") is True:
+        return "user_rejected", attempts
     if runtime_state.get("in_flight") is True:
         return "concurrent_query_blocked", attempts
     maximum = sql_max_attempts()
@@ -580,23 +665,117 @@ def _claim_attempt(config: RunnableConfig) -> tuple[str, int]:
     return "permitted", attempts + 1
 
 
-def _finish_attempt(config: RunnableConfig, *, success: bool) -> None:
+def _finish_attempt(
+    config: RunnableConfig,
+    *,
+    success: bool,
+    row_count: int = 0,
+    result_chars: int = 0,
+) -> None:
     runtime_state = _sql_runtime_state(config)
     runtime_state["in_flight"] = False
     if success:
-        runtime_state["succeeded"] = True
+        runtime_state["successful_queries"] = int(
+            runtime_state.get("successful_queries", 0)
+        ) + 1
+        runtime_state["successful_rows"] = int(
+            runtime_state.get("successful_rows", 0)
+        ) + row_count
+        runtime_state["successful_result_chars"] = int(
+            runtime_state.get("successful_result_chars", 0)
+        ) + result_chars
 
 
-def build_sql_tools(agent_name: SqlAgentName) -> tuple[BaseTool, BaseTool, BaseTool]:
-    """Build three tools whose domain permission cannot be changed by the model."""
+def _selected_workflows(config: RunnableConfig) -> tuple[bool, tuple[str, ...]]:
+    """Read progressive workflow state without coupling to either loader."""
+
+    configurable = config.get("configurable")
+    if not isinstance(configurable, dict):
+        return False, ()
+    state = configurable.get("workflow_runtime_state")
+    if not isinstance(state, dict):
+        return False, ()
+    loaded = state.get("loaded") is True
+    selected = state.get("selected_skills")
+    if not isinstance(selected, list):
+        return loaded, ()
+    return loaded, tuple(str(name) for name in selected)
+
+
+def _generic_workflow_block(
+    agent_name: SqlAgentName,
+    config: RunnableConfig,
+    tool_name: str,
+) -> str | None:
+    loaded, selected = _selected_workflows(config)
+    dedicated = tuple(name for name in selected if name != "sql_query")
+    if not loaded:
+        return json.dumps(
+            {
+                "success": False,
+                "agent": agent_name,
+                "tool": tool_name,
+                "error_type": "skill_not_loaded",
+                "error": (
+                    f"Load the {agent_name} sql_query skill before using generic "
+                    "SQL tools."
+                ),
+                "retryable": True,
+                "sources": [],
+            },
+            ensure_ascii=False,
+        )
+    if selected == ("sql_query",):
+        configurable = config.get("configurable")
+        if not isinstance(configurable, dict):
+            configurable = {}
+            config["configurable"] = configurable
+        state = configurable.get("workflow_runtime_state")
+        if not isinstance(state, dict):
+            state = {"selected_skills": [], "loaded": False}
+            configurable["workflow_runtime_state"] = state
+        state["generic_workflow_started"] = True
+        return None
+    if not dedicated:
+        return json.dumps(
+            {
+                "success": False,
+                "agent": agent_name,
+                "tool": tool_name,
+                "error_type": "generic_workflow_not_selected",
+                "error": "Select only the sql_query skill for generic SQL tools.",
+                "retryable": False,
+                "sources": [],
+            },
+            ensure_ascii=False,
+        )
+    return json.dumps(
+        {
+            "success": False,
+            "agent": agent_name,
+            "tool": tool_name,
+            "error_type": "dedicated_workflow_selected",
+            "error": (
+                f"Generic {agent_name.title()} SQL tools are disabled because "
+                "dedicated workflows were selected for this task."
+            ),
+            "selected_skills": list(dedicated),
+            "retryable": False,
+            "sources": [],
+        },
+        ensure_ascii=False,
+    )
+
+
+def build_sql_tools(
+    agent_name: SqlAgentName,
+) -> tuple[BaseTool, BaseTool, BaseTool, BaseTool]:
+    """Build schema, detail, entity, and SQL tools with fixed domain permissions."""
 
     schema_description = (
-        "Find operations-authorized business tables, columns, relationships, and "
-        "entity types before generating SQL for a generic structured-data task. "
-        "Do not call this for a dedicated non-SQL skill."
-        if agent_name == "operations"
-        else "Find finance-authorized business tables, columns, relationships, and "
-        "entity types before generating SQL. Call this first for every Finance task."
+        f"Find {agent_name}-authorized business tables, columns, relationships, "
+        "and entity types before generating SQL for a generic structured-data "
+        "task. Do not call this for a dedicated non-SQL skill."
     )
 
     @tool(
@@ -604,9 +783,16 @@ def build_sql_tools(agent_name: SqlAgentName) -> tuple[BaseTool, BaseTool, BaseT
         args_schema=SchemaSearchInput,
         description=schema_description,
     )
-    async def search_schema(query: str, top_k: int = 6) -> str:
+    async def search_schema(
+        query: str,
+        config: RunnableConfig,
+        top_k: int = 6,
+    ) -> str:
         started_at = perf_counter()
         tool_name = f"search_{agent_name}_schema"
+        blocked = _generic_workflow_block(agent_name, config, tool_name)
+        if blocked is not None:
+            return blocked
         logger.tool_event(status="started", tool_name=tool_name, query_length=len(query))
         result = search_schema_catalog(agent_name, query, top_k)
         logger.tool_event(
@@ -629,10 +815,31 @@ def build_sql_tools(agent_name: SqlAgentName) -> tuple[BaseTool, BaseTool, BaseT
     async def resolve_entity(
         entity_type: str,
         user_term: str,
+        config: RunnableConfig,
         limit: int = 8,
     ) -> str:
         started_at = perf_counter()
         tool_name = f"resolve_{agent_name}_entity"
+        blocked = _generic_workflow_block(agent_name, config, tool_name)
+        if blocked is not None:
+            return blocked
+        if entity_type.strip().lower() == "product":
+            return json.dumps(
+                {
+                    "success": False,
+                    "agent": agent_name,
+                    "tool": tool_name,
+                    "error_type": "product_resolver_required",
+                    "error": (
+                        "Product names must be resolved with find_real_name. "
+                        "Do not use the general entity resolver for products."
+                    ),
+                    "retryable": False,
+                    "candidates": [],
+                    "sources": [],
+                },
+                ensure_ascii=False,
+            )
         logger.tool_event(
             status="started",
             tool_name=tool_name,
@@ -684,12 +891,18 @@ def build_sql_tools(agent_name: SqlAgentName) -> tuple[BaseTool, BaseTool, BaseT
     ) -> str:
         started_at = perf_counter()
         tool_name = f"execute_{agent_name}_sql"
+        blocked = _generic_workflow_block(agent_name, config, tool_name)
+        if blocked is not None:
+            return blocked
         claim_status, attempt = _claim_attempt(config)
         if claim_status != "permitted":
-            if claim_status == "already_succeeded":
-                error = "A successful SQL result already exists; use it to complete the analysis."
-            elif claim_status == "concurrent_query_blocked":
+            if claim_status == "concurrent_query_blocked":
                 error = "Another SQL query is already running; parallel SQL calls are not allowed."
+            elif claim_status == "user_rejected":
+                error = (
+                    "The user already rejected generated SQL for this task; "
+                    "no database query may be executed."
+                )
             else:
                 error = f"The maximum of {sql_max_attempts()} SQL attempts was reached."
             return json.dumps(
@@ -704,6 +917,27 @@ def build_sql_tools(agent_name: SqlAgentName) -> tuple[BaseTool, BaseTool, BaseT
                 ensure_ascii=False,
             )
         actual_parameters = parameters or {}
+        runtime_state = _sql_runtime_state(config)
+        remaining_rows = sql_max_rows() - int(runtime_state.get("successful_rows", 0))
+        remaining_result_chars = sql_max_result_chars() - int(
+            runtime_state.get("successful_result_chars", 0)
+        )
+        if remaining_rows <= 0 or remaining_result_chars <= 0:
+            _finish_attempt(config, success=False)
+            return json.dumps(
+                {
+                    "success": False,
+                    "agent": agent_name,
+                    "error_type": "result_limit",
+                    "error": (
+                        "The cumulative successful SQL result limit was reached; "
+                        "no additional rows can be returned."
+                    ),
+                    "retryable": False,
+                    "sources": [],
+                },
+                ensure_ascii=False,
+            )
         logger.tool_event(
             status="started",
             tool_name=tool_name,
@@ -720,12 +954,172 @@ def build_sql_tools(agent_name: SqlAgentName) -> tuple[BaseTool, BaseTool, BaseT
             sql=sql,
         )
         try:
+            validated_sql, tables = validate_readonly_sql(
+                sql,
+                actual_parameters,
+                agent_name,
+            )
+        except SqlValidationError as error:
+            result = {
+                "success": False,
+                "error_type": "validation_error",
+                "validation_error_type": error.validation_error_type,
+                "error": str(error),
+                "retryable": attempt < sql_max_attempts(),
+                "sources": [],
+            }
+            _finish_attempt(config, success=False)
+            result.setdefault("agent", agent_name)
+            logger.tool_event(
+                status="completed",
+                tool_name=tool_name,
+                duration_ms=round((perf_counter() - started_at) * 1000, 2),
+                attempt=attempt,
+                success=False,
+                error_type="validation_error",
+                validation_error_type=error.validation_error_type,
+                validation_error=str(error),
+            )
+            return json.dumps(result, ensure_ascii=False, default=str)
+
+        configurable = config.get("configurable")
+        run_id = (
+            str(configurable.get("run_id") or "")
+            if isinstance(configurable, dict)
+            else ""
+        )
+        auto_execute_sql = (
+            bool(configurable.get("auto_execute_sql"))
+            if isinstance(configurable, dict)
+            else False
+        )
+        executable_sql = (
+            f"SELECT * FROM ({validated_sql}) AS agent_query "
+            f"LIMIT {remaining_rows + 1}"
+        )
+        if auto_execute_sql:
+            logger.info(
+                "sql.auto_execute",
+                component="tool",
+                tool_name=tool_name,
+                attempt=attempt,
+                agent_name=agent_name,
+            )
+            try:
+                await adispatch_custom_event(
+                    "sql_auto_execute",
+                    {
+                        "run_id": run_id,
+                        "agent": agent_name,
+                        "purpose": purpose,
+                        "tables": tables,
+                        "message": (
+                            "Automatic SQL execution is enabled. The validated "
+                            "read-only query is running without an approval prompt."
+                        ),
+                    },
+                    config=config,
+                )
+            except asyncio.CancelledError:
+                _finish_attempt(config, success=False)
+                raise
+            except Exception as error:
+                logger.warning(
+                    "sql.auto_execute_event_failed",
+                    component="tool",
+                    tool_name=tool_name,
+                    error_type=type(error).__name__,
+                )
+        else:
+            pending = await sql_approval_manager.create(
+                run_id=run_id,
+                agent_name=agent_name,
+            )
+            approval_wait = asyncio.create_task(sql_approval_manager.wait(pending))
+            try:
+                await adispatch_custom_event(
+                    "sql_approval",
+                    {
+                        "approval_id": pending.approval_id,
+                        "run_id": run_id,
+                        "agent": agent_name,
+                        "purpose": purpose,
+                        "sql": executable_sql,
+                        "generated_sql": validated_sql,
+                        "parameters": actual_parameters,
+                        "tables": tables,
+                        "message": (
+                            "No dedicated skill matched this request. The Agent is ready "
+                            "to run the following read-only query. It may fail, take a "
+                            "long time, or consume additional tokens. Do you want to execute it?"
+                        ),
+                    },
+                    config=config,
+                )
+            except asyncio.CancelledError:
+                approval_wait.cancel()
+                try:
+                    await approval_wait
+                except asyncio.CancelledError:
+                    pass
+                _finish_attempt(config, success=False)
+                raise
+            except Exception:
+                approval_wait.cancel()
+                try:
+                    await approval_wait
+                except (asyncio.CancelledError, TimeoutError):
+                    pass
+                _finish_attempt(config, success=False)
+                raise
+
+            try:
+                decision = await approval_wait
+            except TimeoutError:
+                decision = "cancel"
+                approval_error_type = "approval_timeout"
+            except asyncio.CancelledError:
+                _finish_attempt(config, success=False)
+                raise
+            else:
+                approval_error_type = "user_rejected"
+
+            if decision != "execute":
+                runtime_state["approval_denied"] = True
+                _finish_attempt(config, success=False)
+                result = {
+                    "success": False,
+                    "agent": agent_name,
+                    "error_type": approval_error_type,
+                    "error": (
+                        "SQL approval timed out; the database query was not executed."
+                        if approval_error_type == "approval_timeout"
+                        else "The user rejected the generated SQL; the database query was not executed."
+                    ),
+                    "retryable": False,
+                    "sql": validated_sql,
+                    "parameters": actual_parameters,
+                    "sources": [],
+                }
+                logger.tool_event(
+                    status="completed",
+                    tool_name=tool_name,
+                    duration_ms=round((perf_counter() - started_at) * 1000, 2),
+                    attempt=attempt,
+                    success=False,
+                    error_type=approval_error_type,
+                )
+                return json.dumps(result, ensure_ascii=False, default=str)
+
+        try:
             result = await asyncio.to_thread(
                 _execute_sql_sync,
                 agent_name,
                 sql,
                 actual_parameters,
                 purpose,
+                remaining_rows,
+                remaining_result_chars,
             )
         except SqlValidationError as error:
             result = {
@@ -763,7 +1157,12 @@ def build_sql_tools(agent_name: SqlAgentName) -> tuple[BaseTool, BaseTool, BaseT
                 "retryable": False,
                 "sources": [],
             }
-        _finish_attempt(config, success=result.get("success") is True)
+        _finish_attempt(
+            config,
+            success=result.get("success") is True,
+            row_count=int(result.get("row_count") or 0),
+            result_chars=int(result.get("result_chars") or 0),
+        )
         result.setdefault("agent", agent_name)
         logger.tool_event(
             status="completed",
@@ -782,10 +1181,11 @@ def build_sql_tools(agent_name: SqlAgentName) -> tuple[BaseTool, BaseTool, BaseT
         )
         return json.dumps(result, ensure_ascii=False, default=str)
 
-    return search_schema, resolve_entity, execute_sql
+    return search_schema, resolve_entity, execute_sql, get_columns_detail
 
 
 __all__ = [
+    "ColumnDetailInput",
     "connect_readonly",
     "EntityResolutionInput",
     "ReadonlySqlInput",
@@ -793,6 +1193,7 @@ __all__ = [
     "SqlValidationError",
     "ValidationErrorType",
     "build_sql_tools",
+    "get_columns_detail",
     "search_schema_catalog",
     "set_readonly_guards",
     "validate_readonly_sql",

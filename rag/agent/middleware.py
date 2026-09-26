@@ -58,7 +58,11 @@ def _tool_payload(output: Any) -> dict[str, Any] | None:
         value = json.loads(output)
     except json.JSONDecodeError:
         return None
-    return value if isinstance(value, dict) else None
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, list):
+        return {"items": value}
+    return None
 
 
 def _final_message(output: Any) -> AIMessage | None:
@@ -84,6 +88,11 @@ class PublicEventMiddleware:
         self._reasoning_announced = False
         self._announced_specialists: set[str] = set()
         self._model_turns: dict[str, int] = {}
+        self._product_resolution_calls: dict[str, int] = {}
+        self._product_resolution_in_flight: set[str] = set()
+        self._product_resolution_resolved: set[str] = set()
+        self._product_resolution_run_scopes: dict[str, str] = {}
+        self._suppressed_tool_runs: set[str] = set()
 
     def started(self, run_id: str) -> PublicAgentEvent:
         return {
@@ -100,7 +109,46 @@ class PublicEventMiddleware:
         name = str(event.get("name", ""))
         data = event.get("data") or {}
         tags = set(event.get("tags") or [])
+        event_run_id = str(event.get("run_id") or "")
+        resolution_scope = (
+            "finance"
+            if "finance" in tags
+            else "operations" if "operations" in tags else "specialist"
+        )
         translated: list[PublicAgentEvent] = []
+
+        if name == "find_real_name" and event_type == "on_tool_start":
+            calls = self._product_resolution_calls.get(resolution_scope, 0)
+            if (
+                resolution_scope in self._product_resolution_resolved
+                or resolution_scope in self._product_resolution_in_flight
+                or calls >= 3
+            ):
+                if event_run_id:
+                    self._suppressed_tool_runs.add(event_run_id)
+                return []
+            self._product_resolution_calls[resolution_scope] = calls + 1
+            self._product_resolution_in_flight.add(resolution_scope)
+            if event_run_id:
+                self._product_resolution_run_scopes[event_run_id] = resolution_scope
+        elif name == "find_real_name" and event_type == "on_tool_end":
+            if event_run_id in self._suppressed_tool_runs:
+                self._suppressed_tool_runs.discard(event_run_id)
+                return []
+            resolution_scope = self._product_resolution_run_scopes.pop(
+                event_run_id,
+                resolution_scope,
+            )
+            self._product_resolution_in_flight.discard(resolution_scope)
+        elif name == "find_real_name" and event_type == "on_tool_error":
+            if event_run_id in self._suppressed_tool_runs:
+                self._suppressed_tool_runs.discard(event_run_id)
+                return []
+            resolution_scope = self._product_resolution_run_scopes.pop(
+                event_run_id,
+                resolution_scope,
+            )
+            self._product_resolution_in_flight.discard(resolution_scope)
 
         if event_type == "on_chat_model_start":
             progress = self._model_progress_message(name, tags)
@@ -121,27 +169,26 @@ class PublicEventMiddleware:
         ):
             self._announced_specialists.add(name)
             label = "Finance" if name == "finance-agent" else "Operations"
-            skill_items = [f"{label} SQL Query", "SQL Safety"]
-            if label == "Operations":
-                skill_items.insert(0, "Product Review Retrieval")
-            translated.extend(
-                [
-                    {
-                        "event": "status",
-                        "data": {
-                            "stage": "specialist",
-                            "message": f"{label} Agent is analyzing structured business data.",
-                        },
+            translated.append(
+                {
+                    "event": "status",
+                    "data": {
+                        "stage": "specialist",
+                        "message": f"{label} Agent is analyzing structured business data.",
                     },
-                    {
-                        "event": "skills",
-                        "data": {
-                            "items": skill_items,
-                            "message": f"{', '.join(skill_items)} skills were applied.",
-                        },
-                    },
-                ]
+                }
             )
+        elif event_type == "on_custom_event" and name in {
+            "sql_approval",
+            "sql_auto_execute",
+        }:
+            if isinstance(data, dict):
+                translated.append(
+                    {
+                        "event": name,
+                        "data": dict(data),
+                    }
+                )
         elif event_type == "on_tool_start" and name in self.allowed_tools:
             translated.extend(
                 [
@@ -161,6 +208,26 @@ class PublicEventMiddleware:
         elif event_type == "on_tool_end" and name in self.allowed_tools:
             payload = _tool_payload(data.get("output"))
             if payload:
+                if (
+                    name == "find_real_name"
+                    and payload.get("success") is True
+                    and payload.get("result_status") == "matched"
+                ):
+                    self._product_resolution_resolved.add(resolution_scope)
+                if (
+                    name in {"load_finance_skills", "load_operations_skills"}
+                    and payload.get("success") is True
+                ):
+                    skill_items = payload.get("selected_skill_titles") or []
+                    translated.append(
+                        {
+                            "event": "skills",
+                            "data": {
+                                "items": skill_items,
+                                "message": f"{', '.join(skill_items)} skills were loaded.",
+                            },
+                        }
+                    )
                 sources = payload.get("sources")
                 if isinstance(sources, list):
                     added: list[dict[str, Any]] = []
@@ -196,6 +263,13 @@ class PublicEventMiddleware:
                                     "successful_review_tool_count": int(
                                         validation.get("successful_review_tool_count") or 0
                                     ),
+                                    "successful_ticket_tool_count": int(
+                                        validation.get("successful_ticket_tool_count") or 0
+                                    ),
+                                    "workflow_count": int(
+                                        validation.get("workflow_count") or 0
+                                    ),
+                                    "workflows": validation.get("workflows") or [],
                                     "evidence_count": int(
                                         validation.get("evidence_count") or 0
                                     ),
@@ -272,11 +346,11 @@ class PublicEventMiddleware:
         if turn == 1:
             if agent == "operations":
                 return "Operations is selecting a dedicated workflow or the governed SQL fallback."
-            return "Finance is identifying the required measures and authorized schema."
+            return "Finance is selecting a dedicated workflow or the governed SQL fallback."
         if turn == 2:
             if agent == "operations":
                 return "Operations is using the authorized evidence tools for the selected workflow."
-            return "Finance is composing one governed read-only query."
+            return "Finance is using the authorized evidence tools for the selected workflow."
         if turn == 3:
             return f"{label} is checking returned evidence and preparing its finding."
         return f"{label} is correcting an evidence gap using validator feedback."
@@ -287,6 +361,17 @@ class PublicEventMiddleware:
         payload: dict[str, Any] | None,
     ) -> dict[str, Any]:
         payload = payload or {}
+        if name in {"load_finance_skills", "load_operations_skills"}:
+            label = "Finance" if name == "load_finance_skills" else "Operations"
+            if payload.get("success") is True:
+                return {
+                    "stage": "workflow_execution",
+                    "message": f"Selected workflow instructions are loaded; {label} is collecting evidence.",
+                }
+            return {
+                "stage": "workflow_selection",
+                "message": "The workflow selection needs correction before evidence collection.",
+            }
         if name.startswith("search_") and name.endswith("_schema"):
             return {
                 "stage": "query_planning",
@@ -302,6 +387,11 @@ class PublicEventMiddleware:
                 return {
                     "stage": "evidence_validation",
                     "message": "The query succeeded; the specialist is validating the returned evidence.",
+                }
+            if payload.get("error_type") in {"user_rejected", "approval_timeout"}:
+                return {
+                    "stage": "query_cancelled",
+                    "message": "The generated SQL was not executed; the specialist is returning the cancellation to the Supervisor.",
                 }
             if payload.get("error_type") == "concurrent_query_blocked":
                 return {
@@ -319,6 +409,11 @@ class PublicEventMiddleware:
             }
         if name.startswith("delegate_"):
             validation = payload.get("validation") or {}
+            if payload.get("status") == "query_cancelled":
+                return {
+                    "stage": "answering",
+                    "message": "The SQL approval ended without execution; the Supervisor is preparing a response without database results.",
+                }
             if payload.get("status") == "completed" and validation.get("valid") is True:
                 return {
                     "stage": "answering",
@@ -337,6 +432,73 @@ class PublicEventMiddleware:
             return {
                 "stage": "answering",
                 "message": "Knowledge evidence is ready for final synthesis.",
+            }
+        if name == "find_real_name":
+            if payload.get("result_status") == "matched":
+                return {
+                    "stage": "query_planning",
+                    "message": "The canonical product name is resolved; the specialist is applying it to the requested analysis.",
+                }
+            if (
+                payload.get("terminal") is True
+                and payload.get("result_status") == "canonical_product_not_found"
+            ):
+                return {
+                    "stage": "evidence_gap",
+                    "message": "No canonical product matched after three attempts; the user must provide an exact product name.",
+                }
+            return {
+                "stage": "query_planning",
+                "message": "Canonical product candidates are ready for the specialist.",
+            }
+        if name == "check_purchase_rate":
+            if payload.get("result_status") == "ok":
+                return {
+                    "stage": "evidence_validation",
+                    "message": "Purchase-rate evidence is ready for validation.",
+                }
+            return {
+                "stage": "evidence_gap",
+                "message": "The purchase rate was unavailable; the limitation will be reported.",
+            }
+        if name == "check_like_rate":
+            if payload.get("result_status") == "ok":
+                return {
+                    "stage": "evidence_validation",
+                    "message": "Like-rate evidence is ready for validation.",
+                }
+            return {
+                "stage": "evidence_gap",
+                "message": "The like rate was unavailable; the limitation will be reported.",
+            }
+        if name in {"check_less_like", "check_less_purchase"}:
+            return {
+                "stage": "evidence_validation",
+                "message": "The Bottom-10 product ranking is ready for validation.",
+            }
+        if name == "check_most_interact":
+            return {
+                "stage": "evidence_validation",
+                "message": "The interaction-duration product ranking is ready for validation.",
+            }
+        if name == "check_concrete_problem":
+            return {
+                "stage": "evidence_validation",
+                "message": "Concrete support-ticket evidence is ready for validation.",
+            }
+        if name in {
+            "calculate_net_sales",
+            "calculate_gross_profit",
+            "calculate_gross_margin",
+        }:
+            if payload.get("success") is True:
+                return {
+                    "stage": "evidence_validation",
+                    "message": "The fixed Finance calculation is ready for validation.",
+                }
+            return {
+                "stage": "evidence_gap",
+                "message": "The fixed Finance calculation was unavailable; the limitation will be reported.",
             }
         if name in {
             "search_customer_reviews",
@@ -358,12 +520,24 @@ class PublicEventMiddleware:
             "search_knowledge": "Searching the uploaded knowledge base for supporting rules.",
             "delegate_finance": "Preparing a structured task for the Finance Agent.",
             "delegate_operations": "Preparing a structured task for the Operations Agent.",
+            "load_finance_skills": "Loading instructions for the selected Finance workflows.",
+            "load_operations_skills": "Loading instructions for the selected Operations workflows.",
+            "calculate_net_sales": "Finance is calculating refund-adjusted net sales.",
+            "calculate_gross_profit": "Finance is calculating gross profit from recorded transactions.",
+            "calculate_gross_margin": "Finance is calculating gross margin from recorded transactions.",
+            "find_real_name": "Matching the requested product to canonical database names.",
+            "check_purchase_rate": "Calculating the product's interest-to-purchase event ratio.",
+            "check_like_rate": "Calculating the product's view-to-like event ratio.",
+            "check_less_like": "Reading the ten lowest like-rate products from the metrics view.",
+            "check_less_purchase": "Reading the ten lowest purchase-rate products from the metrics view.",
+            "check_most_interact": "Ranking products by total and average interaction duration.",
+            "check_concrete_problem": "Operations is searching concrete descriptions in support-ticket notes.",
             "search_finance_schema": "Finance is selecting authorized tables and columns.",
             "resolve_finance_entity": "Finance is matching the requested entity to database values.",
-            "execute_finance_sql": "Finance is validating and running a read-only SQL query.",
+            "execute_finance_sql": "Finance is validating generated read-only SQL.",
             "search_operations_schema": "Operations is selecting authorized tables and columns.",
             "resolve_operations_entity": "Operations is matching the requested entity to database values.",
-            "execute_operations_sql": "Operations is validating and running a read-only SQL query.",
+            "execute_operations_sql": "Operations is validating generated read-only SQL.",
             "search_customer_reviews": "Operations is searching customer review themes with structured filters.",
             "find_other_comment_product": "Operations is retrieving additional unseen reviews for the selected product.",
             "find_other_comment_category": "Operations is retrieving additional unseen reviews for the selected category.",
@@ -372,6 +546,58 @@ class PublicEventMiddleware:
 
     @staticmethod
     def _tool_end_message(name: str, payload: dict[str, Any] | None) -> str:
+        if (
+            name in {"load_finance_skills", "load_operations_skills"}
+            and payload is not None
+        ):
+            if payload.get("success") is True:
+                count = len(payload.get("selected_skills") or [])
+                return f"{name} loaded {count} workflow skill(s)."
+            return f"{name} reported {payload.get('error_type', 'an error')}."
+        if (
+            name in {
+                "calculate_net_sales",
+                "calculate_gross_profit",
+                "calculate_gross_margin",
+            }
+            and payload is not None
+        ):
+            if payload.get("success") is False:
+                return f"{name} could not complete the fixed Finance calculation."
+            result = payload.get("result") or {}
+            return (
+                f"{name} completed for {int(result.get('transaction_count') or 0)} "
+                "transactions."
+            )
+        if name == "find_real_name" and payload is not None:
+            count = len(payload.get("items") or [])
+            call_number = payload.get("call_number")
+            threshold = payload.get("minimum_similarity")
+            if payload.get("result_status") == "matched":
+                return f"{name} resolved {count} canonical product name(s)."
+            if (
+                payload.get("terminal") is True
+                and payload.get("result_status") == "canonical_product_not_found"
+            ):
+                return f"{name} found no canonical product after three attempts; resolution stopped."
+            suffix = (
+                f" on attempt {call_number} at threshold {threshold}"
+                if call_number is not None and threshold is not None
+                else ""
+            )
+            return f"{name} returned {count} canonical product names{suffix}."
+        if name == "check_purchase_rate" and payload is not None:
+            return f"{name} completed with status {payload.get('result_status', 'unknown')}."
+        if name == "check_like_rate" and payload is not None:
+            return f"{name} completed with status {payload.get('result_status', 'unknown')}."
+        if name in {"check_less_like", "check_less_purchase"} and payload is not None:
+            return f"{name} returned {len(payload.get('items') or [])} ranked products with metric values."
+        if name == "check_most_interact" and payload is not None:
+            return f"{name} returned {len(payload.get('items') or [])} ranked products with interaction metrics."
+        if name == "check_concrete_problem" and payload is not None:
+            if payload.get("success") is False:
+                return f"{name} could not retrieve concrete support-ticket evidence."
+            return f"{name} returned {len(payload.get('matches') or [])} relevant support tickets."
         if name == "search_knowledge" and payload:
             if payload.get("success") is False:
                 return f"{name} could not retrieve knowledge evidence."

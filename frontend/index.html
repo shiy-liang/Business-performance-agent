@@ -208,6 +208,12 @@
                     </div>
                   </header>
                   <div id="chat-answer" class="chat-answer"></div>
+                  <section
+                    id="chat-sql-approvals"
+                    class="chat-sql-approvals"
+                    aria-label="SQL execution approvals"
+                    hidden
+                  ></section>
                   <section id="chat-sources" class="chat-sources" aria-label="References" hidden></section>
                 </article>
               </div>
@@ -223,7 +229,25 @@
                 aria-label="Ask the business assistant"
               ></textarea>
               <div class="chat-compose-actions">
-                <span>Enter to send · Shift + Enter for a new line</span>
+                <div class="chat-compose-meta">
+                  <span class="chat-shortcut">Enter to send · Shift + Enter for a new line</span>
+                  <div class="sql-auto-execute-setting">
+                    <label class="sql-auto-execute-toggle" for="sql-auto-execute">
+                      <input id="sql-auto-execute" type="checkbox" />
+                      <span class="sql-auto-checkbox" aria-hidden="true"></span>
+                      <span>Automatically execute SQL</span>
+                    </label>
+                    <details class="sql-auto-help">
+                      <summary aria-label="About automatic SQL execution">?</summary>
+                      <div role="tooltip">
+                        Runs model-generated read-only SQL immediately after safety
+                        validation, without an approval prompt. Table allow-lists,
+                        timeouts, and result limits still apply. Queries may take
+                        longer or use more tokens.
+                      </div>
+                    </details>
+                  </div>
+                </div>
                 <button type="submit">
                   <span id="chat-submit-label">Send</span>
                   <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -275,7 +299,7 @@
               </div>
               <div class="knowledge-header-actions">
                 <button id="review-sync-button" class="review-sync-button" type="button">
-                  Sync customer reviews
+                  Sync reviews &amp; tickets
                 </button>
                 <span id="knowledge-file-count" class="soft-badge">Loading</span>
               </div>
