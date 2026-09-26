@@ -19,15 +19,24 @@ const state = {
 };
 
 const elements = {
+  sidebar: document.querySelector("#sidebar"),
+  sidebarToggle: document.querySelector("#sidebar-toggle"),
+  sidebarBackdrop: document.querySelector("#sidebar-backdrop"),
+  knowledgeOpen: document.querySelector("#knowledge-open"),
+  knowledgeDialog: document.querySelector("#knowledge-dialog"),
+  knowledgeClose: document.querySelector("#knowledge-close"),
+  assistantOpen: document.querySelector("#assistant-open"),
+  assistantPanel: document.querySelector("#assistant-panel"),
+  assistantClose: document.querySelector("#assistant-close"),
   yearFilter: document.querySelector("#year-filter"),
   monthFilter: document.querySelector("#month-filter"),
   storeFilter: document.querySelector("#store-filter"),
   refreshButton: document.querySelector("#refresh-button"),
   connectionStatus: document.querySelector("#connection-status"),
   globalError: document.querySelector("#global-error"),
-  salesDataThrough: document.querySelector("#sales-data-through"),
-  scopeCaption: document.querySelector("#scope-caption"),
   financePeriod: document.querySelector("#finance-period"),
+  financePeriodToggle: document.querySelector("#finance-period-toggle"),
+  financeFilters: document.querySelector("#finance-filters"),
   financeMetrics: document.querySelector("#finance-metrics"),
   financeChart: document.querySelector("#finance-chart"),
   businessRiskCount: document.querySelector("#business-risk-count"),
@@ -41,6 +50,7 @@ const elements = {
   campaignCount: document.querySelector("#campaign-count"),
   campaignList: document.querySelector("#campaign-list"),
   chatForm: document.querySelector("#chat-form"),
+  chatConversation: document.querySelector("#chat-conversation"),
   chatHistory: document.querySelector("#chat-history"),
   newChatButton: document.querySelector("#new-chat-button"),
   chatInput: document.querySelector("#chat-input"),
@@ -66,6 +76,59 @@ const elements = {
   reviewSyncButton: document.querySelector("#review-sync-button"),
   reviewSyncStatus: document.querySelector("#review-sync-status"),
 };
+
+const mobileNavigation = window.matchMedia("(max-width: 840px)");
+
+function updateSidebarState() {
+  const isMobile = mobileNavigation.matches;
+  const isOpen = isMobile
+    ? document.body.classList.contains("sidebar-open")
+    : !document.body.classList.contains("sidebar-collapsed");
+  elements.sidebarToggle.setAttribute("aria-expanded", String(isOpen));
+  elements.sidebarToggle.setAttribute(
+    "aria-label",
+    isOpen ? (isMobile ? "Close navigation" : "Collapse navigation") : "Open navigation",
+  );
+  elements.sidebar.inert = isMobile && !isOpen;
+  elements.sidebarBackdrop.hidden = !isMobile || !isOpen;
+}
+
+elements.sidebarToggle.addEventListener("click", () => {
+  document.body.classList.toggle(
+    mobileNavigation.matches ? "sidebar-open" : "sidebar-collapsed",
+  );
+  updateSidebarState();
+});
+
+elements.sidebarBackdrop.addEventListener("click", () => {
+  document.body.classList.remove("sidebar-open");
+  updateSidebarState();
+  elements.sidebarToggle.focus();
+});
+
+elements.sidebar.querySelectorAll(".sidebar-link").forEach((link) => {
+  link.addEventListener("click", () => {
+    if (mobileNavigation.matches) {
+      document.body.classList.remove("sidebar-open");
+      updateSidebarState();
+    }
+  });
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && document.body.classList.contains("sidebar-open")) {
+    document.body.classList.remove("sidebar-open");
+    updateSidebarState();
+    elements.sidebarToggle.focus();
+  }
+});
+
+mobileNavigation.addEventListener("change", () => {
+  document.body.classList.remove("sidebar-open");
+  updateSidebarState();
+});
+
+updateSidebarState();
 
 const moneyFormatter = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -375,6 +438,9 @@ function prepareChatResponse(question) {
   elements.chatAnswerStatus.textContent = "Thinking";
   elements.chatAnswerStatus.classList.add("is-streaming");
   setThinking("Connecting to the model…");
+  window.requestAnimationFrame(() => {
+    elements.chatConversation.scrollTop = elements.chatConversation.scrollHeight;
+  });
 }
 
 async function startNewChat() {
@@ -402,11 +468,14 @@ async function startNewChat() {
 
 function renderChatAnswer() {
   state.chatRenderFrame = null;
+  const followAnswer = elements.chatConversation.scrollHeight -
+    elements.chatConversation.scrollTop - elements.chatConversation.clientHeight < 80;
   if (window.ChatRenderer?.renderMarkdown) {
     elements.chatAnswer.innerHTML = window.ChatRenderer.renderMarkdown(state.chatAnswerText);
-    return;
+  } else {
+    elements.chatAnswer.innerHTML = `<p>${escapeHtml(state.chatAnswerText).replaceAll("\n", "<br>")}</p>`;
   }
-  elements.chatAnswer.innerHTML = `<p>${escapeHtml(state.chatAnswerText).replaceAll("\n", "<br>")}</p>`;
+  if (followAnswer) elements.chatConversation.scrollTop = elements.chatConversation.scrollHeight;
 }
 
 function scheduleChatAnswerRender() {
@@ -984,10 +1053,6 @@ function renderFinance(data) {
   elements.financePeriod.textContent = `${formatMonth(data.period.month)}${
     data.period.is_complete ? " · Complete month" : " · Partial data"
   }`;
-  elements.salesDataThrough.textContent = data.period.sales_data_through;
-  elements.scopeCaption.textContent = `${data.scope.label} · ${
-    data.period.is_complete ? "Complete calendar month" : "Partial month"
-  }`;
 
   state.maxMonth = data.period.sales_data_through.slice(0, 7);
   if (!state.month) state.month = data.period.month;
@@ -1422,8 +1487,6 @@ function renderMarketing(data) {
 function panelError(panel, message) {
   if (panel === "finance") {
     elements.financePeriod.textContent = "—";
-    elements.salesDataThrough.textContent = "—";
-    elements.scopeCaption.textContent = "—";
     elements.financeMetrics.innerHTML = "";
     renderEmpty(elements.financeMetrics, message);
     renderEmpty(elements.financeChart, "The trend chart is temporarily unavailable");
@@ -1544,6 +1607,63 @@ elements.monthFilter.addEventListener("change", updateOperatingMonthFromFilters)
 
 elements.refreshButton.addEventListener("click", loadDashboard);
 
+elements.financePeriodToggle.addEventListener("click", () => {
+  const willOpen = elements.financeFilters.hidden;
+  elements.financeFilters.hidden = !willOpen;
+  elements.financePeriodToggle.setAttribute("aria-expanded", String(willOpen));
+  if (willOpen && !elements.yearFilter.disabled) elements.yearFilter.focus();
+});
+
+elements.financeFilters.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  elements.financeFilters.hidden = true;
+  elements.financePeriodToggle.setAttribute("aria-expanded", "false");
+  elements.financePeriodToggle.focus();
+});
+
+elements.knowledgeOpen.addEventListener("click", () => {
+  elements.knowledgeDialog.showModal();
+  loadKnowledgeFiles();
+});
+
+elements.knowledgeClose.addEventListener("click", () => elements.knowledgeDialog.close());
+elements.knowledgeDialog.addEventListener("close", () => elements.knowledgeOpen.focus());
+elements.knowledgeDialog.addEventListener("click", (event) => {
+  if (event.target !== elements.knowledgeDialog) return;
+  const bounds = elements.knowledgeDialog.getBoundingClientRect();
+  if (
+    event.clientX < bounds.left || event.clientX > bounds.right ||
+    event.clientY < bounds.top || event.clientY > bounds.bottom
+  ) elements.knowledgeDialog.close();
+});
+
+function setAssistantOpen(isOpen) {
+  elements.assistantPanel.hidden = !isOpen;
+  elements.assistantOpen.setAttribute("aria-expanded", String(isOpen));
+  elements.assistantOpen.setAttribute(
+    "aria-label",
+    isOpen ? "Close business assistant" : "Open business assistant",
+  );
+  if (isOpen) {
+    elements.chatInput.focus();
+    window.requestAnimationFrame(() => {
+      elements.chatConversation.scrollTop = elements.chatConversation.scrollHeight;
+    });
+  } else {
+    elements.assistantOpen.focus();
+  }
+}
+
+elements.assistantOpen.addEventListener("click", () => {
+  setAssistantOpen(elements.assistantPanel.hidden);
+});
+elements.assistantClose.addEventListener("click", () => setAssistantOpen(false));
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !elements.assistantPanel.hidden && !elements.knowledgeDialog.open) {
+    setAssistantOpen(false);
+  }
+});
+
 elements.knowledgeDropZone.addEventListener("click", () => {
   elements.knowledgeFileInput.click();
 });
@@ -1586,7 +1706,7 @@ elements.knowledgeDropZone.addEventListener("paste", (event) => {
 });
 
 document.addEventListener("paste", (event) => {
-  if (event.defaultPrevented) return;
+  if (event.defaultPrevented || !elements.knowledgeDialog.open) return;
   const files = event.clipboardData?.files;
   if (files?.length) {
     event.preventDefault();

@@ -13,85 +13,105 @@
     <link rel="stylesheet" href="/static/vendor/chat-renderer.css?v=__ASSET_VERSION__" />
   </head>
   <body>
+    <aside id="sidebar" class="sidebar" aria-label="Main navigation">
+      <a class="brand sidebar-brand" href="/" aria-label="Business Pulse home">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 42 42" role="img">
+            <path d="M8 27.5 18.2 8h8.1l-4.7 10.1H34L20.2 34l2.2-11H8Z" />
+          </svg>
+        </span>
+        <span class="brand-name">
+          <strong>Business Pulse</strong>
+          <small>Performance Agent</small>
+        </span>
+      </a>
+      <nav class="sidebar-nav" aria-label="Dashboard sections">
+        <a class="sidebar-link" href="#action-center" title="Action Center">
+          <span class="sidebar-link-icon" aria-hidden="true">01</span>
+          <span class="sidebar-link-label">Action Center</span>
+        </a>
+        <a class="sidebar-link" href="#product-performance" title="Product Performance">
+          <span class="sidebar-link-icon" aria-hidden="true">02</span>
+          <span class="sidebar-link-label">Product Performance</span>
+        </a>
+        <a class="sidebar-link" href="#campaign-performance" title="Campaign Performance">
+          <span class="sidebar-link-icon" aria-hidden="true">03</span>
+          <span class="sidebar-link-label">Campaign Performance</span>
+        </a>
+      </nav>
+    </aside>
+    <button id="sidebar-backdrop" class="sidebar-backdrop" type="button" aria-label="Close navigation" hidden></button>
     <div class="app-shell">
       <header class="topbar">
-        <a class="brand" href="/" aria-label="Business Performance Agent home">
-          <span class="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 42 42" role="img">
-              <path d="M8 27.5 18.2 8h8.1l-4.7 10.1H34L20.2 34l2.2-11H8Z" />
-            </svg>
-          </span>
-          <span>
-            <strong>Business Pulse</strong>
-            <small>Performance Agent</small>
-          </span>
-        </a>
-
-        <div class="topbar-actions">
-          <span id="connection-status" class="live-pill"><i></i> Connecting to database</span>
-          <label class="filter-control year-control">
-            <span>Operating year</span>
-            <select id="year-filter" aria-label="Select operating year" disabled>
-              <option value="">Year</option>
-            </select>
-          </label>
-          <label class="filter-control month-control">
-            <span>Operating month</span>
-            <select id="month-filter" aria-label="Select operating month" disabled>
-              <option value="01">January</option>
-              <option value="02">February</option>
-              <option value="03">March</option>
-              <option value="04">April</option>
-              <option value="05">May</option>
-              <option value="06">June</option>
-              <option value="07">July</option>
-              <option value="08">August</option>
-              <option value="09">September</option>
-              <option value="10">October</option>
-              <option value="11">November</option>
-              <option value="12">December</option>
-            </select>
-          </label>
-          <label class="filter-control store-control">
-            <span>Business scope</span>
-            <select id="store-filter" aria-label="Select store">
-              <option value="">All stores</option>
-            </select>
-          </label>
-          <button id="refresh-button" class="icon-button" type="button" title="Refresh data">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M20 11a8.1 8.1 0 1 0-2.3 5.7M20 5v6h-6" />
-            </svg>
-          </button>
-        </div>
+        <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-controls="sidebar" aria-expanded="true" aria-label="Collapse navigation" title="Toggle navigation">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+        </button>
       </header>
 
       <main>
         <section class="page-heading">
           <div>
-            <p class="eyebrow">Business overview</p>
-            <h1>See what needs attention first.</h1>
-            <p class="heading-copy">
-              Bring sales, costs, inventory, service, and campaigns into one operating view.
-            </p>
+            <h1>Business overview</h1>
           </div>
-          <div class="as-of-card">
-            <span>Sales data through</span>
-            <strong id="sales-data-through">—</strong>
-            <small id="scope-caption">All stores · latest complete month</small>
-          </div>
+          <button id="knowledge-open" class="knowledge-open" type="button" aria-haspopup="dialog" aria-controls="knowledge-dialog">
+            <span class="knowledge-open-icon" aria-hidden="true">+</span>
+            <span>Knowledge files<small>Upload and view history</small></span>
+          </button>
         </section>
 
         <div id="global-error" class="global-error" role="alert" hidden></div>
 
         <div class="dashboard-grid">
           <section class="panel finance-panel" aria-labelledby="finance-title">
-            <div class="panel-header">
+            <div class="panel-header finance-header">
               <div>
                 <p class="panel-kicker">01 · Financial pulse</p>
                 <h2 id="finance-title">Financial pulse</h2>
               </div>
-              <span id="finance-period" class="soft-badge">Loading</span>
+              <div class="finance-header-actions">
+                <span id="connection-status" class="live-pill"><i></i> Connecting to database</span>
+                <button id="finance-period-toggle" class="finance-period-toggle" type="button" aria-expanded="false" aria-controls="finance-filters" title="Choose operating period and store">
+                  <span id="finance-period">Loading</span>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+                </button>
+              </div>
+            </div>
+
+            <div id="finance-filters" class="finance-filters" hidden>
+              <label class="filter-control year-control">
+                <span>Operating year</span>
+                <select id="year-filter" aria-label="Select operating year" disabled>
+                  <option value="">Year</option>
+                </select>
+              </label>
+              <label class="filter-control month-control">
+                <span>Operating month</span>
+                <select id="month-filter" aria-label="Select operating month" disabled>
+                  <option value="01">January</option>
+                  <option value="02">February</option>
+                  <option value="03">March</option>
+                  <option value="04">April</option>
+                  <option value="05">May</option>
+                  <option value="06">June</option>
+                  <option value="07">July</option>
+                  <option value="08">August</option>
+                  <option value="09">September</option>
+                  <option value="10">October</option>
+                  <option value="11">November</option>
+                  <option value="12">December</option>
+                </select>
+              </label>
+              <label class="filter-control store-control">
+                <span>Business scope</span>
+                <select id="store-filter" aria-label="Select store">
+                  <option value="">All stores</option>
+                </select>
+              </label>
+              <button id="refresh-button" class="icon-button" type="button" title="Refresh data" aria-label="Refresh data">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M20 11a8.1 8.1 0 1 0-2.3 5.7M20 5v6h-6" />
+                </svg>
+              </button>
             </div>
 
             <div id="finance-metrics" class="metric-grid" aria-live="polite">
@@ -125,7 +145,7 @@
             </p>
           </section>
 
-          <section class="panel action-panel" aria-labelledby="action-title">
+          <section id="action-center" class="panel action-panel" aria-labelledby="action-title">
             <div class="panel-header">
               <div>
                 <p class="panel-kicker">02 · Actions and risks</p>
@@ -170,15 +190,9 @@
             </div>
           </section>
 
-          <section class="panel assistant-panel" aria-labelledby="assistant-title">
+          <section id="assistant-panel" class="panel assistant-panel" role="dialog" aria-labelledby="assistant-title" hidden>
             <div class="assistant-header">
               <div class="assistant-copy">
-                <span class="assistant-orb" aria-hidden="true">
-                  <svg viewBox="0 0 48 48">
-                    <path d="M24 7v7M24 34v7M7 24h7M34 24h7M12 12l5 5M31 31l5 5M36 12l-5 5M17 31l-5 5" />
-                    <circle cx="24" cy="24" r="7" />
-                  </svg>
-                </span>
                 <div>
                   <p class="panel-kicker">03 · Ask your business</p>
                   <h2 id="assistant-title">Ask your business directly</h2>
@@ -186,21 +200,20 @@
                 </div>
               </div>
               <div class="assistant-header-actions">
-                <p class="assistant-status">
-                  <i></i> Supervisor online
-                </p>
                 <button id="new-chat-button" class="new-chat-button" type="button">
                   New Chat
                 </button>
+                <button id="assistant-close" class="assistant-close" type="button" aria-label="Close chat">×</button>
               </div>
             </div>
 
-            <div class="prompt-grid" aria-label="Suggested questions">
+            <div id="chat-conversation" class="chat-conversation">
+              <div class="prompt-grid" aria-label="Suggested questions">
               <button type="button" class="prompt-chip">How did revenue and profit perform last month?</button>
               <button type="button" class="prompt-chip">Which products need immediate replenishment?</button>
               <button type="button" class="prompt-chip">Which campaign delivered the highest return?</button>
               <button type="button" class="prompt-chip">What are customers complaining about recently?</button>
-            </div>
+              </div>
 
             <div id="chat-history" class="chat-history" aria-label="Conversation history"></div>
 
@@ -261,6 +274,7 @@
                 </article>
               </div>
             </div>
+            </div>
 
             <form id="chat-form" class="chat-form">
               <textarea
@@ -301,7 +315,7 @@
             </form>
           </section>
 
-          <section class="panel product-panel" aria-labelledby="product-title">
+          <section id="product-performance" class="panel product-panel" aria-labelledby="product-title">
             <div class="panel-header product-header">
               <div>
                 <p class="panel-kicker">04 · Product performance</p>
@@ -317,7 +331,7 @@
             <div id="product-list" class="rank-list loading-copy">Analyzing products…</div>
           </section>
 
-          <section class="panel marketing-panel" aria-labelledby="marketing-title">
+          <section id="campaign-performance" class="panel marketing-panel" aria-labelledby="marketing-title">
             <div class="panel-header">
               <div>
                 <p class="panel-kicker">05 · Campaign performance</p>
@@ -334,6 +348,7 @@
             </p>
           </section>
 
+          <dialog id="knowledge-dialog" class="knowledge-dialog" aria-labelledby="knowledge-title">
           <section class="panel knowledge-panel" aria-labelledby="knowledge-title">
             <div class="panel-header knowledge-header">
               <div>
@@ -345,6 +360,7 @@
                   Sync reviews &amp; tickets
                 </button>
                 <span id="knowledge-file-count" class="soft-badge">Loading</span>
+                <button id="knowledge-close" class="knowledge-close" type="button" aria-label="Close knowledge files">×</button>
               </div>
             </div>
 
@@ -382,8 +398,13 @@
               </div>
             </div>
           </section>
+          </dialog>
         </div>
       </main>
+
+      <button id="assistant-open" class="assistant-open" type="button" aria-label="Open business assistant" aria-controls="assistant-panel" aria-expanded="false" title="Ask your business">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5c-1.2 0-2.3-.3-3.3-.8L4 20l1.8-5.2a7.5 7.5 0 1 1 14.2-3.3Z" /><path d="M8.5 11.5h7" /></svg>
+      </button>
 
       <footer>
         <span>Business Performance Agent</span>
