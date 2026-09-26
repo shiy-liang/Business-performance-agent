@@ -14,6 +14,7 @@ const state = {
   chatAnswerText: "",
   chatRenderFrame: null,
   chatTurnComplete: false,
+  chatSubtasks: new Map(),
 };
 
 const elements = {
@@ -42,6 +43,7 @@ const elements = {
   chatResponse: document.querySelector("#chat-response"),
   chatQuestion: document.querySelector("#chat-question"),
   chatProgress: document.querySelector("#chat-progress"),
+  chatSubtasks: document.querySelector("#chat-subtasks"),
   chatThinking: document.querySelector("#chat-thinking"),
   chatThinkingLabel: document.querySelector("#chat-thinking-label"),
   chatAnswer: document.querySelector("#chat-answer"),
@@ -310,6 +312,9 @@ function resetConversationUi() {
   elements.chatResponse.hidden = true;
   elements.chatQuestion.textContent = "";
   elements.chatProgress.replaceChildren();
+  state.chatSubtasks.clear();
+  elements.chatSubtasks.replaceChildren();
+  elements.chatSubtasks.hidden = true;
   elements.chatAnswer.replaceChildren();
   elements.chatSqlApprovals.replaceChildren();
   elements.chatSqlApprovals.hidden = true;
@@ -351,6 +356,9 @@ function prepareChatResponse(question) {
   elements.chatResponse.hidden = false;
   elements.chatQuestion.textContent = question;
   elements.chatProgress.replaceChildren();
+  state.chatSubtasks.clear();
+  elements.chatSubtasks.replaceChildren();
+  elements.chatSubtasks.hidden = true;
   elements.chatAnswer.replaceChildren();
   elements.chatAnswer.classList.remove("is-streaming");
   elements.chatSqlApprovals.replaceChildren();
@@ -411,6 +419,106 @@ function appendChatActivity(kind, label, message) {
   copy.append(heading, document.createTextNode(String(message || "")));
   item.append(dot, copy);
   elements.chatProgress.append(item);
+}
+
+const SUBTASK_STATUS_LABELS = {
+  pending: "Pending",
+  running: "In progress",
+  completed: "Completed",
+  blocked: "Blocked",
+  empty: "Completed · no data",
+};
+
+function normalizedSubtaskStatus(value) {
+  const status = String(value || "pending");
+  return Object.hasOwn(SUBTASK_STATUS_LABELS, status) ? status : "pending";
+}
+
+function buildSubtaskRow(task) {
+  const status = normalizedSubtaskStatus(task.status);
+  const row = document.createElement("div");
+  row.className = `subtask-row is-${status}`;
+  row.dataset.subtaskId = task.id;
+
+  const copy = document.createElement("span");
+  copy.className = "subtask-copy";
+  const title = document.createElement("strong");
+  title.textContent = task.question || task.id;
+  const meta = document.createElement("small");
+  meta.textContent = [task.id, task.agent, task.skill].filter(Boolean).join(" · ");
+  copy.append(title, meta);
+
+  const stateCopy = document.createElement("span");
+  stateCopy.className = "subtask-state";
+  const label = document.createElement("small");
+  label.className = "subtask-state-label";
+  label.textContent = SUBTASK_STATUS_LABELS[status];
+  const indicator = document.createElement("span");
+  indicator.className = "subtask-check";
+  indicator.setAttribute("aria-hidden", "true");
+  stateCopy.append(label, indicator);
+  row.append(copy, stateCopy);
+  return row;
+}
+
+function updateSubtaskProgressCount() {
+  const finished = [...state.chatSubtasks.values()].filter((task) =>
+    ["completed", "blocked", "empty"].includes(normalizedSubtaskStatus(task.status)),
+  ).length;
+  const count = elements.chatSubtasks.querySelector(".subtask-heading span");
+  if (count) count.textContent = `${finished}/${state.chatSubtasks.size} finished`;
+}
+
+function renderSubtasks(items) {
+  const tasks = Array.isArray(items)
+    ? items.filter((item) => item && typeof item === "object" && item.id)
+    : [];
+  state.chatSubtasks.clear();
+  tasks.forEach((item) => {
+    const task = { ...item, status: normalizedSubtaskStatus(item.status) };
+    state.chatSubtasks.set(String(task.id), task);
+  });
+  elements.chatSubtasks.replaceChildren();
+  elements.chatSubtasks.hidden = state.chatSubtasks.size === 0;
+  if (!state.chatSubtasks.size) return;
+
+  const heading = document.createElement("div");
+  heading.className = "subtask-heading";
+  const title = document.createElement("strong");
+  title.textContent = "Subtasks";
+  const count = document.createElement("span");
+  heading.append(title, count);
+
+  const list = document.createElement("div");
+  list.className = "subtask-list";
+  state.chatSubtasks.forEach((task) => list.append(buildSubtaskRow(task)));
+  elements.chatSubtasks.append(heading, list);
+  updateSubtaskProgressCount();
+}
+
+function updateSubtaskStatus(data) {
+  const taskId = String(data?.subtask_id || "");
+  if (!taskId) return;
+  const previous = state.chatSubtasks.get(taskId) || {
+    id: taskId,
+    question: String(data?.question || taskId),
+    agent: String(data?.agent || ""),
+    skill: String(data?.skill || ""),
+  };
+  const status = normalizedSubtaskStatus(data?.status);
+  const task = { ...previous, status };
+  state.chatSubtasks.set(taskId, task);
+
+  const row = [...elements.chatSubtasks.querySelectorAll(".subtask-row")]
+    .find((item) => item.dataset.subtaskId === taskId);
+  if (!row) {
+    renderSubtasks([...state.chatSubtasks.values()]);
+    return;
+  }
+  row.className = `subtask-row is-${status}`;
+  const label = row.querySelector(".subtask-state-label");
+  if (label) label.textContent = SUBTASK_STATUS_LABELS[status];
+  updateSubtaskProgressCount();
 }
 
 function setThinking(message, visible = true) {
@@ -614,6 +722,11 @@ function handleChatEvent(eventName, data) {
     } else {
       appendChatActivity("skill", "Skills", message);
     }
+  } else if (eventName === "subtasks") {
+    renderSubtasks(data?.items);
+  } else if (eventName === "subtask_status") {
+    updateSubtaskStatus(data);
+    if (message) setThinking(message, data?.status === "running");
   } else if (eventName === "tool_start") {
     appendChatActivity("tool-start", "Tool call", message || String(data?.name || "Tool started"));
   } else if (eventName === "tool_end") {

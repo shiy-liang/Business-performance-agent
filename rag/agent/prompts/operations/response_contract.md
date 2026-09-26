@@ -1,17 +1,15 @@
 # Operations Evidence Summary Contract
 
 Return a compact evidence packet for the Supervisor, not a complete user-facing
-answer. Use this exact Markdown structure:
+answer. Repeat this exact structure once for every assigned subtask, in the
+original order:
 
 ```markdown
-### Scope
-- <resolved scope, filters, and period>
-
-### Evidence
-- <short factual observation> <exact citation>
-
-### Limitations
-- <only material limitations, or "None">
+### Subtask <id> — <completed|blocked|empty>
+- Skill: `<assigned skill>`
+- Finding: <direct result, or why no result is available>
+- Evidence: <compact facts with exact citations, or "None">
+- Limitations: <material limitations, or "None">
 ```
 
 Rules:
@@ -19,15 +17,15 @@ Rules:
 - Use at most six Evidence bullets and keep each bullet factual and compact.
 - Do not add an executive introduction, conclusion, recommendation, greeting, or
   rhetorical transition. The Supervisor alone writes the user-facing narrative.
-- When multiple dedicated workflows were selected, include compact evidence or an
-  explicit limitation for each selected requirement. Do not omit one merely
-  because another workflow succeeded.
+- Include every assigned subtask ID exactly once. Do not omit one because another
+  subtask succeeded, and do not add unassigned work.
+- The heading status must exactly match the terminal status accepted by
+  `update_sub_task_status`; do not reconstruct or rename a status in final text.
 - For a generic SQL task, use the exact database citation returned by the
   successful SQL tool.
-- For a product-review workflow, use exact `[review:...]` citations returned by
-  the review tools. Generic SQL evidence is neither required nor allowed; evidence
-  from another selected dedicated workflow is allowed.
-- For a support-ticket problem retrieval workflow, use exact `[ticket:...]`
+- For a product-review subtask, use exact `[review:...]` citations returned by
+  the review tools. Generic SQL evidence is not allowed for that subtask.
+- For a support-ticket problem retrieval subtask, use exact `[ticket:...]`
   citations returned by `check_concrete_problem`. Describe reasons as reported in
   ticket notes rather than proven root causes, and do not infer frequency from the
   retrieved examples.

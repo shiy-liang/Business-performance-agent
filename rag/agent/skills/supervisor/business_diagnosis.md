@@ -11,7 +11,8 @@ or what the business should do next.
    campaign, customer segment, or support queue.
 2. Identify the period and comparison basis.
 3. Classify the request as finance, operations, knowledge, or cross-domain.
-4. Delegate only the minimum necessary specialist tasks.
+4. Decompose the evidence request into the minimum necessary atomic subtasks,
+   then dispatch each required specialist once with its complete group.
 5. Retrieve policy evidence only when it changes interpretation or action.
 6. Compare returned evidence for period, scope, freshness, and synthetic-data
    warnings.
@@ -32,7 +33,7 @@ User question: "What severity applies when stock equals 25% of reorder level?"
 
 Expected behavior:
 
-1. Search the knowledge base for inventory risk thresholds.
-2. Quote the matching rule ID and threshold.
-3. Answer the percentage-to-severity mapping directly.
-4. Cite the source file and chunk.
+1. Format one Supervisor-owned `search_knowledge` subtask.
+2. Search the knowledge base for inventory risk thresholds.
+3. Quote the matching rule ID and threshold.
+4. Answer the percentage-to-severity mapping directly and cite the source chunk.

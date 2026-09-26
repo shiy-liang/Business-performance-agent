@@ -5,7 +5,7 @@
 Use this skill when the task asks which products have the lowest, worst, or least
 effective purchase rate across the current product metrics view.
 
-## Dedicated workflow
+## Execution procedure
 
 1. Call `check_less_purchase` with no arguments.
 2. Do not search schema, generate SQL, or use a single-product rate tool for this

@@ -1,4 +1,4 @@
-"""Progressive-disclosure skill catalog and workflow configuration."""
+"""Progressive-disclosure skill catalogs and per-agent skill limits."""
 
 from __future__ import annotations
 
@@ -16,8 +16,12 @@ SKILL_ROOT = AGENT_ROOT / "skills"
 DEFAULT_AGENT_CONFIG_PATH = PROJECT_ROOT / "config" / "agent.yml"
 
 
-class WorkflowConfigError(ValueError):
-    """Raised when workflow routing configuration is missing or invalid."""
+class SkillConfigError(ValueError):
+    """Raised when skill catalog or agent runtime configuration is invalid."""
+
+
+# Historical public name retained for callers outside this package.
+WorkflowConfigError = SkillConfigError
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,13 +36,25 @@ class AgentRuntimeConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class OperationsWorkflowConfig:
-    max_workflows_per_task: int
+class OperationsSkillConfig:
+    max_skills_per_task: int
+
+    @property
+    def max_workflows_per_task(self) -> int:
+        """Deprecated compatibility view of the skill limit."""
+
+        return self.max_skills_per_task
 
 
 @dataclass(frozen=True, slots=True)
-class FinanceWorkflowConfig:
-    max_workflows_per_task: int
+class FinanceSkillConfig:
+    max_skills_per_task: int
+
+    @property
+    def max_workflows_per_task(self) -> int:
+        """Deprecated compatibility view of the skill limit."""
+
+        return self.max_skills_per_task
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,10 +179,10 @@ def load_agent_runtime_config(
 
 
 @lru_cache(maxsize=1)
-def load_operations_workflow_config(
+def load_operations_skill_config(
     path: Path = DEFAULT_AGENT_CONFIG_PATH,
-) -> OperationsWorkflowConfig:
-    """Load and validate Operations workflow routing limits."""
+) -> OperationsSkillConfig:
+    """Load and validate the Operations per-task skill limit."""
 
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -177,24 +193,27 @@ def load_operations_workflow_config(
 
     root = _mapping(raw, "agent config")
     operations = _mapping(root.get("operations"), "operations")
-    maximum = operations.get("max_workflows_per_task")
+    maximum = operations.get(
+        "max_skills_per_task",
+        operations.get("max_workflows_per_task"),
+    )
     if not isinstance(maximum, int) or isinstance(maximum, bool) or maximum <= 0:
         raise WorkflowConfigError(
-            "operations.max_workflows_per_task must be a positive integer"
+            "operations.max_skills_per_task must be a positive integer"
         )
-    if maximum > len(OPERATIONS_DEDICATED_SKILL_NAMES):
+    if maximum > len(OPERATIONS_SKILLS):
         raise WorkflowConfigError(
-            "operations.max_workflows_per_task cannot exceed the number of "
-            "dedicated Operations skills"
+            "operations.max_skills_per_task cannot exceed the number of "
+            "Operations skills"
         )
-    return OperationsWorkflowConfig(max_workflows_per_task=maximum)
+    return OperationsSkillConfig(max_skills_per_task=maximum)
 
 
 @lru_cache(maxsize=1)
-def load_finance_workflow_config(
+def load_finance_skill_config(
     path: Path = DEFAULT_AGENT_CONFIG_PATH,
-) -> FinanceWorkflowConfig:
-    """Load and validate Finance workflow routing limits."""
+) -> FinanceSkillConfig:
+    """Load and validate the Finance per-task skill limit."""
 
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -205,17 +224,26 @@ def load_finance_workflow_config(
 
     root = _mapping(raw, "agent config")
     finance = _mapping(root.get("finance"), "finance")
-    maximum = finance.get("max_workflows_per_task")
+    maximum = finance.get(
+        "max_skills_per_task",
+        finance.get("max_workflows_per_task"),
+    )
     if not isinstance(maximum, int) or isinstance(maximum, bool) or maximum <= 0:
         raise WorkflowConfigError(
-            "finance.max_workflows_per_task must be a positive integer"
+            "finance.max_skills_per_task must be a positive integer"
         )
-    if maximum > len(FINANCE_DEDICATED_SKILL_NAMES):
+    if maximum > len(FINANCE_SKILLS):
         raise WorkflowConfigError(
-            "finance.max_workflows_per_task cannot exceed the number of "
-            "dedicated Finance skills"
+            "finance.max_skills_per_task cannot exceed the number of Finance skills"
         )
-    return FinanceWorkflowConfig(max_workflows_per_task=maximum)
+    return FinanceSkillConfig(max_skills_per_task=maximum)
+
+
+# Backward-compatible import aliases for integrations that have not yet migrated.
+OperationsWorkflowConfig = OperationsSkillConfig
+FinanceWorkflowConfig = FinanceSkillConfig
+load_operations_workflow_config = load_operations_skill_config
+load_finance_workflow_config = load_finance_skill_config
 
 
 @lru_cache(maxsize=None)
@@ -249,7 +277,7 @@ def read_finance_skill_body(skill_name: str) -> str:
 
 
 def _routing_description(markdown: str) -> str:
-    """Extract only the first applicability section, not the workflow body."""
+    """Extract only the first applicability section, not the procedure body."""
 
     lines = markdown.splitlines()
     description: list[str] = []
@@ -289,7 +317,7 @@ def build_finance_skill_catalog() -> str:
 
 
 def load_operations_skill_bodies(skill_names: list[str]) -> dict[str, str]:
-    """Load selected bodies, adding SQL safety only for the generic fallback."""
+    """Load selected bodies, adding SQL safety when sql_query is assigned."""
 
     bodies = {name: read_skill_body(name) for name in skill_names}
     if "sql_query" in bodies:
@@ -300,7 +328,7 @@ def load_operations_skill_bodies(skill_names: list[str]) -> dict[str, str]:
 
 
 def load_finance_skill_bodies(skill_names: list[str]) -> dict[str, str]:
-    """Load selected Finance bodies, adding SQL safety for the fallback only."""
+    """Load selected Finance bodies, adding SQL safety when sql_query is assigned."""
 
     bodies = {name: read_finance_skill_body(name) for name in skill_names}
     if "sql_query" in bodies:
@@ -315,20 +343,25 @@ __all__ = [
     "FINANCE_DEDICATED_SKILL_NAMES",
     "FINANCE_SKILLS",
     "FINANCE_SKILL_BY_NAME",
+    "FinanceSkillConfig",
     "FinanceWorkflowConfig",
     "GraphRuntimeConfig",
     "OPERATIONS_DEDICATED_SKILL_NAMES",
     "OPERATIONS_SKILLS",
     "OPERATIONS_SKILL_BY_NAME",
+    "OperationsSkillConfig",
     "OperationsWorkflowConfig",
     "SkillDefinition",
+    "SkillConfigError",
     "WorkflowConfigError",
     "build_finance_skill_catalog",
     "build_operations_skill_catalog",
     "load_agent_runtime_config",
     "load_finance_skill_bodies",
+    "load_finance_skill_config",
     "load_finance_workflow_config",
     "load_operations_skill_bodies",
+    "load_operations_skill_config",
     "load_operations_workflow_config",
     "read_skill_body",
     "read_finance_skill_body",

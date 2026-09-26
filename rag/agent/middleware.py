@@ -181,6 +181,7 @@ class PublicEventMiddleware:
         elif event_type == "on_custom_event" and name in {
             "sql_approval",
             "sql_auto_execute",
+            "subtask_status",
         }:
             if isinstance(data, dict):
                 translated.append(
@@ -189,6 +190,10 @@ class PublicEventMiddleware:
                         "data": dict(data),
                     }
                 )
+        elif event_type == "on_tool_start" and name == "update_sub_task_status":
+            return []
+        elif event_type == "on_tool_end" and name == "update_sub_task_status":
+            return []
         elif event_type == "on_tool_start" and name in self.allowed_tools:
             translated.extend(
                 [
@@ -208,6 +213,20 @@ class PublicEventMiddleware:
         elif event_type == "on_tool_end" and name in self.allowed_tools:
             payload = _tool_payload(data.get("output"))
             if payload:
+                if name == "format_sub_task" and payload.get("success") is True:
+                    sub_tasks = payload.get("sub_tasks") or []
+                    translated.append(
+                        {
+                            "event": "subtasks",
+                            "data": {
+                                "items": sub_tasks,
+                                "message": (
+                                    f"Created {len(sub_tasks)} subtask(s) and grouped "
+                                    "them by evidence owner."
+                                ),
+                            },
+                        }
+                    )
                 if (
                     name == "find_real_name"
                     and payload.get("success") is True
@@ -266,10 +285,16 @@ class PublicEventMiddleware:
                                     "successful_ticket_tool_count": int(
                                         validation.get("successful_ticket_tool_count") or 0
                                     ),
-                                    "workflow_count": int(
-                                        validation.get("workflow_count") or 0
+                                    "skill_count": int(
+                                        validation.get("skill_count") or 0
                                     ),
-                                    "workflows": validation.get("workflows") or [],
+                                    "skills": validation.get("skills") or [],
+                                    "assigned_subtask_count": int(
+                                        validation.get("assigned_subtask_count") or 0
+                                    ),
+                                    "subtask_statuses": (
+                                        validation.get("subtask_statuses") or {}
+                                    ),
                                     "evidence_count": int(
                                         validation.get("evidence_count") or 0
                                     ),
@@ -332,8 +357,10 @@ class PublicEventMiddleware:
     def _model_progress_message(self, name: str, tags: set[str]) -> str:
         """Return a safe phase summary, never model chain-of-thought text."""
 
-        if "supervisor-routing" in tags or name == "supervisor_routing_model":
-            return "Supervisor is identifying the period, metrics, and required evidence sources."
+        if "supervisor-planning" in tags or name == "supervisor_planning_model":
+            return "Supervisor is decomposing the request into atomic evidence questions."
+        if "supervisor-dispatch" in tags or name == "supervisor_dispatch_model":
+            return "Supervisor is grouping the fixed subtasks by evidence owner."
         if "supervisor-synthesis" in tags or name == "supervisor_synthesis_model":
             return "Supervisor is reconciling validated evidence and drafting the final answer."
 
@@ -344,16 +371,10 @@ class PublicEventMiddleware:
         self._model_turns[agent] = turn
         label = "Finance" if agent == "finance" else "Operations"
         if turn == 1:
-            if agent == "operations":
-                return "Operations is selecting a dedicated workflow or the governed SQL fallback."
-            return "Finance is selecting a dedicated workflow or the governed SQL fallback."
+            return f"{label} is loading the skills assigned to its subtask list."
         if turn == 2:
-            if agent == "operations":
-                return "Operations is using the authorized evidence tools for the selected workflow."
-            return "Finance is using the authorized evidence tools for the selected workflow."
-        if turn == 3:
-            return f"{label} is checking returned evidence and preparing its finding."
-        return f"{label} is correcting an evidence gap using validator feedback."
+            return f"{label} is executing the assigned subtasks with authorized evidence tools."
+        return f"{label} is progressing through its assigned subtask list."
 
     @staticmethod
     def _status_after_tool(
@@ -361,16 +382,26 @@ class PublicEventMiddleware:
         payload: dict[str, Any] | None,
     ) -> dict[str, Any]:
         payload = payload or {}
+        if name == "format_sub_task":
+            if payload.get("success") is True:
+                return {
+                    "stage": "subtask_dispatch",
+                    "message": "The subtask plan is validated; agent groups are ready for dispatch.",
+                }
+            return {
+                "stage": "subtask_planning",
+                "message": "The subtask plan needs correction before any agent is dispatched.",
+            }
         if name in {"load_finance_skills", "load_operations_skills"}:
             label = "Finance" if name == "load_finance_skills" else "Operations"
             if payload.get("success") is True:
                 return {
-                    "stage": "workflow_execution",
-                    "message": f"Selected workflow instructions are loaded; {label} is collecting evidence.",
+                    "stage": "skill_execution",
+                    "message": f"Assigned skill instructions are loaded; {label} is collecting evidence.",
                 }
             return {
-                "stage": "workflow_selection",
-                "message": "The workflow selection needs correction before evidence collection.",
+                "stage": "skill_selection",
+                "message": "The assigned skill selection needs correction before evidence collection.",
             }
         if name.startswith("search_") and name.endswith("_schema"):
             return {
@@ -517,11 +548,12 @@ class PublicEventMiddleware:
     @staticmethod
     def _tool_start_message(name: str) -> str:
         messages = {
+            "format_sub_task": "Formatting and validating the Supervisor's atomic subtask plan.",
             "search_knowledge": "Searching the uploaded knowledge base for supporting rules.",
             "delegate_finance": "Preparing a structured task for the Finance Agent.",
             "delegate_operations": "Preparing a structured task for the Operations Agent.",
-            "load_finance_skills": "Loading instructions for the selected Finance workflows.",
-            "load_operations_skills": "Loading instructions for the selected Operations workflows.",
+            "load_finance_skills": "Loading instructions for the assigned Finance skills.",
+            "load_operations_skills": "Loading instructions for the assigned Operations skills.",
             "calculate_net_sales": "Finance is calculating refund-adjusted net sales.",
             "calculate_gross_profit": "Finance is calculating gross profit from recorded transactions.",
             "calculate_gross_margin": "Finance is calculating gross margin from recorded transactions.",
@@ -546,13 +578,20 @@ class PublicEventMiddleware:
 
     @staticmethod
     def _tool_end_message(name: str, payload: dict[str, Any] | None) -> str:
+        if name == "format_sub_task" and payload is not None:
+            if payload.get("success") is True:
+                return (
+                    f"{name} validated {len(payload.get('sub_tasks') or [])} "
+                    "subtask(s)."
+                )
+            return f"{name} reported {payload.get('error_type', 'an error')}."
         if (
             name in {"load_finance_skills", "load_operations_skills"}
             and payload is not None
         ):
             if payload.get("success") is True:
                 count = len(payload.get("selected_skills") or [])
-                return f"{name} loaded {count} workflow skill(s)."
+                return f"{name} loaded {count} skill(s)."
             return f"{name} reported {payload.get('error_type', 'an error')}."
         if (
             name in {
@@ -643,7 +682,10 @@ class AgentLoggingCallback(AsyncCallbackHandler):
     def _response_phase(kwargs: dict[str, Any]) -> str:
         tags = {str(tag) for tag in kwargs.get("tags") or []}
         name = str(kwargs.get("name") or "")
-        if "supervisor-routing" in tags or name == "supervisor_routing_model":
+        if (
+            {"supervisor-planning", "supervisor-dispatch"} & tags
+            or name in {"supervisor_planning_model", "supervisor_dispatch_model"}
+        ):
             return "supervisor_routing"
         if "supervisor-synthesis" in tags or name == "supervisor_synthesis_model":
             return "supervisor_synthesis"

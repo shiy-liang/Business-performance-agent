@@ -5,7 +5,7 @@
 Use this skill when the task asks which products have the lowest, worst, or least
 effective like rate or purchase rate across the current product metrics view.
 
-## Dedicated workflow
+## Execution procedure
 
 1. For lowest like-rate requests, call `check_less_like` with no arguments.
 2. For lowest purchase-rate requests, call `check_less_purchase` with no

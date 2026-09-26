@@ -9,8 +9,8 @@ from typing import Mapping
 from rag.agent.workflows import (
     build_finance_skill_catalog,
     build_operations_skill_catalog,
-    load_finance_workflow_config,
-    load_operations_workflow_config,
+    load_finance_skill_config,
+    load_operations_skill_config,
 )
 
 
@@ -52,6 +52,9 @@ def load_supervisor_components() -> dict[str, str]:
         "business_diagnosis": _read(
             SKILL_ROOT / "supervisor" / "business_diagnosis.md"
         ),
+        "task_decomposition": _read(
+            SKILL_ROOT / "supervisor" / "task_decomposition.md"
+        ),
         "evidence_policy": _read(SKILL_ROOT / "common" / "evidence_policy.md"),
     }
 
@@ -64,9 +67,17 @@ def build_supervisor_prompt(
     """Compose the injectable supervisor system prompt for one user turn."""
 
     components = load_supervisor_components()
+    task_decomposition = inject_template(
+        components["task_decomposition"],
+        {
+            "operations_skill_catalog": build_operations_skill_catalog(),
+            "finance_skill_catalog": build_finance_skill_catalog(),
+        },
+    )
     skills = "\n\n".join(
         (
             components["business_diagnosis"],
+            task_decomposition,
             components["evidence_policy"],
         )
     )
@@ -111,13 +122,13 @@ def build_specialist_prompt(
     # Specialists use progressive disclosure: only routing metadata is in the
     # system prompt; complete selected bodies arrive later through a ToolMessage.
     settings = (
-        load_finance_workflow_config()
+        load_finance_skill_config()
         if agent_name == "finance"
-        else load_operations_workflow_config()
+        else load_operations_skill_config()
     )
     extra_values = {
         "skill_catalog": components["skill_catalog"],
-        "max_workflows_per_task": str(settings.max_workflows_per_task),
+        "max_skills_per_task": str(settings.max_skills_per_task),
     }
     return inject_template(
         components["system"],

@@ -6,7 +6,7 @@ Use this skill when the task asks what proportion of a product's expressed
 interest became a purchase, including wording about cart, wishlist, checkout,
 purchase conversion, actual transaction rate, or loved-to-purchased rate.
 
-## Dedicated workflow
+## Execution procedure
 
 1. Use `find_real_name` first only when the product wording is fuzzy,
    non-standard, or cross-language. If it returns multiple plausible products

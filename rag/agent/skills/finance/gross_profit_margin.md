@@ -5,11 +5,11 @@
 Use this skill when the task asks to query or calculate gross profit or gross
 margin from transactions already recorded in the database, either for the full
 dataset or one specified scope. Do not use it for a forecast, prediction,
-projection, budget, future period, or any forward-looking result. This workflow
+projection, budget, future period, or any forward-looking result. This skill
 calculates recorded-data metrics; it does not predict them.
 Use generic SQL for grouped breakdowns, rankings, comparisons, or time series.
 
-## Dedicated workflow
+## Execution procedure
 
 1. For gross-profit amount only, call `calculate_gross_profit` exactly once.
 2. For gross-margin percentage, call `calculate_gross_margin` exactly once. Its
