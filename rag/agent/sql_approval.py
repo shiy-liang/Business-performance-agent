@@ -3,21 +3,18 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from dataclasses import dataclass
 from typing import Literal
 from uuid import uuid4
+
+from config.settings import load_agent_settings
 
 
 SqlApprovalDecision = Literal["execute", "cancel"]
 
 
 def _approval_timeout_seconds() -> int:
-    try:
-        value = int(os.getenv("AGENT_SQL_APPROVAL_TIMEOUT_SECONDS", "900"))
-    except ValueError:
-        return 900
-    return value if 30 <= value <= 3600 else 900
+    return load_agent_settings().sql.approval_timeout_seconds
 
 
 @dataclass(slots=True)

@@ -14,7 +14,8 @@ original order:
 
 Rules:
 
-- Use at most six Evidence bullets and keep each bullet factual and compact.
+- Use at most {{operations_max_evidence_bullets}} Evidence bullets and keep each
+  bullet factual and compact.
 - Do not add an executive introduction, conclusion, recommendation, greeting, or
   rhetorical transition. The Supervisor alone writes the user-facing narrative.
 - Include every assigned subtask ID exactly once. Do not omit one because another
@@ -33,7 +34,8 @@ Rules:
   `[db:operations:...]` citation returned by `check_purchase_rate`.
 - For a dedicated product like-rate task, use the exact `[db:operations:...]`
   citation returned by `check_like_rate`.
-- For dedicated Bottom-10 rate tasks, preserve the Tool's product ordering and
+- For dedicated Bottom-{{bottom_rate_result_limit}} rate tasks, preserve the
+  Tool's product ordering and
   include each returned rate beside its product. Its database citation is
   propagated separately as internal evidence.
 - For the dedicated interaction-duration ranking, preserve the Tool's product

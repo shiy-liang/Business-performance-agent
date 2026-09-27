@@ -2,6 +2,7 @@
 
 from contextlib import asynccontextmanager
 from hashlib import sha256
+import json
 from pathlib import Path
 
 import psycopg
@@ -21,6 +22,7 @@ from backend.routers.products import router as products_router
 from backend.routers.product_reviews import router as product_reviews_router
 from backend.routers.runs import router as runs_router
 from backend.routers.sessions import router as sessions_router
+from config.settings import load_application_settings
 from rag.agent.bootstrap import initialize_agent_runtime
 from rag.agent.sql_approval import sql_approval_manager
 
@@ -75,7 +77,19 @@ def dashboard() -> HTMLResponse:
     assets = sorted(frontend_directory.glob("*.js")) + sorted(frontend_directory.glob("*.css"))
     assets += sorted((frontend_directory / "vendor").glob("chat-renderer.*"))
     version = sha256(b"".join(path.read_bytes() for path in assets)).hexdigest()[:16]
+    settings = load_application_settings()
+    browser_config = json.dumps(
+        {
+            "dashboardFilterDebounceMs": (
+                settings.frontend.dashboard_filter_debounce_ms
+            ),
+            "copyFeedbackMs": settings.frontend.copy_feedback_ms,
+            "maxChatMessageLength": settings.api.max_chat_message_length,
+        },
+        separators=(",", ":"),
+    )
     html = (frontend_directory / "index.html").read_text(encoding="utf-8")
+    html = html.replace("__APP_CONFIG__", browser_config)
     return HTMLResponse(html.replace("__ASSET_VERSION__", version))
 
 

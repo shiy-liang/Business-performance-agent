@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import re
 from datetime import date, datetime
 from decimal import Decimal
@@ -14,7 +13,6 @@ from typing import Any, Literal
 
 import psycopg
 import sqlglot
-from dotenv import load_dotenv
 from langchain_core.callbacks.manager import adispatch_custom_event
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, tool
@@ -23,7 +21,11 @@ from psycopg.rows import dict_row
 from pydantic import BaseModel, Field, field_validator
 from sqlglot import exp
 
-from model.config import PROJECT_ROOT
+from config.settings import (
+    load_agent_settings,
+    load_application_settings,
+    load_environment_settings,
+)
 from observability import logger
 from rag.agent.sql_approval import sql_approval_manager
 from rag.agent.tools.common.schema_catalog import (
@@ -36,56 +38,50 @@ from rag.agent.tools.common.schema_catalog import (
 )
 
 
-load_dotenv(PROJECT_ROOT / ".env")
+_SQL_SETTINGS = load_agent_settings().sql
+_APPLICATION_SETTINGS = load_application_settings()
 
-DEFAULT_MAX_ROWS = 500
-DEFAULT_MAX_RESULT_CHARS = 30000
-DEFAULT_TIMEOUT_MS = 5000
-DEFAULT_MAX_ATTEMPTS = 3
+# Compatibility names retained for integrations that import the old constants.
+DEFAULT_MAX_ROWS = _SQL_SETTINGS.max_rows_per_subtask
+DEFAULT_MAX_RESULT_CHARS = _SQL_SETTINGS.max_result_chars_per_subtask
+DEFAULT_TIMEOUT_MS = _SQL_SETTINGS.statement_timeout_ms
+DEFAULT_MAX_ATTEMPTS = _SQL_SETTINGS.max_attempts_per_subtask
 PARAMETER_PATTERN = re.compile(r"%\(([A-Za-z_][A-Za-z0-9_]*)\)s")
 
 
-def _positive_env(name: str, default: int, maximum: int) -> int:
-    try:
-        value = int(os.getenv(name, str(default)))
-    except ValueError:
-        return default
-    return value if 0 < value <= maximum else default
-
-
 def sql_max_rows() -> int:
-    return _positive_env("AGENT_SQL_MAX_ROWS", DEFAULT_MAX_ROWS, 5000)
+    return _SQL_SETTINGS.max_rows_per_subtask
 
 
 def sql_timeout_ms() -> int:
-    return _positive_env("AGENT_SQL_TIMEOUT_MS", DEFAULT_TIMEOUT_MS, 30000)
+    return _SQL_SETTINGS.statement_timeout_ms
 
 
 def sql_max_result_chars() -> int:
-    return _positive_env(
-        "AGENT_SQL_MAX_RESULT_CHARS",
-        DEFAULT_MAX_RESULT_CHARS,
-        200000,
-    )
+    return _SQL_SETTINGS.max_result_chars_per_subtask
 
 
 def sql_max_attempts() -> int:
-    return _positive_env("AGENT_SQL_MAX_ATTEMPTS", DEFAULT_MAX_ATTEMPTS, 3)
+    return _SQL_SETTINGS.max_attempts_per_subtask
 
 
 class SchemaSearchInput(BaseModel):
     query: str = Field(
-        min_length=2,
-        max_length=500,
+        min_length=_SQL_SETTINGS.schema_search_min_query_length,
+        max_length=_SQL_SETTINGS.schema_search_max_query_length,
         description="An English schema-search phrase containing the required metrics, entities, and filters.",
     )
-    top_k: int = Field(default=6, ge=1, le=8)
+    top_k: int = Field(
+        default=_SQL_SETTINGS.schema_search_default_top_k,
+        ge=1,
+        le=_SQL_SETTINGS.schema_search_max_top_k,
+    )
 
 
 class EntityResolutionInput(BaseModel):
     entity_type: str = Field(
-        min_length=2,
-        max_length=40,
+        min_length=_SQL_SETTINGS.entity_type_min_length,
+        max_length=_SQL_SETTINGS.entity_type_max_length,
         description=(
             "One supported non-product-name entity type returned by the schema "
             "tool. Never use entity_type='product' for a product name; resolve "
@@ -93,17 +89,21 @@ class EntityResolutionInput(BaseModel):
         ),
     )
     user_term: str = Field(
-        min_length=1,
-        max_length=120,
+        min_length=_SQL_SETTINGS.entity_term_min_length,
+        max_length=_SQL_SETTINGS.entity_term_max_length,
         description="The user's entity phrase or a careful translated candidate.",
     )
-    limit: int = Field(default=8, ge=1, le=10)
+    limit: int = Field(
+        default=_SQL_SETTINGS.entity_resolution_default_limit,
+        ge=1,
+        le=_SQL_SETTINGS.entity_resolution_max_limit,
+    )
 
 
 class ColumnDetailInput(BaseModel):
     table_name: str = Field(
         min_length=1,
-        max_length=63,
+        max_length=_SQL_SETTINGS.table_name_max_length,
         description="One authorized table name returned by the schema search tool.",
     )
 
@@ -113,8 +113,8 @@ SqlParameter = str | int | float | bool | None
 
 class ReadonlySqlInput(BaseModel):
     sql: str = Field(
-        min_length=8,
-        max_length=12000,
+        min_length=_SQL_SETTINGS.min_sql_length,
+        max_length=_SQL_SETTINGS.max_sql_length,
         description="One PostgreSQL SELECT query using only schema returned by the schema tool.",
     )
     parameters: dict[str, SqlParameter] = Field(
@@ -123,7 +123,7 @@ class ReadonlySqlInput(BaseModel):
     )
     purpose: str = Field(
         min_length=3,
-        max_length=300,
+        max_length=_SQL_SETTINGS.max_purpose_length,
         description="A short public explanation of what this query measures.",
     )
 
@@ -132,8 +132,9 @@ class ReadonlySqlInput(BaseModel):
     def validate_parameter_count(
         cls, value: dict[str, SqlParameter]
     ) -> dict[str, SqlParameter]:
-        if len(value) > 30:
-            raise ValueError("No more than 30 SQL parameters are allowed")
+        maximum = _SQL_SETTINGS.max_parameters_per_query
+        if len(value) > maximum:
+            raise ValueError(f"No more than {maximum} SQL parameters are allowed")
         return value
 
 
@@ -184,8 +185,9 @@ def _json_value(value: Any) -> Any:
         return value.isoformat()
     if isinstance(value, bytes):
         return "[binary data omitted]"
-    if isinstance(value, str) and len(value) > 4000:
-        return value[:4000] + "… [truncated]"
+    maximum = _SQL_SETTINGS.max_string_cell_chars
+    if isinstance(value, str) and len(value) > maximum:
+        return value[:maximum] + "… [truncated]"
     if isinstance(value, list):
         return [_json_value(item) for item in value]
     if isinstance(value, dict):
@@ -507,10 +509,8 @@ async def get_columns_detail(
 
 
 def readonly_database_url() -> str:
-    database_url = (
-        os.getenv("AGENT_READONLY_DATABASE_URL", "").strip()
-        or os.getenv("DATABASE_URL", "").strip()
-    )
+    environment = load_environment_settings()
+    database_url = environment.agent_readonly_database_url or environment.database_url
     if not database_url:
         raise RuntimeError(
             "AGENT_READONLY_DATABASE_URL or DATABASE_URL must be configured"
@@ -521,7 +521,7 @@ def readonly_database_url() -> str:
 def connect_readonly() -> psycopg.Connection:
     return psycopg.connect(
         readonly_database_url(),
-        connect_timeout=5,
+        connect_timeout=_APPLICATION_SETTINGS.database.connect_timeout_seconds,
         prepare_threshold=None,
     )
 
@@ -778,7 +778,7 @@ def build_sql_tools(
     async def search_schema(
         query: str,
         config: RunnableConfig,
-        top_k: int = 6,
+        top_k: int = _SQL_SETTINGS.schema_search_default_top_k,
     ) -> str:
         started_at = perf_counter()
         tool_name = f"search_{agent_name}_schema"
@@ -810,7 +810,7 @@ def build_sql_tools(
         entity_type: str,
         user_term: str,
         config: RunnableConfig,
-        limit: int = 8,
+        limit: int = _SQL_SETTINGS.entity_resolution_default_limit,
     ) -> str:
         started_at = perf_counter()
         tool_name = f"resolve_{agent_name}_entity"
@@ -874,7 +874,8 @@ def build_sql_tools(
         description=(
             f"Validate and execute one parameterized, read-only PostgreSQL SELECT for "
             f"the {agent_name} domain. It enforces a table whitelist, read-only transaction, "
-            "timeout, row cap, and at most three attempts."
+            "timeout, row cap, and at most "
+            f"{_SQL_SETTINGS.max_attempts_per_subtask} attempts."
         ),
     )
     async def execute_sql(

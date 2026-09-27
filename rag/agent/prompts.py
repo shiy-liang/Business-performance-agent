@@ -6,6 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Mapping
 
+from config.settings import render_config_template
 from rag.agent.workflows import (
     build_finance_skill_catalog,
     build_operations_skill_catalog,
@@ -25,7 +26,7 @@ class PromptTemplateError(RuntimeError):
 
 def _read(path: Path) -> str:
     try:
-        return path.read_text(encoding="utf-8").strip()
+        return render_config_template(path.read_text(encoding="utf-8").strip())
     except OSError as exc:
         raise PromptTemplateError(f"Unable to load prompt component: {path}") from exc
 

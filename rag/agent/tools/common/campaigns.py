@@ -13,16 +13,18 @@ from pgvector import Vector
 from pgvector.psycopg import register_vector
 from pydantic import BaseModel, Field
 
+from config.settings import load_agent_settings
 from model import embedding_model
 from observability import logger
 from rag.agent.tools.common.sql_runtime import connect_readonly, set_readonly_guards
 
 
-CAMPAIGN_NAME_TOP_K = 5
-MIN_SIMILARITY = 0.70
-CAMPAIGN_NAME_SIMILARITY_THRESHOLDS = (0.70, 0.60, 0.55)
+_CAMPAIGN_SETTINGS = load_agent_settings().campaign_resolution
+CAMPAIGN_NAME_TOP_K = _CAMPAIGN_SETTINGS.top_k
+CAMPAIGN_NAME_SIMILARITY_THRESHOLDS = _CAMPAIGN_SETTINGS.similarity_thresholds
+MIN_SIMILARITY = CAMPAIGN_NAME_SIMILARITY_THRESHOLDS[0]
 MAX_CAMPAIGN_NAME_ATTEMPTS = len(CAMPAIGN_NAME_SIMILARITY_THRESHOLDS)
-MAX_SIMILARITY_GAP = 0.20
+MAX_SIMILARITY_GAP = _CAMPAIGN_SETTINGS.max_similarity_gap
 
 CAMPAIGN_NAME_SEARCH_SQL = """
 SELECT
@@ -36,7 +38,7 @@ FROM public.campaigns
 WHERE embedding IS NOT NULL
   AND vector_dims(embedding) = %(dimensions)s
 ORDER BY similarity DESC, campaign_name ASC
-LIMIT 5
+LIMIT %(top_k)s
 """
 
 
@@ -45,7 +47,7 @@ class FindRealCampaignNameInput(BaseModel):
 
     query: str = Field(
         min_length=1,
-        max_length=200,
+        max_length=_CAMPAIGN_SETTINGS.max_query_length,
         description=(
             "A fuzzy, abbreviated, non-standard, or cross-language campaign name "
             "from the user."
@@ -67,6 +69,7 @@ def _search_campaign_candidates(query_vector: list[float]) -> list[dict[str, Any
                 {
                     "query_embedding": vector,
                     "dimensions": len(query_vector),
+                    "top_k": CAMPAIGN_NAME_TOP_K,
                 },
             )
             rows = cursor.fetchall()
@@ -148,7 +151,7 @@ def canonical_campaign_name_error(
 
 @tool(args_schema=FindRealCampaignNameInput)
 async def find_real_campaign_name(query: str, config: RunnableConfig) -> str:
-    """Resolve a fuzzy campaign name, stopping after a match or three attempts."""
+    """Resolve a fuzzy campaign within the configured sequential-attempt policy."""
 
     tool_name = "find_real_campaign_name"
     state = _campaign_resolution_state(config)
@@ -202,7 +205,7 @@ async def find_real_campaign_name(query: str, config: RunnableConfig) -> str:
                 "result_status": "canonical_campaign_not_found",
                 "error_type": "canonical_campaign_not_found",
                 "error": (
-                    "No canonical campaign name was found after three attempts. "
+                    f"No canonical campaign name was found after {MAX_CAMPAIGN_NAME_ATTEMPTS} attempts. "
                     "Stop querying and ask the user for an exact campaign name."
                 ),
                 "call_number": attempts,
@@ -317,7 +320,7 @@ async def find_real_campaign_name(query: str, config: RunnableConfig) -> str:
         "rephrasing of the user's campaign wording."
         if not terminal
         else (
-            "No canonical campaign name was found after three attempts. "
+            f"No canonical campaign name was found after {MAX_CAMPAIGN_NAME_ATTEMPTS} attempts. "
             "Stop querying and ask the user for an exact campaign name."
         )
     )

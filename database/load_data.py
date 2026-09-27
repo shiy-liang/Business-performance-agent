@@ -9,8 +9,9 @@ import io
 from pathlib import Path
 
 import psycopg
-from dotenv import load_dotenv
 from psycopg import sql
+
+from config.settings import load_environment_settings
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATASETS = [
@@ -30,8 +31,7 @@ DATASETS = [
 
 
 def database_url() -> str:
-    load_dotenv(PROJECT_ROOT / ".env")
-    value = os.getenv("DATABASE_URL")
+    value = load_environment_settings().database_url
     if not value:
         raise RuntimeError("DATABASE_URL is missing. Copy .env.example to .env first.")
     return value

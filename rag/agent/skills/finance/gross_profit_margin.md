@@ -11,8 +11,10 @@ Use generic SQL for grouped breakdowns, rankings, comparisons, or time series.
 
 ## Execution procedure
 
-1. For gross-profit amount only, call `calculate_gross_profit` exactly once.
-2. For gross-margin percentage, call `calculate_gross_margin` exactly once. Its
+1. For gross-profit amount only, call `calculate_gross_profit` at most
+   {{finance_metric_max_calls}} time(s).
+2. For gross-margin percentage, call `calculate_gross_margin` at most
+   {{finance_metric_max_calls}} time(s). Its
    result also contains the supporting gross-profit amount, so use this Tool alone
    when both profit and margin are requested.
 3. Do not retrieve schema, generate SQL, or call `execute_finance_sql` for either

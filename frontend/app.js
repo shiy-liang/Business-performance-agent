@@ -1,5 +1,7 @@
 "use strict";
 
+const appConfig = Object.freeze(window.APP_CONFIG);
+
 const state = {
   month: "",
   financeChartView: "trend",
@@ -249,6 +251,9 @@ function showCurrentPage() {
 
 window.addEventListener("hashchange", showCurrentPage);
 showCurrentPage();
+
+elements.chatInput.maxLength = appConfig.maxChatMessageLength;
+
 
 const moneyFormatter = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -588,7 +593,7 @@ function archiveCompletedTurn() {
   archived.removeAttribute("aria-live");
   archived.hidden = false;
   archived.classList.add("chat-turn--archived");
-  archived.querySelector(".chat-trace")?.remove();
+
   archived.querySelector(".answer-actions")?.remove();
   archived.querySelectorAll("[id]").forEach((node) => node.removeAttribute("id"));
   archived.querySelector("[aria-labelledby]")?.removeAttribute("aria-labelledby");
@@ -2675,7 +2680,7 @@ function scheduleDashboardLoad() {
   state.filterTimer = window.setTimeout(() => {
     state.filterTimer = null;
     loadDashboard();
-  }, 300);
+  }, appConfig.dashboardFilterDebounceMs);
 }
 
 elements.productTabs.addEventListener("click", (event) => {
@@ -3011,7 +3016,7 @@ elements.chatCopyButton.addEventListener("click", async () => {
     elements.chatCopyButton.textContent = "Copied";
     window.setTimeout(() => {
       elements.chatCopyButton.textContent = "Copy";
-    }, 1400);
+    }, appConfig.copyFeedbackMs);
   } catch (_error) {
     elements.chatCopyButton.textContent = "Copy failed";
   }

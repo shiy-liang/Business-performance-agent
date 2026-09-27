@@ -11,7 +11,8 @@ interaction time across product-related user behaviors.
 2. Do not retrieve schema, generate SQL, resolve product names, or call another
    rate or ranking Tool for this request.
 3. Preserve the returned order. The first product has the strongest combined
-   interaction-duration ranking, and the list contains at most ten products.
+   interaction-duration ranking, and the list contains at most
+   {{interaction_result_limit}} products.
 4. Display the returned `total_duration`, `avg_duration`, `interaction_count`,
    `rank_total`, `rank_avg`, and `rank_combo` beside each product. Do not invent
    causes, time ranges, or recommendations.
@@ -20,7 +21,8 @@ interaction time across product-related user behaviors.
 
 ## Ranking definition
 
-The fixed SQL keeps products with non-null interaction duration and at least 20
+The fixed SQL keeps products with non-null interaction duration and at least
+{{interaction_minimum_samples}}
 interaction rows. It ranks both total duration and average duration descending,
 averages those two ranks into `rank_combo`, then orders by `rank_combo` ascending
 and total duration descending. This is a combined rank, not a pure total-duration

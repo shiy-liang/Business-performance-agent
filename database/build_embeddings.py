@@ -2,29 +2,26 @@
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
-
 import numpy as np
 import psycopg
-from dotenv import load_dotenv
 from pgvector.psycopg import register_vector
 from psycopg.types.json import Jsonb
 from sentence_transformers import SentenceTransformer
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-EXPECTED_DIMENSIONS = 384
+from config.settings import load_environment_settings
+from model.config import load_model_config
+
+
+_OFFLINE_SETTINGS = load_model_config().offline_embedding_model
+DEFAULT_MODEL = _OFFLINE_SETTINGS.model
+EXPECTED_DIMENSIONS = _OFFLINE_SETTINGS.dimensions
 
 
 def settings() -> tuple[str, str, int]:
-    load_dotenv(PROJECT_ROOT / ".env")
-    url = os.getenv("DATABASE_URL")
+    url = load_environment_settings().database_url
     if not url:
         raise RuntimeError("DATABASE_URL is missing from .env")
-    model = os.getenv("EMBEDDING_MODEL", DEFAULT_MODEL)
-    batch_size = int(os.getenv("EMBEDDING_BATCH_SIZE", "64"))
-    return url, model, batch_size
+    return url, _OFFLINE_SETTINGS.model, _OFFLINE_SETTINGS.batch_size
 
 
 def fetch_documents(connection: psycopg.Connection) -> list[dict[str, object]]:

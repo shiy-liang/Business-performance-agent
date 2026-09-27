@@ -11,12 +11,15 @@ from typing import Any
 
 from langchain_core.tools import tool
 
+from config.settings import load_agent_settings
 from observability import logger
 from rag.agent.tools.common.product_metrics import NoToolInput
 from rag.agent.tools.common.sql_runtime import connect_readonly, set_readonly_guards
 
 
-MOST_INTERACT_SQL = """
+_RANKING_SETTINGS = load_agent_settings().rankings
+
+MOST_INTERACT_SQL = f"""
 WITH stats AS (
     SELECT
         i.page_or_product,
@@ -31,7 +34,7 @@ WITH stats AS (
           FROM public.products
       )
     GROUP BY i.page_or_product
-    HAVING COUNT(*) >= 20
+    HAVING COUNT(*) >= {_RANKING_SETTINGS.interaction_minimum_samples}
 ),
 ranked AS (
     SELECT
@@ -60,7 +63,7 @@ SELECT
     rank_combo
 FROM ranked
 ORDER BY rank_combo ASC, total_duration DESC
-LIMIT 10
+LIMIT {_RANKING_SETTINGS.interaction_result_limit}
 """
 
 
@@ -116,7 +119,7 @@ def _evidence_artifact(row_count: int) -> dict[str, Any]:
         "agent": "operations",
         "tool": "check_most_interact",
         "metric": "interaction_duration_rank_combo",
-        "minimum_interactions": 20,
+        "minimum_interactions": _RANKING_SETTINGS.interaction_minimum_samples,
         "row_count": row_count,
         "citation": citation,
         "sources": [source],
@@ -125,15 +128,15 @@ def _evidence_artifact(row_count: int) -> dict[str, Any]:
 
 @tool(args_schema=NoToolInput, response_format="content_and_artifact")
 async def check_most_interact() -> tuple[str, dict[str, Any]]:
-    """Return the top 10 products by combined total and average interaction duration rank."""
+    """Return the configured product interaction-duration combined ranking."""
 
     tool_name = "check_most_interact"
     started_at = perf_counter()
     logger.tool_event(
         status="started",
         tool_name=tool_name,
-        minimum_interactions=20,
-        limit=10,
+        minimum_interactions=_RANKING_SETTINGS.interaction_minimum_samples,
+        limit=_RANKING_SETTINGS.interaction_result_limit,
     )
     try:
         ranking = await asyncio.to_thread(_query_most_interacted_products)
