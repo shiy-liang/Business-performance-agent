@@ -1220,7 +1220,7 @@ function parseSseFrame(frame) {
   handleChatEvent(eventName, data);
 }
 
-async function submitChat(question) {
+async function submitChat(question, { abortExisting = true } = {}) {
   const cleanQuestion = String(question || "").trim();
   if (!cleanQuestion) return;
   const autoExecuteSql = elements.sqlAutoExecute.checked;
@@ -1230,9 +1230,13 @@ async function submitChat(question) {
     showGlobalError(`Chat session could not be created: ${error.message}`);
     return;
   }
-  if (state.chatController) state.chatController.abort();
+  if (state.chatController) {
+    if (!abortExisting) return;
+    state.chatController.abort();
+  }
   const controller = new AbortController();
   state.chatController = controller;
+  setRiskAskAgentButtonsDisabled(true);
   archiveCompletedTurn();
   prepareChatResponse(cleanQuestion);
 
@@ -1294,6 +1298,7 @@ async function submitChat(question) {
   } finally {
     if (state.chatController === controller) {
       state.chatController = null;
+      setRiskAskAgentButtonsDisabled(false);
       submitButton.disabled = false;
       elements.sqlAutoExecute.disabled = false;
       elements.chatSubmitLabel.textContent = "Send";
@@ -1750,17 +1755,23 @@ function fixedNumber(value, digits = 2) {
   return finiteNumber(value).toFixed(digits);
 }
 
-function issueContext(issue) {
+function issueScopeLabel(issue) {
   const scope = issue && typeof issue.scope === "object" ? issue.scope : {};
-  const period = issue && typeof issue.period === "object" ? issue.period : {};
-  const scopeLabel = scope.label ||
+  return scope.label ||
     (scope.type === "company" ? "Company-wide" : scope.store_id || "Current scope");
-  const periodLabel = period.snapshot_date
+}
+
+function issuePeriodLabel(issue) {
+  const period = issue && typeof issue.period === "object" ? issue.period : {};
+  return period.snapshot_date
     ? `Snapshot ${period.snapshot_date}`
     : period.data_through
       ? `Data through ${period.data_through}`
     : period.month || "Current period";
-  return `${scopeLabel} · ${periodLabel}`;
+}
+
+function issueContext(issue) {
+  return `${issueScopeLabel(issue)} · ${issuePeriodLabel(issue)}`;
 }
 
 function genericEvidence(evidence) {
@@ -1797,6 +1808,13 @@ function issueEvidenceLines(issue) {
       `${formatMoney(evidence.baseline_value)} → ${formatMoney(evidence.current_value)}`,
     ];
   }
+  if (issue.issue_type === "inventory_replenishment_risk") {
+    return [
+      `${numberFormatter.format(finiteNumber(evidence.affected_inventory_count))} of ${numberFormatter.format(finiteNumber(evidence.total_inventory_count))} inventory records need replenishment`,
+      `${fixedNumber(evidence.affected_ratio)}% affected`,
+      `${numberFormatter.format(finiteNumber(evidence.critical_count))} critical records`,
+    ];
+  }
   if (issue.issue_type === "campaign_inefficiency") {
     return [
       `${numberFormatter.format(finiteNumber(evidence.negative_roi_campaign_count))} of ${numberFormatter.format(finiteNumber(evidence.active_campaign_count))} active campaigns have negative reported ROI`,
@@ -1823,13 +1841,161 @@ function issueEvidenceLines(issue) {
   return genericEvidence(evidence);
 }
 
+function candidatePromptText(value, maxLength = 160) {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  return text.length <= maxLength
+    ? text
+    : `${text.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
+}
+
+function candidateIssueRepresentativeLines(issue) {
+  const evidence = issue && typeof issue.evidence === "object" ? issue.evidence : {};
+  if (issue?.issue_type === "inventory_replenishment_risk") {
+    const items = Array.isArray(evidence.representative_items)
+      ? evidence.representative_items.slice(0, 3)
+      : [];
+    return items
+      .filter((item) => item && typeof item === "object")
+      .map((item) => {
+        const name = candidatePromptText(item.product_name || "Unknown product", 100);
+        const location = candidatePromptText(item.store_location || "Unknown location", 80);
+        return `Representative item: ${name} at ${location}, stock ${numberFormatter.format(finiteNumber(item.stock_quantity))}, reorder level ${numberFormatter.format(finiteNumber(item.reorder_level))}`;
+      });
+  }
+  if (issue?.issue_type === "campaign_inefficiency") {
+    const campaigns = Array.isArray(evidence.representative_campaigns)
+      ? evidence.representative_campaigns.slice(0, 3)
+      : [];
+    return campaigns
+      .filter((campaign) => campaign && typeof campaign === "object")
+      .map((campaign) => {
+        const name = candidatePromptText(
+          campaign.campaign_name || campaign.campaign_id || "Unknown campaign",
+          120,
+        );
+        return `Representative campaign: ${name}, reported lifecycle ROI ${fixedNumber(campaign.reported_roi)}%`;
+      });
+  }
+  if (issue?.issue_type === "support_ticket_backlog") {
+    const tickets = Array.isArray(evidence.representative_tickets)
+      ? evidence.representative_tickets.slice(0, 3)
+      : [];
+    return tickets
+      .filter((ticket) => ticket && typeof ticket === "object")
+      .map((ticket) => {
+        const category = candidatePromptText(ticket.issue_category || "Support request", 120);
+        return `Representative ticket: ${category}, open ${numberFormatter.format(finiteNumber(ticket.open_days))} days`;
+      });
+  }
+  return [];
+}
+
+function buildCandidateIssuePrompt(issue) {
+  if (!issue || typeof issue !== "object" || Array.isArray(issue)) return "";
+
+  const scope = issue.scope && typeof issue.scope === "object" ? issue.scope : {};
+  const period = issue.period && typeof issue.period === "object" ? issue.period : {};
+  const title = candidatePromptText(issue.title || issue.issue_type || "Business risk", 160);
+  const severity = candidatePromptText(issue.severity || "unknown", 20).toUpperCase();
+  const scopeType = scope.type === "company" ? "company scope" : scope.type === "store" ? "store scope" : "current scope";
+  const storeSuffix = scope.type === "store" && scope.store_id
+    ? ` (store ${candidatePromptText(scope.store_id, 60)})`
+    : "";
+  const scopeLine = `${candidatePromptText(issueScopeLabel(issue), 160)} — ${scopeType}${storeSuffix}`;
+  const periodLine = period.snapshot_date
+    ? `Latest available inventory snapshot on ${candidatePromptText(period.snapshot_date, 40)}`
+    : period.month
+      ? `Operating month ${candidatePromptText(period.month, 40)}`
+      : period.data_through
+        ? `Data through ${candidatePromptText(period.data_through, 40)}`
+        : candidatePromptText(issuePeriodLabel(issue), 160);
+  const evidenceLines = [
+    ...issueEvidenceLines(issue).slice(0, 4),
+    ...candidateIssueRepresentativeLines(issue),
+  ].slice(0, 7).map((line) => candidatePromptText(line, 240));
+  const inventoryCaution = period.snapshot_date
+    ? "Inventory evidence is from the latest available snapshot. Do not interpret this snapshot as the selected financial operating month or as a proven cause of historical financial performance."
+    : "";
+
+  const buildPrompt = () => [
+    "Investigate this newly selected dashboard risk.",
+    "",
+    `Risk: ${title}`,
+    `Severity: ${severity}`,
+    `Scope: ${scopeLine}`,
+    `Period: ${periodLine}`,
+    "",
+    "Confirmed deterministic evidence:",
+    ...evidenceLines.map((line) => `- ${line}`),
+    ...(inventoryCaution ? ["", inventoryCaution] : []),
+    "",
+    "Please investigate using available business data and tools.",
+    "",
+    "Explain:",
+    "1. What happened?",
+    "2. What may explain it?",
+    "3. What should be investigated or done next?",
+    "",
+    "Treat the evidence above as confirmed deterministic data.",
+    "Clearly distinguish hypotheses from established facts.",
+    "Do not present inferred causes as confirmed facts.",
+  ].join("\n");
+
+  let prompt = buildPrompt();
+  while (prompt.length > 2000 && evidenceLines.length > 1) {
+    evidenceLines.pop();
+    prompt = buildPrompt();
+  }
+  return prompt;
+}
+
+function candidateIssueAskButton(issue, issueIndex) {
+  if (!issue || typeof issue !== "object" || !Number.isInteger(issueIndex) || issueIndex < 0) {
+    return "";
+  }
+  const title = issue.title || issue.issue_type || "business risk";
+  return `<button class="risk-ask-agent-button" type="button" data-ask-agent data-issue-index="${issueIndex}" aria-label="Ask Agent to investigate ${escapeHtml(title)}"${state.chatController ? " disabled" : ""}>Ask Agent</button>`;
+}
+
+function setRiskAskAgentButtonsDisabled(disabled) {
+  [elements.businessRiskList, elements.inventoryRiskSummary].forEach((container) => {
+    container?.querySelectorAll("[data-ask-agent]").forEach((button) => {
+      button.disabled = Boolean(disabled);
+    });
+  });
+}
+
+function candidateIssueFromElement(element) {
+  const rawIndex = String(element?.dataset?.issueIndex ?? "");
+  if (!/^\d+$/.test(rawIndex)) return null;
+  const issueIndex = Number(rawIndex);
+  if (!Number.isSafeInteger(issueIndex)) return null;
+  const issue = state.candidateIssues[issueIndex];
+  return issue && typeof issue === "object" ? issue : null;
+}
+
+async function askAgentAboutIssue(issue) {
+  if (!issue || typeof issue !== "object" || state.chatController) return;
+  const prompt = buildCandidateIssuePrompt(issue);
+  if (!prompt) return;
+
+  setRiskAskAgentButtonsDisabled(true);
+  setAssistantOpen(true);
+  try {
+    await submitChat(prompt, { abortExisting: false });
+  } finally {
+    if (!state.chatController) setRiskAskAgentButtonsDisabled(false);
+  }
+}
+
 function renderDetectedRisks(candidateIssues) {
   state.candidateIssues = candidateIssues;
-  const hasInventoryIssue = candidateIssues.some(
-    (issue) => issue.issue_type === "inventory_replenishment_risk",
+  const indexedIssues = candidateIssues.map((issue, issueIndex) => ({ issue, issueIndex }));
+  const hasInventoryIssue = indexedIssues.some(
+    ({ issue }) => issue.issue_type === "inventory_replenishment_risk",
   );
-  const visibleIssues = candidateIssues.filter(
-    (issue) => issue.issue_type !== "inventory_replenishment_risk",
+  const visibleIssues = indexedIssues.filter(
+    ({ issue }) => issue.issue_type !== "inventory_replenishment_risk",
   );
   elements.businessRiskCount.className = candidateIssues.length
     ? "alert-badge"
@@ -1855,13 +2021,13 @@ function renderDetectedRisks(candidateIssues) {
   elements.businessRiskList.hidden = false;
   elements.businessRiskList.className = "risk-list";
   elements.businessRiskList.innerHTML = visibleIssues
-    .map((issue) => {
+    .map(({ issue, issueIndex }) => {
       const severity = issue.severity === "high" ? "high" : "medium";
       const supportButton = issue.issue_type === "support_ticket_backlog"
         ? `<button class="risk-details-button" type="button" data-support-risk>View support tickets</button>`
         : "";
       return `
-        <article class="risk-card ${severity}${issue.issue_type === "support_ticket_backlog" ? " risk-card-clickable" : ""}" ${issue.issue_type === "support_ticket_backlog" ? "tabindex=\"0\" data-support-risk-card" : ""}>
+        <article class="risk-card ${severity}${issue.issue_type === "support_ticket_backlog" ? " risk-card-clickable" : ""}" data-issue-index="${issueIndex}" ${issue.issue_type === "support_ticket_backlog" ? "tabindex=\"0\" data-support-risk-card" : ""}>
           <div class="risk-card-header">
             <span class="severity-badge ${severity}">${escapeHtml(severity.toUpperCase())}</span>
             <span class="risk-context">${escapeHtml(issueContext(issue))}</span>
@@ -1872,17 +2038,20 @@ function renderDetectedRisks(candidateIssues) {
               .map((line) => `<span>${escapeHtml(line)}</span>`)
               .join("")}
           </div>
-          ${issue.issue_type === "customer_experience_deterioration"
-            ? `<a class="review-investigate" href="#product-performance" data-review-investigate>See products and customer comments</a>`
-            : ""}
-          ${supportButton}
+          <div class="risk-card-actions">
+            ${issue.issue_type === "customer_experience_deterioration"
+              ? `<a class="review-investigate" href="#product-performance" data-review-investigate>See products and customer comments</a>`
+              : ""}
+            ${supportButton}
+            ${candidateIssueAskButton(issue, issueIndex)}
+          </div>
         </article>
       `;
     })
     .join("");
 }
 
-function expandSupportTicketCard(card, issue) {
+function expandSupportTicketCard(card, issue, issueIndex) {
   const tickets = Array.isArray(issue?.evidence?.representative_tickets)
     ? issue.evidence.representative_tickets
     : [];
@@ -1912,10 +2081,13 @@ function expandSupportTicketCard(card, issue) {
     `).join("")
     : `<p class="loading-copy">No representative ticket details available.</p>`}
     </div>
+    <div class="risk-card-actions">
+      ${candidateIssueAskButton(issue, issueIndex)}
+    </div>
   `;
 }
 
-function renderInventorySection(inventory, inventoryIssue) {
+function renderInventorySection(inventory, inventoryIssue, inventoryIssueIndex) {
   const criticalCount = finiteNumber(inventory.critical_count);
   const additionalCount = finiteNumber(inventory.additional_reorder_count);
   const affectedCount = criticalCount + additionalCount;
@@ -1926,6 +2098,7 @@ function renderInventorySection(inventory, inventoryIssue) {
   if (inventoryIssue) {
     const severity = inventoryIssue.severity === "high" ? "high" : "medium";
     elements.inventoryRiskSummary.className = `risk-card ${severity} inventory-risk-card`;
+    elements.inventoryRiskSummary.dataset.issueIndex = String(inventoryIssueIndex);
     elements.inventoryRiskSummary.innerHTML = `
       <div class="risk-card-header">
         <span class="severity-badge ${severity}">${escapeHtml(severity.toUpperCase())}</span>
@@ -1937,9 +2110,13 @@ function renderInventorySection(inventory, inventoryIssue) {
         <span><strong>${fixedNumber(affectedRatio)}%</strong> affected</span>
         <span><strong>${numberFormatter.format(criticalCount)}</strong> critical</span>
       </div>
+      <div class="risk-card-actions">
+        ${candidateIssueAskButton(inventoryIssue, inventoryIssueIndex)}
+      </div>
     `;
   } else if (affectedCount > 0) {
     elements.inventoryRiskSummary.className = "inventory-risk-summary";
+    delete elements.inventoryRiskSummary.dataset.issueIndex;
     elements.inventoryRiskSummary.innerHTML = `
       <div class="inventory-replenishment-copy">
         <strong>${numberFormatter.format(affectedCount)} items need replenishment</strong>
@@ -1948,6 +2125,7 @@ function renderInventorySection(inventory, inventoryIssue) {
     `;
   } else {
     elements.inventoryRiskSummary.className = "inventory-risk-summary";
+    delete elements.inventoryRiskSummary.dataset.issueIndex;
     elements.inventoryRiskSummary.innerHTML = `
       <div class="inventory-replenishment-copy">
         <strong>No inventory replenishment items detected</strong>
@@ -1989,12 +2167,17 @@ function renderBusinessActionCenter(data, candidateIssues) {
   const issues = Array.isArray(candidateIssues)
     ? candidateIssues.filter((issue) => issue && typeof issue === "object")
     : [];
-  const inventoryIssue = issues.find(
+  const inventoryIssueIndex = issues.findIndex(
     (issue) => issue.issue_type === "inventory_replenishment_risk",
   );
+  const inventoryIssue = inventoryIssueIndex >= 0 ? issues[inventoryIssueIndex] : null;
 
   renderDetectedRisks(issues);
-  renderInventorySection(actionCenter.inventory || {}, inventoryIssue);
+  renderInventorySection(
+    actionCenter.inventory || {},
+    inventoryIssue,
+    inventoryIssueIndex,
+  );
 }
 
 const productTabLabels = {
@@ -2578,16 +2761,23 @@ elements.reviewHotspotList?.addEventListener("click", (event) => {
 });
 
 elements.businessRiskList.addEventListener("click", (event) => {
+  const askButton = event.target.closest("[data-ask-agent]");
+  if (askButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    const issue = candidateIssueFromElement(askButton);
+    if (issue && !state.chatController) askAgentAboutIssue(issue);
+    return;
+  }
   if (event.target.closest("[data-support-risk-collapse]")) {
     renderDetectedRisks(state.candidateIssues);
     return;
   }
   const supportCard = event.target.closest("[data-support-risk-card]");
   if (supportCard) {
-    const issue = state.candidateIssues.find(
-      (candidate) => candidate.issue_type === "support_ticket_backlog",
-    );
-    if (issue) expandSupportTicketCard(supportCard, issue);
+    const issue = candidateIssueFromElement(supportCard);
+    const issueIndex = Number(supportCard.dataset.issueIndex);
+    if (issue) expandSupportTicketCard(supportCard, issue, issueIndex);
     return;
   }
   if (event.target.closest("[data-review-investigate]")) {
@@ -2598,13 +2788,21 @@ elements.businessRiskList.addEventListener("click", (event) => {
 
 elements.businessRiskList.addEventListener("keydown", (event) => {
   if (event.key !== "Enter" && event.key !== " ") return;
+  if (event.target.closest("button, a")) return;
   const supportCard = event.target.closest("[data-support-risk-card]");
   if (!supportCard) return;
   event.preventDefault();
-  const issue = state.candidateIssues.find(
-    (candidate) => candidate.issue_type === "support_ticket_backlog",
-  );
-  if (issue) expandSupportTicketCard(supportCard, issue);
+  const issue = candidateIssueFromElement(supportCard);
+  const issueIndex = Number(supportCard.dataset.issueIndex);
+  if (issue) expandSupportTicketCard(supportCard, issue, issueIndex);
+});
+
+elements.inventoryRiskSummary.addEventListener("click", (event) => {
+  const askButton = event.target.closest("[data-ask-agent]");
+  if (!askButton) return;
+  event.preventDefault();
+  const issue = candidateIssueFromElement(askButton);
+  if (issue && !state.chatController) askAgentAboutIssue(issue);
 });
 
 elements.reviewProductSelect.addEventListener("change", () => {

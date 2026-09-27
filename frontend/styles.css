@@ -2171,6 +2171,51 @@ h2 {
   background: var(--red-soft);
 }
 
+.risk-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 11px;
+}
+
+.risk-card-actions .review-investigate,
+.risk-card-actions .risk-details-button {
+  margin-top: 0;
+}
+
+.risk-ask-agent-button {
+  display: inline-flex;
+  min-height: 30px;
+  padding: 6px 10px;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--green);
+  border-radius: 8px;
+  color: var(--green-dark);
+  background: var(--green-soft);
+  font-size: 10px;
+  font-weight: 780;
+  transition: border-color 160ms ease, background 160ms ease, color 160ms ease, opacity 160ms ease;
+}
+
+.risk-ask-agent-button:hover:not(:disabled) {
+  border-color: var(--green-dark);
+  color: #fff;
+  background: var(--green);
+}
+
+.risk-ask-agent-button:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+
+.risk-ask-agent-button:disabled {
+  cursor: wait;
+  opacity: 0.48;
+}
+
 .risk-card-header {
   display: flex;
   gap: 9px;
@@ -4093,6 +4138,14 @@ footer {
 }
 
 @media (max-width: 540px) {
+  .risk-card-actions {
+    align-items: stretch;
+  }
+
+  .risk-ask-agent-button {
+    flex: 1 1 100%;
+  }
+
   .review-controls {
     grid-template-columns: 1fr;
   }
