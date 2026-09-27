@@ -170,6 +170,34 @@ LEFT JOIN refunds r USING (month_start)
 ORDER BY m.month_start
 """
 
+CATEGORY_SHARE_SQL = """
+WITH sales AS (
+    SELECT COALESCE(p.product_category, 'Uncategorized') AS category,
+           SUM(t.net_sales) AS amount
+    FROM transactions t
+    LEFT JOIN products p ON p.product_id = t.product_id
+    WHERE t.transaction_date >= %(period_start)s
+      AND t.transaction_date < %(period_end)s
+      AND (%(store_id)s::text IS NULL OR t.store_id = %(store_id)s::text)
+    GROUP BY 1
+), refunds AS (
+    SELECT COALESCE(p.product_category, 'Uncategorized') AS category,
+           SUM(r.refund_amount) AS amount
+    FROM returns_refunds r
+    JOIN transactions t ON t.transaction_id = r.transaction_id
+    LEFT JOIN products p ON p.product_id = t.product_id
+    WHERE r.return_date >= %(period_start)s
+      AND r.return_date < %(period_end)s
+      AND r.refund_status = 'completed'
+      AND (%(store_id)s::text IS NULL OR t.store_id = %(store_id)s::text)
+    GROUP BY 1
+)
+SELECT COALESCE(s.category, r.category) AS category,
+       COALESCE(s.amount, 0) - COALESCE(r.amount, 0) AS revenue
+FROM sales s FULL OUTER JOIN refunds r USING (category)
+ORDER BY revenue DESC
+"""
+
 
 def _next_month(month_start: date) -> date:
     if month_start.month == 12:
@@ -425,6 +453,19 @@ def analyze_prepared_financial_pulse(
                     for row in cursor.fetchall()
                 ]
 
+                cursor.execute(
+                    CATEGORY_SHARE_SQL,
+                    {
+                        "period_start": selected_month,
+                        "period_end": period_end,
+                        "store_id": store_id,
+                    },
+                )
+                category_share = [
+                    {"category": row["category"], "revenue": _money(row["revenue"])}
+                    for row in cursor.fetchall()
+                ]
+
         profit_label = (
             "Estimated operating profit"
             if store_id is None
@@ -455,6 +496,7 @@ def analyze_prepared_financial_pulse(
                 },
             },
             "trend": trend,
+            "category_share": category_share,
         }
 
         if run_id is not None:

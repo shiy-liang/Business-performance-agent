@@ -2,6 +2,8 @@
 
 const state = {
   month: "",
+  financeChartView: "trend",
+  financeTrend: [],
   storeId: "",
   activeProductTab: "best_sellers",
   productData: null,
@@ -55,6 +57,10 @@ const elements = {
   financeFilters: document.querySelector("#finance-filters"),
   financeMetrics: document.querySelector("#finance-metrics"),
   financeChart: document.querySelector("#finance-chart"),
+  financeChartSubtitle: document.querySelector("#finance-chart-subtitle"),
+  financeChartLegend: document.querySelector("#finance-chart-legend"),
+  overviewCategoryChart: document.querySelector("#overview-category-chart"),
+  overviewCategoryPeriod: document.querySelector("#overview-category-period"),
   businessRiskCount: document.querySelector("#business-risk-count"),
   businessRiskList: document.querySelector("#business-risk-list"),
   reviewHotspotList: document.querySelector("#review-hotspot-list"),
@@ -66,6 +72,10 @@ const elements = {
   productDateApply: document.querySelector("#product-date-apply"),
   productList: document.querySelector("#product-list"),
   productChart: document.querySelector("#product-chart"),
+  productRevenueChart: document.querySelector("#product-revenue-chart"),
+  productRevenuePeriod: document.querySelector("#product-revenue-period"),
+  productCategoryChart: document.querySelector("#product-category-chart"),
+  productCategoryPeriod: document.querySelector("#product-category-period"),
   productChartTitle: document.querySelector("#product-chart-title"),
   productTable: document.querySelector("#product-table"),
   productTableNote: document.querySelector("#product-table-note"),
@@ -159,7 +169,26 @@ elements.sidebarBackdrop.addEventListener("click", () => {
   elements.sidebarToggle.focus();
 });
 
+elements.sidebar.addEventListener("pointermove", (event) => {
+  const bounds = elements.sidebar.getBoundingClientRect();
+  elements.sidebar.style.setProperty("--sidebar-hover-x", `${event.clientX - bounds.left}px`);
+  elements.sidebar.style.setProperty("--sidebar-hover-y", `${event.clientY - bounds.top}px`);
+});
+elements.sidebar.addEventListener("pointerleave", () => {
+  elements.sidebar.style.removeProperty("--sidebar-hover-x");
+  elements.sidebar.style.removeProperty("--sidebar-hover-y");
+});
+
 elements.sidebar.querySelectorAll(".sidebar-link").forEach((link) => {
+  link.addEventListener("pointermove", (event) => {
+    const bounds = link.getBoundingClientRect();
+    link.style.setProperty("--hover-x", `${event.clientX - bounds.left}px`);
+    link.style.setProperty("--hover-y", `${event.clientY - bounds.top}px`);
+  });
+  link.addEventListener("pointerleave", () => {
+    link.style.removeProperty("--hover-x");
+    link.style.removeProperty("--hover-y");
+  });
   link.addEventListener("click", () => {
     if (mobileNavigation.matches) {
       document.body.classList.remove("sidebar-open");
@@ -167,6 +196,18 @@ elements.sidebar.querySelectorAll(".sidebar-link").forEach((link) => {
     }
   });
 });
+
+for (const button of [elements.knowledgeOpen, elements.knowledgeDropZone, elements.assistantOpen, elements.productDateApply, elements.campaignDateApply]) {
+  button.addEventListener("pointermove", (event) => {
+    const bounds = button.getBoundingClientRect();
+    button.style.setProperty("--hover-x", `${event.clientX - bounds.left}px`);
+    button.style.setProperty("--hover-y", `${event.clientY - bounds.top}px`);
+  });
+  button.addEventListener("pointerleave", () => {
+    button.style.removeProperty("--hover-x");
+    button.style.removeProperty("--hover-y");
+  });
+}
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && document.body.classList.contains("sidebar-open")) {
@@ -242,12 +283,12 @@ function formatCompactMoney(value) {
   const absolute = Math.abs(number);
   const sign = number < 0 ? "−" : "";
   if (absolute >= 1_000_000) {
-    return `${sign}$${(absolute / 1_000_000).toFixed(1)}M`;
+    return `${sign}$${Number((absolute / 1_000_000).toFixed(2))}M`;
   }
   if (absolute >= 1_000) {
-    return `${sign}$${(absolute / 1_000).toFixed(0)}K`;
+    return `${sign}$${Number((absolute / 1_000).toFixed(2))}K`;
   }
-  return `${sign}$${absolute.toFixed(0)}`;
+  return `${sign}$${Number(absolute.toFixed(2))}`;
 }
 
 function formatMonth(month) {
@@ -1385,7 +1426,10 @@ function renderFinance(data) {
   state.maxMonth = data.period.sales_data_through.slice(0, 7);
   if (!state.month) state.month = data.period.month;
   syncOperatingMonthFilters();
-  renderFinanceChart(data.trend);
+  state.financeTrend = data.trend;
+  renderFinanceChart(state.financeTrend);
+  elements.overviewCategoryPeriod.textContent = formatMonth(data.period.month);
+  renderCategoryShare(elements.overviewCategoryChart, data.category_share);
 }
 
 function updateMetricContextVisibility() {
@@ -1406,7 +1450,106 @@ if ("ResizeObserver" in window) {
   window.addEventListener("resize", updateMetricContextVisibility);
 }
 
+function enableChartValues(container, points, series, geometry, formatLabel) {
+  const svg = container.querySelector("svg");
+  if (!svg || !points.length) return;
+
+  const namespace = "http://www.w3.org/2000/svg";
+  const marker = document.createElementNS(namespace, "g");
+  marker.setAttribute("class", "chart-hover-marker");
+  marker.setAttribute("hidden", "");
+  const guide = document.createElementNS(namespace, "line");
+  guide.setAttribute("class", "chart-hover-guide");
+  guide.setAttribute("y1", String(geometry.margin.top));
+  guide.setAttribute("y2", String(geometry.height - geometry.margin.bottom));
+  marker.appendChild(guide);
+  const dots = series.map(({ color }) => {
+    const dot = document.createElementNS(namespace, "circle");
+    dot.setAttribute("r", "5");
+    dot.setAttribute("fill", color);
+    dot.setAttribute("class", "chart-hover-dot");
+    if (geometry.showDots !== false) marker.appendChild(dot);
+    return dot;
+  });
+  svg.appendChild(marker);
+
+  const tooltip = document.createElement("div");
+  tooltip.className = "chart-tooltip";
+  tooltip.hidden = true;
+  container.appendChild(tooltip);
+  const announcement = document.createElement("span");
+  announcement.className = "sr-only";
+  announcement.setAttribute("aria-live", "polite");
+  container.appendChild(announcement);
+  svg.setAttribute("tabindex", "0");
+  svg.setAttribute("aria-keyshortcuts", "ArrowLeft ArrowRight");
+
+  let activeIndex = -1;
+  const show = (index, announce = false) => {
+    if (index < 0 || index >= points.length) return;
+    const point = points[index];
+    const position = geometry.x(index);
+    guide.setAttribute("x1", String(position));
+    guide.setAttribute("x2", String(position));
+    const details = series.map(({ key, name, color }, seriesIndex) => {
+      const value = finiteNumber(point[key]);
+      dots[seriesIndex].setAttribute("cx", String(position));
+      dots[seriesIndex].setAttribute("cy", String(geometry.y(value)));
+      return { name, color, value };
+    });
+    marker.removeAttribute("hidden");
+    tooltip.hidden = false;
+    if (activeIndex !== index) {
+      tooltip.innerHTML = `<strong>${escapeHtml(formatLabel(point))}</strong>${details.map(({ name, color, value }) => `<span><i style="background:${color}"></i>${escapeHtml(name)}<b>${escapeHtml(formatMoney(value))}</b></span>`).join("")}`;
+      activeIndex = index;
+    }
+    const svgRect = svg.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+    const tooltipWidth = tooltip.offsetWidth;
+    const tooltipHeight = tooltip.offsetHeight;
+    const xPixels = svgRect.left - containerRect.left + position * svgRect.width / geometry.width;
+    const yPixels = svgRect.top - containerRect.top + Math.min(...details.map(({ value }) => geometry.y(value))) * svgRect.height / geometry.height;
+    tooltip.style.left = `${Math.max(tooltipWidth / 2 + 4, Math.min(containerRect.width - tooltipWidth / 2 - 4, xPixels))}px`;
+    tooltip.style.top = `${Math.max(4, yPixels - tooltipHeight - 12)}px`;
+    if (announce) {
+      announcement.textContent = `${formatLabel(point)}. ${details.map(({ name, value }) => `${name}: ${formatMoney(value)}`).join(". ")}`;
+    }
+  };
+  const hide = () => {
+    marker.setAttribute("hidden", "");
+    tooltip.hidden = true;
+    activeIndex = -1;
+  };
+
+  svg.addEventListener("pointermove", (event) => {
+    const rect = svg.getBoundingClientRect();
+    const graphX = (event.clientX - rect.left) * geometry.width / rect.width;
+    const index = points.reduce((nearest, _, candidate) =>
+      Math.abs(geometry.x(candidate) - graphX) < Math.abs(geometry.x(nearest) - graphX) ? candidate : nearest, 0);
+    show(index);
+  });
+  svg.addEventListener("pointerleave", hide);
+  svg.addEventListener("focus", () => show(0, true));
+  svg.addEventListener("blur", hide);
+  svg.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    show(Math.max(0, Math.min(points.length - 1, activeIndex + (event.key === "ArrowRight" ? 1 : -1))), true);
+  });
+}
+
 function renderFinanceChart(points) {
+  const stacked = state.financeChartView === "stacked";
+  elements.financeChart.setAttribute("aria-label", stacked
+    ? "Twelve-month stacked sales and refunds with estimated gross profit"
+    : "Twelve-month refund-adjusted revenue and estimated gross profit trend");
+  elements.financeChartSubtitle.textContent = stacked
+    ? "Monthly sales split into kept revenue and refunds, with gross profit"
+    : "Refund-adjusted revenue and estimated gross profit";
+  elements.financeChartLegend.classList.toggle("is-stacked", stacked);
+  elements.financeChartLegend.innerHTML = stacked
+    ? '<span><i class="revenue-dot"></i>Kept revenue</span><span><i class="refund-dot"></i>Refunds</span><span><i class="profit-dot"></i>Gross profit</span>'
+    : '<span><i class="revenue-dot"></i>Revenue</span><span><i class="profit-dot"></i>Gross profit</span>';
   if (!Array.isArray(points) || points.length === 0) {
     renderEmpty(elements.financeChart, "No trend data is available for this scope");
     return;
@@ -1417,21 +1560,29 @@ function renderFinanceChart(points) {
   const margin = { top: 15, right: 15, bottom: 34, left: 58 };
   const chartWidth = width - margin.left - margin.right;
   const chartHeight = height - margin.top - margin.bottom;
-  const values = points.flatMap((item) => [
+  const chartPoints = points.map((item) => ({
+    ...item,
+    sales_before_refunds: finiteNumber(item.refund_adjusted_revenue) + finiteNumber(item.completed_refunds),
+  }));
+  const values = chartPoints.flatMap((item) => [
     Number(item.refund_adjusted_revenue) || 0,
     Number(item.estimated_gross_profit) || 0,
+    ...(stacked ? [item.sales_before_refunds] : []),
   ]);
   const minimum = Math.min(0, ...values);
   const maximum = Math.max(0, ...values);
-  const span = maximum - minimum || 1;
-  const paddedMaximum = maximum + span * 0.08;
-  const paddedMinimum = minimum - span * 0.04;
-  const paddedSpan = paddedMaximum - paddedMinimum || 1;
+  const roughStep = (maximum - minimum || Math.max(Math.abs(maximum), 1)) / 4;
+  const magnitude = 10 ** Math.floor(Math.log10(roughStep));
+  const step = [1, 2, 5, 10].find((multiple) => multiple * magnitude >= roughStep) * magnitude;
+  const axisMaximum = Math.ceil(maximum / step) * step + step;
+  const axisMinimum = Math.min(0, Math.floor(minimum / step) * step);
+  const axisSpan = axisMaximum - axisMinimum;
 
-  const x = (index) =>
-    margin.left + (index * chartWidth) / Math.max(points.length - 1, 1);
+  const x = (index) => stacked
+    ? margin.left + ((index + .5) * chartWidth) / chartPoints.length
+    : margin.left + (index * chartWidth) / Math.max(chartPoints.length - 1, 1);
   const y = (value) =>
-    margin.top + ((paddedMaximum - value) / paddedSpan) * chartHeight;
+    margin.top + ((axisMaximum - value) / axisSpan) * chartHeight;
   const pathFor = (key) =>
     points
       .map((item, index) => {
@@ -1440,10 +1591,9 @@ function renderFinanceChart(points) {
       })
       .join(" ");
 
-  const grid = Array.from({ length: 4 }, (_, index) => {
-    const ratio = index / 3;
-    const yPosition = margin.top + ratio * chartHeight;
-    const value = paddedMaximum - ratio * paddedSpan;
+  const grid = Array.from({ length: Math.round(axisSpan / step) + 1 }, (_, index) => {
+    const value = axisMaximum - index * step;
+    const yPosition = y(value);
     return `
       <line x1="${margin.left}" y1="${yPosition}" x2="${width - margin.right}" y2="${yPosition}" stroke="#dfe3dc" stroke-width="1" />
       <text x="${margin.left - 10}" y="${yPosition + 4}" text-anchor="end" fill="#66706a" font-size="10">${escapeHtml(formatCompactMoney(value))}</text>
@@ -1458,38 +1608,137 @@ function renderFinanceChart(points) {
     })
     .join("");
 
-  const circles = (key, color, label) =>
-    points
-      .map(
-        (item, index) => `
-          <circle cx="${x(index)}" cy="${y(Number(item[key]) || 0)}" r="3" fill="${color}" stroke="#f8f9f5" stroke-width="2">
-            <title>${escapeHtml(`${item.month} ${label}：${formatMoney(item[key])}`)}</title>
-          </circle>
-        `,
-      )
-      .join("");
+  const revenuePath = pathFor("refund_adjusted_revenue");
+  const revenueArea = `${revenuePath} L${x(points.length - 1).toFixed(1)},${y(0).toFixed(1)} L${x(0).toFixed(1)},${y(0).toFixed(1)} Z`;
+  const barWidth = Math.min(39, chartWidth / chartPoints.length * .58);
+  const bars = chartPoints.map((item, index) => {
+    const kept = Math.max(0, finiteNumber(item.refund_adjusted_revenue));
+    const refunds = Math.max(0, finiteNumber(item.completed_refunds));
+    const negativeRevenue = Math.min(0, finiteNumber(item.refund_adjusted_revenue));
+    const left = x(index) - barWidth / 2;
+    const segment = (top, bottom, color) => {
+      const segmentHeight = y(bottom) - y(top);
+      if (segmentHeight <= 0) return "";
+      const shape = `x="${left.toFixed(1)}" y="${y(top).toFixed(1)}" width="${barWidth.toFixed(1)}" height="${segmentHeight.toFixed(1)}" rx="2"`;
+      return `<rect ${shape} fill="${color}" fill-opacity=".53" /><rect ${shape} fill="url(#finance-bar-grain)" fill-opacity=".16" pointer-events="none" />`;
+    };
+    return segment(kept, 0, "#167d5a") + segment(kept + refunds, kept, "#d48679") + segment(0, negativeRevenue, "#ad584e");
+  }).join("");
 
-  const description = points
+  const description = chartPoints
     .map(
       (item) =>
-        `${item.month}: revenue ${formatMoney(item.refund_adjusted_revenue)}, gross profit ${formatMoney(item.estimated_gross_profit)}`,
+        `${item.month}: ${stacked ? `sales before refunds ${formatMoney(item.sales_before_refunds)}, ` : ""}revenue ${formatMoney(item.refund_adjusted_revenue)}, ${stacked ? `refunds ${formatMoney(item.completed_refunds)}, ` : ""}gross profit ${formatMoney(item.estimated_gross_profit)}`,
     )
     .join("；");
 
   elements.financeChart.className = "line-chart";
   elements.financeChart.innerHTML = `
     <svg viewBox="0 0 ${width} ${height}" role="img" aria-labelledby="finance-chart-title finance-chart-desc">
-      <title id="finance-chart-title">Twelve-month financial trend</title>
+      <title id="finance-chart-title">Twelve-month ${stacked ? "sales and refunds" : "financial trend"}</title>
       <desc id="finance-chart-desc">${escapeHtml(description)}</desc>
+      <defs>
+        <linearGradient id="finance-revenue-gradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#167d5a" stop-opacity=".22" /><stop offset="100%" stop-color="#167d5a" stop-opacity="0" /></linearGradient>
+        <filter id="finance-grain-filter"><feTurbulence type="fractalNoise" baseFrequency=".72" numOctaves="3" seed="4" stitchTiles="stitch" /><feColorMatrix type="saturate" values="0" /></filter>
+        <pattern id="finance-bar-grain" patternUnits="userSpaceOnUse" width="64" height="64"><rect width="64" height="64" filter="url(#finance-grain-filter)" /></pattern>
+      </defs>
       ${grid}
       <line x1="${margin.left}" y1="${y(0)}" x2="${width - margin.right}" y2="${y(0)}" stroke="#aeb7b0" stroke-width="1" />
-      <path d="${pathFor("refund_adjusted_revenue")}" fill="none" stroke="#167d5a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
-      <path d="${pathFor("estimated_gross_profit")}" fill="none" stroke="#c7812c" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
-      ${circles("refund_adjusted_revenue", "#167d5a", "refund-adjusted revenue")}
-      ${circles("estimated_gross_profit", "#c7812c", "estimated gross profit")}
+      ${stacked ? bars : `<path d="${revenueArea}" fill="url(#finance-revenue-gradient)" /><path d="${revenuePath}" fill="none" stroke="#167d5a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />`}
+      <path d="${pathFor("estimated_gross_profit")}" fill="none" stroke="${stacked ? "#1686d9" : "#c7812c"}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
       ${xLabels}
     </svg>
   `;
+  enableChartValues(
+    elements.financeChart,
+    chartPoints,
+    stacked
+      ? [
+          { key: "sales_before_refunds", name: "Sales before refunds", color: "#789783" },
+          { key: "refund_adjusted_revenue", name: "Kept revenue", color: "#167d5a" },
+          { key: "completed_refunds", name: "Refunds", color: "#d48679" },
+          { key: "estimated_gross_profit", name: "Gross profit", color: "#1686d9" },
+        ]
+      : [
+          { key: "refund_adjusted_revenue", name: "Revenue", color: "#167d5a" },
+          { key: "estimated_gross_profit", name: "Gross profit", color: "#c7812c" },
+        ],
+    { width, height, margin, x, y, showDots: !stacked },
+    (point) => formatMonth(point.month),
+  );
+}
+
+function renderCategoryShare(container, rows) {
+  const categories = (Array.isArray(rows) ? rows : [])
+    .map((row) => ({ category: String(row.category || "Uncategorized"), revenue: finiteNumber(row.revenue) }));
+  const positive = categories
+    .filter((row) => row.revenue > 0)
+    .sort((a, b) => b.revenue - a.revenue);
+  const total = positive.reduce((sum, row) => sum + row.revenue, 0);
+  if (!total) {
+    renderEmpty(container, "No category revenue for this period");
+    return;
+  }
+  const slices = positive.length > 4
+    ? [...positive.slice(0, 4), { category: "Others", revenue: positive.slice(4).reduce((sum, row) => sum + row.revenue, 0) }]
+    : positive;
+  const colors = ["#167d5a", "#85ae87", "#c7812c", "#6d85a6", "#b7bdba"];
+  let offset = 0;
+  const stops = slices.map((row, index) => {
+    const start = offset;
+    offset += (row.revenue / total) * 100;
+    return `${colors[index]} ${start.toFixed(2)}% ${offset.toFixed(2)}%`;
+  });
+  container.className = "category-chart";
+  container.innerHTML = `
+    <div class="category-donut" role="img" aria-label="${escapeHtml(slices.map((row) => `${row.category} ${(row.revenue / total * 100).toFixed(1)} percent`).join(", "))}" style="background:conic-gradient(${stops.join(",")})">
+      <div class="category-donut-center"><span>${categories.some((row) => row.revenue < 0) ? "Positive revenue" : "Total revenue"}</span><strong>${escapeHtml(formatCompactMoney(total))}</strong></div>
+    </div>
+    <ul class="category-legend">${slices.map((row, index) => `<li><span class="category-label" title="${escapeHtml(row.category)}"><i style="background:${colors[index]}"></i><span>${escapeHtml(row.category)}</span></span><strong>${(row.revenue / total * 100).toFixed(1)}%</strong><small>${escapeHtml(formatMoney(row.revenue))}</small></li>`).join("")}</ul>
+    ${categories.some((row) => row.revenue < 0) ? '<p class="category-note">Negative net categories are excluded from shares.</p>' : ""}
+  `;
+}
+
+function renderProductRevenueTrend(rows) {
+  const points = Array.isArray(rows) ? rows : [];
+  if (!points.length) {
+    renderEmpty(elements.productRevenueChart, "No revenue in this period");
+    return;
+  }
+  const width = 600;
+  const height = 220;
+  const margin = { top: 18, right: 12, bottom: 30, left: 55 };
+  const chartHeight = height - margin.top - margin.bottom;
+  const values = points.map((row) => finiteNumber(row.revenue));
+  const minimum = Math.min(0, ...values);
+  const maximum = Math.max(0, ...values);
+  const span = maximum - minimum || 1;
+  const upper = maximum + span * .08;
+  const lower = minimum - span * .04;
+  const x = (index) => margin.left + index * (width - margin.left - margin.right) / Math.max(points.length - 1, 1);
+  const y = (value) => margin.top + (upper - value) / (upper - lower) * chartHeight;
+  const path = points.map((row, index) => `${index ? "L" : "M"}${x(index).toFixed(1)},${y(finiteNumber(row.revenue)).toFixed(1)}`).join(" ");
+  const area = `${path} L${x(points.length - 1).toFixed(1)},${y(0).toFixed(1)} L${x(0).toFixed(1)},${y(0).toFixed(1)} Z`;
+  const useDay = points.length > 1 && (new Date(points.at(-1).date) - new Date(points[0].date)) / 86_400_000 <= 90;
+  const labels = points.map((row, index) => {
+    if (index !== 0 && index !== points.length - 1 && index % Math.max(1, Math.ceil(points.length / 5))) return "";
+    return `<text x="${x(index)}" y="${height - 8}" text-anchor="middle">${escapeHtml(formatShortDate(row.date, useDay))}</text>`;
+  }).join("");
+  const grid = Array.from({ length: 4 }, (_, index) => {
+    const lineY = margin.top + index * chartHeight / 3;
+    return `<line x1="${margin.left}" x2="${width - margin.right}" y1="${lineY}" y2="${lineY}" stroke="#dfe3dc" stroke-dasharray="2 3" /><text x="${margin.left - 8}" y="${lineY + 4}" text-anchor="end">${escapeHtml(formatCompactMoney(upper - index * (upper - lower) / 3))}</text>`;
+  }).join("");
+  elements.productRevenueChart.className = "line-chart";
+  elements.productRevenueChart.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Revenue trend: ${escapeHtml(points.map((row) => `${row.date} ${formatMoney(row.revenue)}`).join(", "))}">
+    <defs><linearGradient id="product-revenue-gradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#167d5a" stop-opacity=".22" /><stop offset="100%" stop-color="#167d5a" stop-opacity="0" /></linearGradient></defs>
+    ${grid}<path d="${area}" fill="url(#product-revenue-gradient)" /><path d="${path}" fill="none" stroke="#167d5a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />${points.length === 1 ? `<circle cx="${x(0)}" cy="${y(values[0])}" r="4" fill="#167d5a" />` : ""}${labels}</svg>`;
+  enableChartValues(
+    elements.productRevenueChart,
+    points,
+    [{ key: "revenue", name: "Revenue", color: "#167d5a" }],
+    { width, height, margin, x, y },
+    (point) => formatShortDate(point.date, useDay),
+  );
 }
 
 function finiteNumber(value, fallback = 0) {
@@ -1780,6 +2029,11 @@ function renderProducts(data) {
     setSharedDateRange(data.period.start_date || "", data.period.end_date || "");
   }
   renderProductTab();
+  const periodLabel = `${formatShortDate(data.period.start_date, true)} – ${formatShortDate(data.period.end_date, true)}`;
+  elements.productRevenuePeriod.textContent = periodLabel;
+  elements.productCategoryPeriod.textContent = periodLabel;
+  renderProductRevenueTrend(data.revenue_trend);
+  renderCategoryShare(elements.productCategoryChart, data.category_share);
 }
 
 function setSharedDateRange(start, end) {
@@ -2179,6 +2433,7 @@ function panelError(panel, message) {
     elements.financeMetrics.innerHTML = "";
     renderEmpty(elements.financeMetrics, message);
     renderEmpty(elements.financeChart, "The trend chart is temporarily unavailable");
+    renderEmpty(elements.overviewCategoryChart, "Category share is temporarily unavailable");
   } else if (panel === "action") {
     elements.businessRiskCount.className = "soft-badge";
     elements.businessRiskCount.textContent = "Unavailable";
@@ -2190,6 +2445,8 @@ function panelError(panel, message) {
     renderEmpty(elements.productList, message);
     renderEmpty(elements.productChart, message);
     renderEmpty(elements.productTable, message);
+    renderEmpty(elements.productRevenueChart, message);
+    renderEmpty(elements.productCategoryChart, message);
   } else if (panel === "marketing") {
     state.campaigns = [];
     state.selectedCampaignId = "";
@@ -2295,6 +2552,16 @@ elements.productTabs.addEventListener("click", (event) => {
   if (!button) return;
   state.activeProductTab = button.dataset.tab;
   renderProductTab();
+});
+
+document.querySelector(".chart-view-toggle").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-finance-view]");
+  if (!button || state.financeChartView === button.dataset.financeView) return;
+  state.financeChartView = button.dataset.financeView;
+  document.querySelectorAll("[data-finance-view]").forEach((option) => {
+    option.setAttribute("aria-pressed", String(option === button));
+  });
+  renderFinanceChart(state.financeTrend);
 });
 
 elements.productDateApply.addEventListener("click", applyProductDateRange);

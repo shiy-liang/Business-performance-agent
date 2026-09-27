@@ -27,15 +27,21 @@
       </a>
       <nav class="sidebar-nav" aria-label="Dashboard sections">
         <a class="sidebar-link" href="#overview" data-page-link="overview" title="Business overview">
-          <span class="sidebar-link-icon" aria-hidden="true">00</span>
+          <span class="sidebar-link-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>
+          </span>
           <span class="sidebar-link-label">Business overview</span>
         </a>
         <a class="sidebar-link" href="#product-performance" data-page-link="product-performance" title="Product Performance">
-          <span class="sidebar-link-icon" aria-hidden="true">01</span>
+          <span class="sidebar-link-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5v-9Z" /><path d="m3 7.5 9 4.5 9-4.5M12 12v9" /></svg>
+          </span>
           <span class="sidebar-link-label">Product Performance</span>
         </a>
         <a class="sidebar-link" href="#campaign-performance" data-page-link="campaign-performance" title="Campaign Performance">
-          <span class="sidebar-link-icon" aria-hidden="true">02</span>
+          <span class="sidebar-link-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M3 10v4h4l10 5V5L7 10H3ZM7 14l1.5 6h3L10 15.5M19 9c1 .7 1.5 1.7 1.5 3S20 14.3 19 15" /></svg>
+          </span>
           <span class="sidebar-link-label">Campaign Performance</span>
         </a>
       </nav>
@@ -51,7 +57,7 @@
             <h1 id="page-title">Business overview</h1>
           </div>
           <button id="knowledge-open" class="knowledge-open" type="button" aria-haspopup="dialog" aria-controls="knowledge-dialog">
-            <span class="knowledge-open-icon" aria-hidden="true">+</span>
+            <span class="knowledge-open-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg></span>
             <span>Knowledge files<small>Upload and view history</small></span>
           </button>
         </section>
@@ -104,9 +110,7 @@
                 </select>
               </label>
               <button id="refresh-button" class="icon-button" type="button" title="Refresh data" aria-label="Refresh data">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M20 11a8.1 8.1 0 1 0-2.3 5.7M20 5v6h-6" />
-                </svg>
+                <span class="refresh-ring" aria-hidden="true"></span>
               </button>
             </div>
 
@@ -119,12 +123,18 @@
             <div class="chart-block">
               <div class="chart-heading">
                 <div>
-                  <strong>Last 12 months</strong>
-                  <span>Refund-adjusted revenue and estimated gross profit</span>
+                  <strong>Revenue trend · last 12 months</strong>
+                  <span id="finance-chart-subtitle">Refund-adjusted revenue and estimated gross profit</span>
                 </div>
-                <div class="chart-legend" aria-label="Chart legend">
-                  <span><i class="revenue-dot"></i>Revenue</span>
-                  <span><i class="profit-dot"></i>Gross profit</span>
+                <div class="finance-chart-tools">
+                  <div class="chart-view-toggle" role="group" aria-label="Revenue chart view">
+                    <button type="button" data-finance-view="trend" aria-pressed="true">Trend</button>
+                    <button type="button" data-finance-view="stacked" aria-pressed="false">Stacked bars</button>
+                  </div>
+                  <div id="finance-chart-legend" class="chart-legend" aria-label="Chart legend">
+                    <span><i class="revenue-dot"></i>Revenue</span>
+                    <span><i class="profit-dot"></i>Gross profit</span>
+                  </div>
                 </div>
               </div>
               <div
@@ -140,17 +150,28 @@
               Profit uses synthetic product costs; company totals include online and unassigned transactions.
             </p>
 
-            <div class="overview-risk-block">
-              <div class="subsection-heading action-section-heading">
-                <div>
-                  <strong>Detected risks</strong>
-                  <span>Current operating alerts for the selected scope</span>
+            <div class="overview-lower-grid">
+              <div class="overview-risk-block">
+                <div class="subsection-heading action-section-heading">
+                  <div>
+                    <strong>Detected risks</strong>
+                    <span>Current operating alerts for the selected scope</span>
+                  </div>
+                  <span id="business-risk-count" class="soft-badge">Loading</span>
                 </div>
-                <span id="business-risk-count" class="soft-badge">Loading</span>
+                <div id="business-risk-list" class="risk-list loading-copy">Loading risks…</div>
+                <div id="inventory-risk-summary" class="inventory-risk-summary skeleton-line"></div>
+                <div id="inventory-list" class="compact-list loading-copy">Loading inventory…</div>
               </div>
-              <div id="business-risk-list" class="risk-list loading-copy">Loading risks…</div>
-              <div id="inventory-risk-summary" class="inventory-risk-summary skeleton-line"></div>
-              <div id="inventory-list" class="compact-list loading-copy">Loading inventory…</div>
+              <section class="category-card" aria-labelledby="overview-category-title">
+                <div class="chart-heading">
+                  <div>
+                    <strong id="overview-category-title">Revenue Share by Category</strong>
+                    <span id="overview-category-period">Selected operating month</span>
+                  </div>
+                </div>
+                <div id="overview-category-chart" class="category-chart chart-loading">Loading categories…</div>
+              </section>
             </div>
           </section>
 
@@ -158,14 +179,14 @@
             <div id="assistant-resize-handle" class="assistant-resize-handle" role="separator" aria-label="Resize chat panel" aria-orientation="vertical" aria-valuemin="320" aria-valuemax="900" aria-valuenow="520" tabindex="0"></div>
             <div class="assistant-header">
               <div class="assistant-session-heading">
-                <button id="chat-history-toggle" class="chat-history-toggle" type="button" aria-expanded="false" aria-label="Open chat history" title="Chat history">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4.5A2.5 2.5 0 0 1 8.5 2H20v17H8.5A2.5 2.5 0 0 0 6 21.5v-17Z"/><path d="M6 4.5A2.5 2.5 0 0 0 3.5 7v13A2.5 2.5 0 0 1 6 17.5h14M10 6h6M10 10h6"/></svg>
-                </button>
                 <strong id="chat-session-title">New Chat</strong>
               </div>
               <div class="assistant-header-actions">
-                <button id="new-chat-button" class="new-chat-button" type="button">
-                  New Chat
+                <button id="chat-history-toggle" class="chat-history-toggle" type="button" aria-expanded="false" aria-label="Open chat history" title="Chat history">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 10h8M8 14h8"/></svg>
+                </button>
+                <button id="new-chat-button" class="new-chat-button" type="button" aria-label="New chat" title="New chat">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
                 </button>
                 <button id="assistant-dock-toggle" class="assistant-dock-toggle" type="button" aria-label="Expand chat to side panel" aria-pressed="false" title="Expand chat to side panel">
                   <svg class="assistant-expand-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7M4 4v7M4 4l7 7M20 20h-7M20 20v-7M20 20l-7-7" /></svg>
@@ -259,7 +280,6 @@
               ></textarea>
               <div class="chat-compose-actions">
                 <div class="chat-compose-meta">
-                  <span class="chat-shortcut">Enter to send · Shift + Enter for a new line</span>
                   <div class="sql-auto-execute-setting">
                     <label class="sql-auto-execute-toggle" for="sql-auto-execute">
                       <input id="sql-auto-execute" type="checkbox" />
@@ -300,6 +320,16 @@
                 <button class="tab" data-tab="high_return_rate" type="button" aria-pressed="false">High returns</button>
                 <button class="tab" data-tab="lowest_rated" type="button" aria-pressed="false">Low rated</button>
               </div>
+            </div>
+            <div class="product-analytics-grid">
+              <section class="insight-card" aria-labelledby="product-revenue-title">
+                <div class="insight-heading"><strong id="product-revenue-title">Revenue trend</strong><span id="product-revenue-period">Selected sales period</span></div>
+                <div id="product-revenue-chart" class="line-chart chart-loading">Loading revenue…</div>
+              </section>
+              <section class="insight-card" aria-labelledby="product-category-title">
+                <div class="insight-heading"><strong id="product-category-title">Revenue Share by Category</strong><span id="product-category-period">Selected sales period</span></div>
+                <div id="product-category-chart" class="category-chart chart-loading">Loading categories…</div>
+              </section>
             </div>
             <div class="insight-layout">
               <div class="insight-card" hidden>
@@ -363,7 +393,6 @@
           <section class="panel knowledge-panel" aria-labelledby="knowledge-title">
             <div class="panel-header knowledge-header">
               <div>
-                <p class="panel-kicker">06 · Knowledge sources</p>
                 <h2 id="knowledge-title">RAG Knowledge Files</h2>
               </div>
               <div class="knowledge-header-actions">
@@ -414,7 +443,7 @@
       </main>
 
       <button id="assistant-open" class="assistant-open" type="button" aria-label="Open business assistant" aria-controls="assistant-panel" aria-expanded="false" title="Ask your business">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5c-1.2 0-2.3-.3-3.3-.8L4 20l1.8-5.2a7.5 7.5 0 1 1 14.2-3.3Z" /><path d="M8.5 11.5h7" /></svg>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5c-1.2 0-2.3-.3-3.3-.8L4 20l1.8-5.2a7.5 7.5 0 1 1 14.2-3.3Z" /></svg>
       </button>
 
       <footer>
