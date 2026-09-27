@@ -2064,18 +2064,24 @@ function candidateIssueFromElement(element) {
   return issue && typeof issue === "object" ? issue : null;
 }
 
-async function askAgentAboutIssue(issue) {
+function askAgentAboutIssue(issue) {
   if (!issue || typeof issue !== "object" || state.chatController) return;
   const prompt = buildCandidateIssuePrompt(issue);
   if (!prompt) return;
 
-  setRiskAskAgentButtonsDisabled(true);
   setAssistantOpen(true);
-  try {
-    await submitChat(prompt, { abortExisting: false });
-  } finally {
-    if (!state.chatController) setRiskAskAgentButtonsDisabled(false);
+  const existingDraft = elements.chatInput.value.trim();
+  if (
+    existingDraft
+    && existingDraft !== prompt
+    && !window.confirm("Replace your unsent chat draft with this risk investigation prompt?")
+  ) {
+    return;
   }
+
+  elements.chatInput.value = prompt;
+  resizeChatInput();
+  elements.chatInput.focus();
 }
 
 function renderDetectedRisks(candidateIssues) {
