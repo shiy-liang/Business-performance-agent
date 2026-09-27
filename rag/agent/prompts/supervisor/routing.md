@@ -47,11 +47,13 @@ and do not assign SQL to the same metric.
 
 Lowest-like-rate and lowest-purchase-rate product rankings use their dedicated
 ranking skills. Choose the agent according to the catalog and surrounding
-question. Do not create a duplicate SQL subtask for these Bottom-10 rankings.
+question. Do not create a duplicate SQL subtask for these
+Bottom-{{bottom_rate_result_limit}} rankings.
 
 Top product interaction-duration rankings use
 `product_interaction_duration`. Preserve that the ranking combines total and
-average duration and excludes products with fewer than 20 interaction rows. Do
+average duration and excludes products with fewer than
+{{interaction_minimum_samples}} interaction rows. Do
 not create a duplicate SQL subtask.
 
 Questions that require the concrete narrative inside support-ticket notes, such

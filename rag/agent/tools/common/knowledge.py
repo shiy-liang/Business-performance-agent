@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from time import perf_counter
 from typing import Any
 
@@ -13,33 +12,33 @@ from pgvector import Vector
 from pgvector.psycopg import register_vector
 from pydantic import BaseModel, Field
 
+from config.settings import load_agent_settings
 from model import embedding_model
 from observability import logger
 from rag.agent.tools.common.sql_runtime import connect_readonly, set_readonly_guards
+
+
+_KNOWLEDGE_SETTINGS = load_agent_settings().knowledge_retrieval
 
 
 class KnowledgeSearchInput(BaseModel):
     """Validated semantic search input exposed to the supervisor."""
 
     query: str = Field(
-        min_length=2,
-        max_length=500,
+        min_length=_KNOWLEDGE_SETTINGS.min_query_length,
+        max_length=_KNOWLEDGE_SETTINGS.max_query_length,
         description="A concise semantic search query preserving rule IDs and business entities.",
     )
     top_k: int = Field(
-        default=5,
+        default=_KNOWLEDGE_SETTINGS.default_top_k,
         ge=1,
-        le=5,
+        le=_KNOWLEDGE_SETTINGS.max_top_k,
         description="Maximum number of knowledge chunks to return.",
     )
 
 
 def _minimum_similarity() -> float:
-    try:
-        value = float(os.getenv("AGENT_KNOWLEDGE_MIN_SIMILARITY", "0.25"))
-    except ValueError:
-        return 0.25
-    return value if -1.0 <= value <= 1.0 else 0.25
+    return _KNOWLEDGE_SETTINGS.min_similarity
 
 
 def _search_chunks(
@@ -106,7 +105,10 @@ def _search_chunks(
 
 
 @tool(args_schema=KnowledgeSearchInput)
-async def search_knowledge(query: str, top_k: int = 5) -> str:
+async def search_knowledge(
+    query: str,
+    top_k: int = _KNOWLEDGE_SETTINGS.default_top_k,
+) -> str:
     """Search uploaded business rules and return chunks with resolvable file citations."""
 
     started_at = perf_counter()

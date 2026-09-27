@@ -11,7 +11,8 @@ questions answerable from ordinary columns.
 
 ## Execution procedure
 
-1. Call `check_concrete_problem` exactly once. Do not retrieve schema, resolve an
+1. Call `check_concrete_problem` at most {{ticket_max_calls}} time(s). Do not
+   retrieve schema, resolve an
    entity, generate SQL, or call `execute_operations_sql` for this subtask.
 2. Put the requested concrete issue and business context in `query`. Preserve
    explicit payment methods, symptoms, dates, products, channels, or failure

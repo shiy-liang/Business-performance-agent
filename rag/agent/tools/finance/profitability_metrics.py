@@ -15,10 +15,14 @@ from langchain_core.tools import tool
 from psycopg.rows import dict_row
 from pydantic import BaseModel, Field, model_validator
 
+from config.settings import load_agent_settings
 from observability import logger
 from rag.agent.tools.common.products import canonical_product_name_error
 from rag.agent.tools.common.sql_runtime import connect_readonly, set_readonly_guards
 from rag.agent.tools.finance.skill_loader import selected_finance_skills
+
+
+_FINANCE_SETTINGS = load_agent_settings().finance
 
 
 NET_SALES_SQL = """
@@ -172,10 +176,26 @@ class FinanceMetricInput(BaseModel):
         default=None,
         description="Optional exclusive transaction-date upper bound.",
     )
-    product_name: str | None = Field(default=None, min_length=1, max_length=200)
-    product_category: str | None = Field(default=None, min_length=1, max_length=200)
-    store_location: str | None = Field(default=None, min_length=1, max_length=200)
-    payment_method: str | None = Field(default=None, min_length=1, max_length=100)
+    product_name: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=_FINANCE_SETTINGS.max_scope_filter_length,
+    )
+    product_category: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=_FINANCE_SETTINGS.max_scope_filter_length,
+    )
+    store_location: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=_FINANCE_SETTINGS.max_scope_filter_length,
+    )
+    payment_method: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=_FINANCE_SETTINGS.max_payment_method_filter_length,
+    )
 
     @model_validator(mode="after")
     def validate_dates(self) -> "FinanceMetricInput":
@@ -204,9 +224,10 @@ def _claim_call(config: RunnableConfig, metric: FinanceMetricName) -> str:
     in_flight = state["in_flight"]
     if metric in in_flight:
         return "concurrent_query_blocked"
-    if int(calls.get(metric, 0)) >= 1:
+    maximum = _FINANCE_SETTINGS.max_calls_per_metric_per_subtask
+    if int(calls.get(metric, 0)) >= maximum:
         return "attempt_limit"
-    calls[metric] = 1
+    calls[metric] = int(calls.get(metric, 0)) + 1
     in_flight.append(metric)
     return "permitted"
 
@@ -266,7 +287,8 @@ def _blocked_payload(tool_name: str, error_type: str) -> str:
             "Another call for this Finance metric is already running."
         ),
         "attempt_limit": (
-            "This Finance metric tool may be called only once per subtask."
+            "This Finance metric tool reached its configured per-subtask call "
+            f"limit of {_FINANCE_SETTINGS.max_calls_per_metric_per_subtask}."
         ),
         "unverified_canonical_product": (
             "The product name was not returned by find_real_name."

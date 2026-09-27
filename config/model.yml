@@ -1,28 +1,65 @@
+# OpenAI-compatible model provider identifier.
 provider: aliyun_bailian
+# Name of the environment variable containing the provider API key.
 api_key_env: DASHSCOPE_API_KEY
+# Name of the environment variable containing the Bailian workspace ID.
 workspace_id_env: DASHSCOPE_WORKSPACE_ID
+# OpenAI-compatible endpoint template; workspace_id is injected at runtime.
 base_url: https://{workspace_id}.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
 
+# Chat-completion model configuration.
 chat_model:
+  # Primary model used by every Agent phase.
   model: qwen3.7-plus
+  # Model used after retryable primary-model failures.
   fallback_model: qwen3-max
+  # Sampling temperature; null lets the provider choose its default.
   temperature: null
+  # Default reasoning effort when no Agent-specific profile is selected.
   reasoning_effort: medium
-  # Keep the same model while matching reasoning cost to each Agent phase.
-  # Routing is a constrained classification task; synthesis and SQL work need
-  # a small reasoning budget to preserve answer and query quality.
+  # Reasoning effort applied to each Agent phase.
   agent_reasoning_effort:
+    # Reasoning effort for routing and task planning.
     supervisor_routing: none
+    # Reasoning effort for final evidence synthesis.
     supervisor_synthesis: low
+    # Reasoning effort for Finance specialist calls.
     finance: low
+    # Reasoning effort for Operations specialist calls.
     operations: low
+  # Maximum completion tokens returned by one model request.
   max_output_tokens: 4096
+  # Model request timeout in seconds.
   timeout_seconds: 120
+  # Additional retry attempts after the initial request.
   max_retries: 1
+  # Initial exponential retry delay in seconds.
+  retry_initial_seconds: 0.5
+  # Maximum exponential retry delay in seconds.
+  retry_max_seconds: 2.0
 
+# Runtime embedding API configuration.
 embedding_model:
+  # Embedding model used by application retrieval paths.
   model: qwen3.7-text-embedding
+  # Requested embedding vector dimensions.
   dimensions: 1024
+  # Maximum texts sent in one embedding request.
   batch_size: 20
+  # Embedding request timeout in seconds.
   timeout_seconds: 15
+  # Additional retry attempts after the initial request.
   max_retries: 1
+  # Initial exponential retry delay in seconds.
+  retry_initial_seconds: 0.5
+  # Maximum exponential retry delay in seconds.
+  retry_max_seconds: 2.0
+
+# Offline local embedding rebuild configuration.
+offline_embedding_model:
+  # Sentence Transformers model used by database/build_embeddings.py.
+  model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+  # Expected vector dimensions produced by the local model.
+  dimensions: 384
+  # Documents encoded in each local model batch.
+  batch_size: 64

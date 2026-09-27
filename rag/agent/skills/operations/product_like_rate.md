@@ -14,10 +14,12 @@ views, or wishlists after views.
    process every exact name in `items` in the returned order; do not request
    clarification merely because more than one candidate was returned.
    Never invent, infer, translate into, or guess a canonical product name. The
-   resolver permits three sequential attempts with thresholds 0.70, 0.60, and
-   0.55. Retry only when `retryable=true`, using a faithful rephrasing that does
+   resolver permits {{product_resolution_max_attempts}} sequential attempts with
+   thresholds {{product_resolution_thresholds}}. Retry only when
+   `retryable=true`, using a faithful rephrasing that does
    not add an unmentioned model. When `result_status=matched`, use an exact name
-   from `items` and never call `find_real_name` again. If the third result is empty and
+   from `items` and never call `find_real_name` again. If the final permitted
+   result is empty and
    `terminal=true`, stop immediately and ask for the exact product name.
 2. Call `check_like_rate` once for each exact canonical `product_name` returned
    in `items`, sequentially and in the returned order. Do not search

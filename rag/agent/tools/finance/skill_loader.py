@@ -23,6 +23,7 @@ class LoadFinanceSkillsInput(BaseModel):
 
     skill_names: list[str] = Field(
         min_length=1,
+        max_length=load_finance_skill_config().max_skills_per_task,
         description=(
             "Unique Finance skill names assigned by the Supervisor. Submit the "
             "ordered union of all assigned skills together in one call."

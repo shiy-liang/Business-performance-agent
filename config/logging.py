@@ -2,31 +2,11 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from zoneinfo import ZoneInfo
 
-from dotenv import load_dotenv
-
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-load_dotenv(PROJECT_ROOT / ".env")
-
-
-def _read_int(name: str, default: int, *, minimum: int = 0) -> int:
-    raw_value = os.getenv(name)
-    if raw_value is None:
-        return default
-
-    try:
-        value = int(raw_value)
-    except ValueError as exc:
-        raise ValueError(f"{name} must be an integer") from exc
-
-    if value < minimum:
-        raise ValueError(f"{name} must be at least {minimum}")
-    return value
+from config.settings import load_environment_settings
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,27 +18,20 @@ class LoggingSettings:
     console_level: str
     file_level: str
     backup_count: int
+    rotate_utc: bool
     timezone: ZoneInfo
 
     @classmethod
     def from_env(cls) -> "LoggingSettings":
-        directory = Path(os.getenv("LOG_DIRECTORY", "logs"))
-        if not directory.is_absolute():
-            directory = PROJECT_ROOT / directory
-
-        timezone_name = os.getenv("LOG_TIMEZONE", "Asia/Singapore")
-        try:
-            timezone = ZoneInfo(timezone_name)
-        except ZoneInfoNotFoundError as exc:
-            raise ValueError(f"Unsupported LOG_TIMEZONE: {timezone_name}") from exc
-
+        environment = load_environment_settings()
         return cls(
-            environment=os.getenv("APP_ENV", "development"),
-            directory=directory,
-            console_level=os.getenv("LOG_CONSOLE_LEVEL", "INFO").upper(),
-            file_level=os.getenv("LOG_FILE_LEVEL", "DEBUG").upper(),
-            backup_count=_read_int("LOG_BACKUP_COUNT", 14, minimum=1),
-            timezone=timezone,
+            environment=environment.app_env,
+            directory=Path(environment.log_directory),
+            console_level=environment.log_console_level,
+            file_level=environment.log_file_level,
+            backup_count=environment.log_backup_count,
+            rotate_utc=environment.log_rotate_utc,
+            timezone=environment.log_timezone,
         )
 
 

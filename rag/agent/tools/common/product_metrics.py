@@ -1,4 +1,4 @@
-"""Fixed Bottom-10 lookups over the precomputed product metrics view."""
+"""Configured fixed-size lookups over the precomputed product metrics view."""
 
 from __future__ import annotations
 
@@ -13,28 +13,32 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from pydantic import BaseModel, ConfigDict
 
+from config.settings import load_agent_settings
 from observability import logger
 from rag.agent.tools.common.sql_runtime import connect_readonly, set_readonly_guards
 
 
-LESS_LIKE_SQL = """
+_RANKING_SETTINGS = load_agent_settings().rankings
+BOTTOM_RATE_RESULT_LIMIT = _RANKING_SETTINGS.bottom_rate_result_limit
+
+LESS_LIKE_SQL = f"""
 SELECT
     page_or_product,
     like_rate
 FROM public.v_product_metrics
 WHERE like_rate IS NOT NULL
 ORDER BY like_rate ASC
-LIMIT 10
+LIMIT {BOTTOM_RATE_RESULT_LIMIT}
 """
 
-LESS_PURCHASE_SQL = """
+LESS_PURCHASE_SQL = f"""
 SELECT
     page_or_product,
     purchase_rate
 FROM public.v_product_metrics
 WHERE purchase_rate IS NOT NULL
 ORDER BY purchase_rate ASC
-LIMIT 10
+LIMIT {BOTTOM_RATE_RESULT_LIMIT}
 """
 
 MetricName = Literal["like_rate", "purchase_rate"]
@@ -42,7 +46,7 @@ AgentName = Literal["finance", "operations"]
 
 
 class NoToolInput(BaseModel):
-    """Explicitly declare that the Bottom-10 tools accept no model arguments."""
+    """Declare that configured fixed-ranking tools accept no model arguments."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -128,7 +132,7 @@ async def _run_bottom_ten(
         tool_name=tool_name,
         source_view="v_product_metrics",
         metric=metric,
-        limit=10,
+        limit=BOTTOM_RATE_RESULT_LIMIT,
     )
     try:
         ranking = await asyncio.to_thread(_query_metric_ranking, statement, metric)
@@ -171,7 +175,7 @@ async def _run_bottom_ten(
 
 @tool(args_schema=NoToolInput, response_format="content_and_artifact")
 async def check_less_like(config: RunnableConfig) -> tuple[str, dict[str, Any]]:
-    """Return up to 10 products with their lowest non-null precomputed like rates."""
+    """Return the configured number of lowest non-null precomputed like rates."""
 
     return await _run_bottom_ten(
         tool_name="check_less_like",
@@ -183,7 +187,7 @@ async def check_less_like(config: RunnableConfig) -> tuple[str, dict[str, Any]]:
 
 @tool(args_schema=NoToolInput, response_format="content_and_artifact")
 async def check_less_purchase(config: RunnableConfig) -> tuple[str, dict[str, Any]]:
-    """Return up to 10 products with their lowest non-null precomputed purchase rates."""
+    """Return the configured number of lowest non-null precomputed purchase rates."""
 
     return await _run_bottom_ten(
         tool_name="check_less_purchase",
@@ -196,6 +200,7 @@ async def check_less_purchase(config: RunnableConfig) -> tuple[str, dict[str, An
 __all__ = [
     "LESS_LIKE_SQL",
     "LESS_PURCHASE_SQL",
+    "BOTTOM_RATE_RESULT_LIMIT",
     "NoToolInput",
     "check_less_like",
     "check_less_purchase",

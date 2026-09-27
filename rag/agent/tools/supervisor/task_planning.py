@@ -9,6 +9,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
+from config.settings import load_agent_settings
 from rag.agent.workflows import (
     FINANCE_SKILL_BY_NAME,
     OPERATIONS_SKILL_BY_NAME,
@@ -18,6 +19,7 @@ from rag.agent.workflows import (
 
 
 SubTaskAgent = Literal["operations", "finance", "supervisor"]
+_PLANNING_SETTINGS = load_agent_settings().planning
 
 
 class SubTask(BaseModel):
@@ -25,13 +27,13 @@ class SubTask(BaseModel):
 
     id: str = Field(
         min_length=2,
-        max_length=8,
+        max_length=_PLANNING_SETTINGS.max_subtask_id_length,
         pattern=r"^t[1-9][0-9]*$",
         description="Sequential subtask identifier such as t1, t2, or t3.",
     )
     question: str = Field(
-        min_length=3,
-        max_length=500,
+        min_length=_PLANNING_SETTINGS.min_subtask_question_length,
+        max_length=_PLANNING_SETTINGS.max_subtask_question_length,
         description=(
             "A self-contained business question preserving the user's metric, scope, "
             "period, filters, and comparison intent."
@@ -41,8 +43,8 @@ class SubTask(BaseModel):
         description="The single evidence owner: operations, finance, or supervisor."
     )
     skill: str = Field(
-        min_length=2,
-        max_length=80,
+        min_length=_PLANNING_SETTINGS.min_skill_name_length,
+        max_length=_PLANNING_SETTINGS.max_skill_name_length,
         description=(
             "One exact skill name from the selected agent's injected catalog; use "
             "search_knowledge for a supervisor-owned knowledge subtask."
@@ -55,7 +57,7 @@ class FormatSubTaskInput(BaseModel):
 
     sub_tasks: list[SubTask] = Field(
         min_length=1,
-        max_length=8,
+        max_length=_PLANNING_SETTINGS.max_subtasks_per_request,
         description=(
             "The minimum complete set of non-overlapping atomic subtasks, ordered as "
             "they should be executed within each specialist."
@@ -160,10 +162,11 @@ async def format_sub_task(
     supervisor_tasks = [
         item for item in normalized if item["agent"] == "supervisor"
     ]
-    if len(supervisor_tasks) > 1:
+    if len(supervisor_tasks) > _PLANNING_SETTINGS.max_supervisor_knowledge_subtasks:
         errors.append(
-            "At most one supervisor-owned knowledge subtask is allowed; combine closely "
-            "related policy questions into one atomic knowledge query."
+            "Supervisor-owned knowledge subtasks exceed the configured limit of "
+            f"{_PLANNING_SETTINGS.max_supervisor_knowledge_subtasks}; combine closely "
+            "related policy questions."
         )
 
     if errors:
@@ -193,7 +196,8 @@ async def format_sub_task(
             "sub_tasks": normalized,
             "groups": groups,
             "instruction": (
-                "Dispatch each non-empty specialist group exactly once using its exact "
+                "Dispatch each non-empty specialist group no more than "
+                f"{_PLANNING_SETTINGS.max_delegations_per_specialist} time(s) using its exact "
                 "task IDs. Run independent agent groups in the same tool-call turn. For "
                 "a supervisor group, call search_knowledge with that subtask's question."
             ),
