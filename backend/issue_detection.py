@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from config.settings import load_business_rules
+
+
+_RULES = load_business_rules()
+
 
 def detect_profit_deterioration(
     finance_result: dict[str, object],
@@ -50,10 +55,11 @@ def detect_profit_deterioration(
         * 100,
         2,
     )
-    if change_pct > -10.0:
+    rules = _RULES.profit_deterioration
+    if change_pct > -rules.trigger_drop_pct:
         return None
 
-    severity = "high" if change_pct <= -20.0 else "medium"
+    severity = "high" if change_pct <= -rules.high_drop_pct else "medium"
     return {
         "rule_id": "FIN_GROSS_PROFIT_MOM_DROP",
         "issue_type": "profit_deterioration",
@@ -67,7 +73,7 @@ def detect_profit_deterioration(
             "baseline_value": previous_gross_profit,
             "baseline_period": previous_month,
             "change_pct": change_pct,
-            "threshold_pct": -10.0,
+            "threshold_pct": -rules.trigger_drop_pct,
         },
     }
 
@@ -120,12 +126,17 @@ def detect_refund_pressure(
         absolute_increase / previous_completed_refunds * 100,
         2,
     )
-    if change_pct < 30.0 or absolute_increase < 5000.0:
+    rules = _RULES.refund_pressure
+    if (
+        change_pct < rules.trigger_growth_pct
+        or absolute_increase < rules.trigger_absolute_increase
+    ):
         return None
 
     severity = (
         "high"
-        if change_pct >= 50.0 and absolute_increase >= 10000.0
+        if change_pct >= rules.high_growth_pct
+        and absolute_increase >= rules.high_absolute_increase
         else "medium"
     )
     return {
@@ -142,8 +153,8 @@ def detect_refund_pressure(
             "baseline_period": previous_month,
             "change_pct": change_pct,
             "absolute_increase": absolute_increase,
-            "threshold_pct": 30.0,
-            "threshold_absolute": 5000.0,
+            "threshold_pct": rules.trigger_growth_pct,
+            "threshold_absolute": rules.trigger_absolute_increase,
         },
     }
 
@@ -190,13 +201,17 @@ def detect_inventory_replenishment_risk(
         return None
 
     affected_inventory_count = critical_count + additional_reorder_count
-    if affected_inventory_count < 5 or affected_ratio < 10.0:
+    rules = _RULES.inventory_replenishment
+    if (
+        affected_inventory_count < rules.trigger_affected_count
+        or affected_ratio < rules.trigger_affected_ratio_pct
+    ):
         return None
 
     severity = (
         "high"
-        if critical_count >= 3
-        or (affected_ratio >= 15.0 and critical_count > 0)
+        if critical_count >= rules.high_critical_count
+        or (affected_ratio >= rules.high_affected_ratio_pct and critical_count > 0)
         else "medium"
     )
     return {
@@ -317,16 +332,18 @@ def detect_campaign_inefficiency(
     ):
         return None
 
+    rules = _RULES.campaign_inefficiency
     if (
         active_campaign_count <= 0
-        or negative_roi_campaign_count < 2
-        or negative_roi_ratio < 30.0
+        or negative_roi_campaign_count < rules.trigger_negative_count
+        or negative_roi_ratio < rules.trigger_negative_ratio_pct
     ):
         return None
 
     severity = (
         "high"
-        if negative_roi_campaign_count >= 3 and negative_roi_ratio >= 40.0
+        if negative_roi_campaign_count >= rules.high_negative_count
+        and negative_roi_ratio >= rules.high_negative_ratio_pct
         else "medium"
     )
     return {
@@ -406,7 +423,11 @@ def detect_customer_experience_deterioration(
     ):
         return None
 
-    if current_review_count < 20 or previous_review_count < 20:
+    rules = _RULES.customer_experience
+    if (
+        current_review_count < rules.minimum_reviews_per_period
+        or previous_review_count < rules.minimum_reviews_per_period
+    ):
         return None
 
     average_rating_change = round(
@@ -417,12 +438,16 @@ def detect_customer_experience_deterioration(
         current_low_rating_ratio - previous_low_rating_ratio,
         2,
     )
-    if average_rating_change > -0.25 or low_rating_ratio_change_pp < 5.0:
+    if (
+        average_rating_change > -rules.trigger_average_rating_drop
+        or low_rating_ratio_change_pp < rules.trigger_low_rating_ratio_increase_pp
+    ):
         return None
 
     severity = (
         "high"
-        if average_rating_change <= -0.50 and low_rating_ratio_change_pp >= 10.0
+        if average_rating_change <= -rules.high_average_rating_drop
+        and low_rating_ratio_change_pp >= rules.high_low_rating_ratio_increase_pp
         else "medium"
     )
     return {
@@ -438,7 +463,7 @@ def detect_customer_experience_deterioration(
             "average_rating": current_average_rating,
             "previous_average_rating": previous_average_rating,
             "average_rating_change": average_rating_change,
-            "low_rating_definition": "rating <= 2",
+            "low_rating_definition": f"rating <= {rules.low_rating_max}",
             "low_rating_count": current_low_rating_count,
             "low_rating_ratio": current_low_rating_ratio,
             "previous_low_rating_ratio": previous_low_rating_ratio,

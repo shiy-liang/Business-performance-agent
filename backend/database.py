@@ -12,15 +12,14 @@ from psycopg_pool import ConnectionPool
 from dotenv import load_dotenv
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-load_dotenv(PROJECT_ROOT / ".env")
+
+from config.settings import load_application_settings, load_environment_settings
 
 
 _pool: ConnectionPool | None = None
 
-
 def _database_url() -> str:
-    database_url = os.getenv("DATABASE_URL")
+    database_url = load_environment_settings().database_url
     if not database_url:
         raise RuntimeError("DATABASE_URL is not configured")
     return database_url
@@ -33,14 +32,20 @@ def open_pool() -> None:
     if _pool is not None:
         return
 
+    timeout = load_application_settings().database.connect_timeout_seconds
+
     _pool = ConnectionPool(
         conninfo=_database_url(),
         min_size=max(1, int(os.getenv("DB_POOL_MIN_SIZE", "1"))),
         max_size=max(1, int(os.getenv("DB_POOL_MAX_SIZE", "5"))),
-        timeout=5,
-        kwargs={"connect_timeout": 5, "prepare_threshold": None},
+        timeout=timeout,
+        kwargs={
+            "connect_timeout": timeout,
+            "prepare_threshold": None,
+        },
         open=False,
     )
+
     _pool.open(wait=True)
 
 
@@ -59,5 +64,6 @@ def connect() -> Iterator[psycopg.Connection]:
 
     open_pool()
     assert _pool is not None
+
     with _pool.connection() as connection:
         yield connection

@@ -11,9 +11,13 @@ from psycopg.rows import dict_row
 
 from backend.database import connect
 from backend.runtime import RunNotFoundError, record_run_event
+from config.settings import load_business_rules
 
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
+_BUSINESS_RULES = load_business_rules()
+_DASHBOARD_RULES = _BUSINESS_RULES.dashboard
+_INVENTORY_RULES = _BUSINESS_RULES.inventory_severity
 
 
 INVENTORY_ALERTS_SQL = """
@@ -36,9 +40,10 @@ SELECT
         ELSE i.stock_quantity::numeric / i.reorder_level
     END AS stock_ratio,
     CASE
-        WHEN i.reorder_level = 0 OR i.stock_quantity * 4 <= i.reorder_level
+        WHEN i.reorder_level = 0
+          OR i.stock_quantity::numeric / i.reorder_level <= %(critical_stock_ratio)s
             THEN 'critical'
-        WHEN i.stock_quantity * 2 <= i.reorder_level
+        WHEN i.stock_quantity::numeric / i.reorder_level <= %(high_stock_ratio)s
             THEN 'high'
         ELSE 'warning'
     END AS severity,
@@ -52,8 +57,11 @@ WHERE i.needs_reorder IS TRUE
   AND (%(store_id)s::text IS NULL OR i.store_id = %(store_id)s::text)
 ORDER BY
     CASE
-        WHEN i.reorder_level = 0 OR i.stock_quantity * 4 <= i.reorder_level THEN 0
-        WHEN i.stock_quantity * 2 <= i.reorder_level THEN 1
+        WHEN i.reorder_level = 0
+          OR i.stock_quantity::numeric / i.reorder_level <= %(critical_stock_ratio)s
+          THEN 0
+        WHEN i.stock_quantity::numeric / i.reorder_level <= %(high_stock_ratio)s
+          THEN 1
         ELSE 2
     END,
     CASE
@@ -66,7 +74,7 @@ ORDER BY
 """
 
 
-OLDEST_TICKETS_SQL = """
+OLDEST_TICKETS_SQL = f"""
 WITH ticket_data_date AS (
     SELECT MAX(submission_date) AS data_through
     FROM support_tickets
@@ -92,7 +100,7 @@ FROM ranked
 ORDER BY
     submission_date,
     ticket_id
-LIMIT 10
+LIMIT {_DASHBOARD_RULES.oldest_ticket_limit}
 """
 
 
@@ -226,7 +234,14 @@ def analyze_prepared_action_center(
             )
             inventory_metadata = cursor.fetchone()
 
-            cursor.execute(INVENTORY_ALERTS_SQL, {"store_id": store_id})
+            cursor.execute(
+                INVENTORY_ALERTS_SQL,
+                {
+                    "store_id": store_id,
+                    "critical_stock_ratio": _INVENTORY_RULES.critical_stock_ratio,
+                    "high_stock_ratio": _INVENTORY_RULES.high_stock_ratio,
+                },
+            )
             inventory_rows = cursor.fetchall()
             critical_count = sum(
                 row["severity"] == "critical" for row in inventory_rows
@@ -244,7 +259,7 @@ def analyze_prepared_action_center(
                     "stock_ratio": _ratio(row["stock_ratio"]),
                     "severity": row["severity"],
                 }
-                for row in inventory_rows[:100]
+                for row in inventory_rows[: _DASHBOARD_RULES.inventory_alert_limit]
             ]
             top_inventory = affected_inventory[:5]
             inventory_snapshot = (

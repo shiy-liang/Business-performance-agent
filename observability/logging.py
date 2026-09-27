@@ -88,7 +88,7 @@ class LogManager:
             interval=1,
             backupCount=logging_settings.backup_count,
             encoding="utf-8",
-            utc=True,
+            utc=logging_settings.rotate_utc,
             atTime=rotation_time_utc,
         )
         file_handler.setLevel(self._parse_level(logging_settings.file_level))

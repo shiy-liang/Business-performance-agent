@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from datetime import date
 from time import perf_counter
 from typing import Any
@@ -15,28 +14,26 @@ from pgvector import Vector
 from pgvector.psycopg import register_vector
 from pydantic import BaseModel, Field, model_validator
 
+from config.settings import load_agent_settings
 from model import embedding_model
 from observability import logger
 from rag.agent.tools.common.sql_runtime import connect_readonly, set_readonly_guards
 from rag.agent.tools.operations.skill_loader import selected_operations_skills
 
 
-MAX_CONCRETE_PROBLEM_CALLS = 1
+_TICKET_SETTINGS = load_agent_settings().ticket_retrieval
+MAX_CONCRETE_PROBLEM_CALLS = _TICKET_SETTINGS.max_calls_per_subtask
 REQUIRED_SKILL = "support_ticket_problem_retrieval"
 
 
 def _minimum_similarity() -> float:
-    try:
-        value = float(os.getenv("AGENT_TICKET_MIN_SIMILARITY", "0.25"))
-    except ValueError:
-        return 0.25
-    return value if -1.0 <= value <= 1.0 else 0.25
+    return _TICKET_SETTINGS.min_similarity
 
 
 class ConcreteProblemInput(BaseModel):
     query: str = Field(
-        min_length=2,
-        max_length=500,
+        min_length=_TICKET_SETTINGS.min_query_length,
+        max_length=_TICKET_SETTINGS.max_query_length,
         description=(
             "A concise semantic description of the concrete support-ticket problem "
             "to find, preserving the user's topic and wording."
@@ -50,10 +47,23 @@ class ConcreteProblemInput(BaseModel):
         default=None,
         description="Optional exclusive ticket submission-date upper bound.",
     )
-    issue_category: str | None = Field(default=None, max_length=200)
-    priority: str | None = Field(default=None, max_length=100)
-    resolution_status: str | None = Field(default=None, max_length=100)
-    top_k: int = Field(default=5, ge=1, le=10)
+    issue_category: str | None = Field(
+        default=None,
+        max_length=_TICKET_SETTINGS.max_issue_category_length,
+    )
+    priority: str | None = Field(
+        default=None,
+        max_length=_TICKET_SETTINGS.max_status_filter_length,
+    )
+    resolution_status: str | None = Field(
+        default=None,
+        max_length=_TICKET_SETTINGS.max_status_filter_length,
+    )
+    top_k: int = Field(
+        default=_TICKET_SETTINGS.default_top_k,
+        ge=1,
+        le=_TICKET_SETTINGS.max_top_k,
+    )
 
     @model_validator(mode="after")
     def validate_dates(self) -> "ConcreteProblemInput":
@@ -193,7 +203,10 @@ def _blocked_payload(error_type: str) -> str:
     if error_type == "concurrent_query_blocked":
         error = "Another concrete-problem retrieval is already running."
     else:
-        error = "check_concrete_problem may be called only once per subtask."
+        error = (
+            "check_concrete_problem reached its configured per-subtask call limit "
+            f"of {MAX_CONCRETE_PROBLEM_CALLS}."
+        )
     return json.dumps(
         {
             "success": False,
@@ -219,7 +232,7 @@ async def check_concrete_problem(
     issue_category: str | None = None,
     priority: str | None = None,
     resolution_status: str | None = None,
-    top_k: int = 5,
+    top_k: int = _TICKET_SETTINGS.default_top_k,
 ) -> str:
     """Retrieve support tickets whose note text matches a concrete problem description."""
 

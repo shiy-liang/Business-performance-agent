@@ -9,9 +9,9 @@ effective purchase rate across the current product metrics view.
 
 1. Call `check_less_purchase` with no arguments.
 2. Do not search schema, generate SQL, or use a single-product rate tool for this
-   Bottom-10 request.
+   Bottom-{{bottom_rate_result_limit}} request.
 3. Preserve the returned order. The first item is the lowest-purchase-rate
-   product, and the list contains at most ten products.
+   product, and the list contains at most {{bottom_rate_result_limit}} products.
 4. Display the exact `purchase_rate` returned beside each product. Do not invent
    causes, time ranges, or recommendations from this ranking.
 5. An empty list means the view query succeeded but found no non-null purchase

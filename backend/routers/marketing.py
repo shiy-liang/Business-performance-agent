@@ -12,9 +12,11 @@ from psycopg.rows import dict_row
 
 from backend.database import connect
 from backend.runtime import RunNotFoundError, record_run_event
+from config.settings import load_business_rules
 
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
+_DASHBOARD_RULES = load_business_rules().dashboard
 
 
 PERIOD_CAMPAIGNS_SQL = """
@@ -68,7 +70,7 @@ WHERE c.start_date < %(period_end)s::date
 """
 
 
-LOWEST_NEGATIVE_ROI_CAMPAIGNS_SQL = """
+LOWEST_NEGATIVE_ROI_CAMPAIGNS_SQL = f"""
 SELECT
     c.campaign_id,
     c.campaign_name,
@@ -82,7 +84,7 @@ WHERE c.start_date < %(period_end)s::date
   AND c.end_date >= %(period_start)s::date
   AND c.roi < 0
 ORDER BY c.roi, c.campaign_id
-LIMIT 3
+LIMIT {_DASHBOARD_RULES.negative_roi_campaign_limit}
 """
 
 
@@ -307,7 +309,7 @@ def analyze_prepared_marketing_performance(
             "basis": {
                 "selection": "campaign dates overlap the selected date range",
                 "ranking": "reported roi descending",
-                "limit": 5,
+                "limit": None,
                 "metrics_period": "campaign_lifecycle",
                 "metrics_note": (
                     "Budget, conversions, conversion rate, and reported ROI describe "

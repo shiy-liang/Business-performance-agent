@@ -2,24 +2,16 @@
 
 from __future__ import annotations
 
-import os
 from threading import RLock
 from typing import Literal, TypedDict
 from uuid import uuid4
 
+
 from backend.database import connect
+from config.settings import load_application_settings
 
 
-def _max_context_messages() -> int:
-    raw_value = os.getenv("MAX_CONTEXT_MESSAGES", "20").strip()
-    try:
-        value = int(raw_value)
-    except ValueError:
-        return 20
-    return value if value > 0 else 20
-
-
-MAX_CONTEXT_MESSAGES = _max_context_messages()
+MAX_CONTEXT_MESSAGES = load_application_settings().conversation.max_context_messages
 MessageRole = Literal["user", "assistant"]
 
 

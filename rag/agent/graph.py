@@ -10,10 +10,14 @@ from langchain_core.messages import SystemMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 
+from config.settings import load_agent_settings
 from rag.agent.model import create_supervisor_model
 from rag.agent.prompts import build_supervisor_prompt
 from rag.agent.state import SupervisorState
 from rag.agent.tools.registry import ToolRegistry, default_tool_registry
+
+
+_PLANNING_SETTINGS = load_agent_settings().planning
 
 
 def build_supervisor_graph(
@@ -111,7 +115,8 @@ def build_supervisor_graph(
             system_prompt += (
                 "\n\n## Current execution phase\n\n"
                 "The subtask plan is fixed. Dispatch every non-empty group now in one "
-                "tool-call turn. Call each required specialist exactly once using the "
+                "tool-call turn. Call each required specialist no more than "
+                f"{_PLANNING_SETTINGS.max_delegations_per_specialist} time(s) using the "
                 "exact ordered task IDs in the formatter's groups. For the optional "
                 "supervisor group, call search_knowledge with its exact question. Emit "
                 "no prose and do not change the plan."

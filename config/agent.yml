@@ -1,17 +1,201 @@
+# Agent graph execution limits.
 runtime:
   supervisor:
-    # Maximum LangGraph steps for the top-level supervisor graph.
+    # Maximum LangGraph steps for one top-level Supervisor run.
     recursion_limit: 10
   specialist:
-    # Supports per-subtask running/terminal status events plus evidence calls.
+    # Maximum LangGraph steps for one Finance or Operations run.
     recursion_limit: 64
 
+# Supervisor planning and delegation limits.
+planning:
+  # Maximum number of atomic subtasks in one user request.
+  max_subtasks_per_request: 8
+  # Maximum number of knowledge-search subtasks owned directly by Supervisor.
+  max_supervisor_knowledge_subtasks: 1
+  # Maximum number of delegations to the same specialist in one request.
+  max_delegations_per_specialist: 1
+  # Maximum length of a generated subtask identifier.
+  max_subtask_id_length: 8
+  # Minimum length of a self-contained subtask question.
+  min_subtask_question_length: 3
+  # Maximum length of a self-contained subtask question.
+  max_subtask_question_length: 500
+  # Minimum length of an assigned skill name.
+  min_skill_name_length: 2
+  # Maximum length of an assigned skill name.
+  max_skill_name_length: 80
+  # Minimum length of a public subtask status message.
+  min_status_message_length: 2
+  # Maximum length of a public subtask status message.
+  max_status_message_length: 240
+
+# Finance Specialist limits.
 finance:
-  # Maximum number of distinct skills that one delegated task packet may load.
-  # sql_query may coexist with dedicated skills only for different subtasks.
+  # Maximum number of distinct skills loaded by one delegated task packet.
+  max_skills_per_task: 3
+  # Maximum calls to each dedicated Finance metric in one subtask.
+  max_calls_per_metric_per_subtask: 1
+  # Maximum length of product, category, and store metric filters.
+  max_scope_filter_length: 200
+  # Maximum length of a payment-method metric filter.
+  max_payment_method_filter_length: 100
+
+# Operations Specialist limits.
+operations:
+  # Maximum number of distinct skills loaded by one delegated task packet.
   max_skills_per_task: 3
 
-operations:
-  # Maximum number of distinct skills that one delegated task packet may load.
-  # sql_query may coexist with dedicated skills only for different subtasks.
-  max_skills_per_task: 3
+# Generic model-generated SQL policy.
+sql:
+  # Maximum cumulative successful rows returned in one subtask.
+  max_rows_per_subtask: 500
+  # Maximum allowed value for max_rows_per_subtask.
+  hard_max_rows_per_subtask: 5000
+  # Maximum cumulative JSON characters returned in one subtask.
+  max_result_chars_per_subtask: 30000
+  # Maximum allowed value for max_result_chars_per_subtask.
+  hard_max_result_chars_per_subtask: 200000
+  # PostgreSQL statement timeout applied to all Agent database tools.
+  statement_timeout_ms: 5000
+  # Maximum allowed statement timeout.
+  hard_max_statement_timeout_ms: 30000
+  # Maximum generic SQL attempts in one subtask.
+  max_attempts_per_subtask: 3
+  # Maximum allowed value for max_attempts_per_subtask.
+  hard_max_attempts_per_subtask: 3
+  # Maximum seconds to wait for user approval of generated SQL.
+  approval_timeout_seconds: 900
+  # Minimum allowed SQL approval timeout.
+  min_approval_timeout_seconds: 30
+  # Maximum allowed SQL approval timeout.
+  max_approval_timeout_seconds: 3600
+  # Maximum number of named parameters in one generated query.
+  max_parameters_per_query: 30
+  # Minimum generated SQL text length.
+  min_sql_length: 8
+  # Maximum generated SQL text length.
+  max_sql_length: 12000
+  # Maximum length of the public purpose attached to a generated query.
+  max_purpose_length: 300
+  # Minimum length of a schema search phrase.
+  schema_search_min_query_length: 2
+  # Maximum length of a schema search phrase.
+  schema_search_max_query_length: 500
+  # Minimum length of a non-product entity type.
+  entity_type_min_length: 2
+  # Maximum length of a non-product entity type.
+  entity_type_max_length: 40
+  # Minimum length of an entity phrase.
+  entity_term_min_length: 1
+  # Maximum length of an entity phrase.
+  entity_term_max_length: 120
+  # Maximum PostgreSQL identifier length accepted for table detail lookup.
+  table_name_max_length: 63
+  # Maximum returned length of one string cell before truncation.
+  max_string_cell_chars: 4000
+  # Default number of schema catalog matches.
+  schema_search_default_top_k: 6
+  # Maximum number of schema catalog matches.
+  schema_search_max_top_k: 8
+  # Default number of entity candidates.
+  entity_resolution_default_limit: 8
+  # Maximum number of entity candidates.
+  entity_resolution_max_limit: 10
+
+# Uploaded knowledge retrieval policy.
+knowledge_retrieval:
+  # Minimum cosine similarity accepted as knowledge evidence.
+  min_similarity: 0.25
+  # Default number of knowledge chunks returned.
+  default_top_k: 5
+  # Maximum number of knowledge chunks returned.
+  max_top_k: 5
+  # Minimum semantic query length.
+  min_query_length: 2
+  # Maximum semantic query length.
+  max_query_length: 500
+
+# Customer review retrieval policy.
+review_retrieval:
+  # Minimum cosine similarity accepted as review evidence.
+  min_similarity: 0.25
+  # Default number of semantic review matches.
+  default_top_k: 5
+  # Maximum number of semantic review matches.
+  max_top_k: 8
+  # Maximum semantic review searches in one subtask.
+  max_semantic_calls_per_subtask: 3
+  # Maximum combined product/category expansion calls in one subtask.
+  max_expansion_calls_per_subtask: 2
+  # Maximum rows returned by each expansion call.
+  expansion_result_limit: 10
+  # Default exclusive rating threshold for expansion calls.
+  default_expansion_rating_threshold: 5
+  # Minimum semantic query length.
+  min_query_length: 2
+  # Maximum semantic query length.
+  max_query_length: 500
+  # Maximum length of a product or category review filter.
+  max_scope_value_length: 200
+  # Maximum length of a product or category review filter.
+  max_scope_value_length: 200
+
+# Support ticket semantic retrieval policy.
+ticket_retrieval:
+  # Minimum cosine similarity accepted as ticket evidence.
+  min_similarity: 0.25
+  # Default number of matching tickets.
+  default_top_k: 5
+  # Maximum number of matching tickets.
+  max_top_k: 10
+  # Maximum tool calls in one subtask.
+  max_calls_per_subtask: 1
+  # Minimum semantic query length.
+  min_query_length: 2
+  # Maximum semantic query length.
+  max_query_length: 500
+  # Maximum length of an issue-category filter.
+  max_issue_category_length: 200
+  # Maximum length of priority and resolution-status filters.
+  max_status_filter_length: 100
+  # Maximum length of an issue-category filter.
+  max_issue_category_length: 200
+  # Maximum length of priority and resolution-status filters.
+  max_status_filter_length: 100
+
+# Fuzzy product-name resolution policy.
+product_resolution:
+  # Number of database candidates considered on each attempt.
+  top_k: 5
+  # Minimum similarities used by consecutive attempts.
+  similarity_thresholds: [0.70, 0.60, 0.55]
+  # Maximum allowed drop between adjacent accepted candidates.
+  max_similarity_gap: 0.20
+  # Maximum fuzzy product query length.
+  max_query_length: 200
+
+# Fuzzy campaign-name resolution policy.
+campaign_resolution:
+  # Number of database candidates considered on each attempt.
+  top_k: 5
+  # Minimum similarities used by consecutive attempts.
+  similarity_thresholds: [0.70, 0.60, 0.55]
+  # Maximum allowed drop between adjacent accepted candidates.
+  max_similarity_gap: 0.20
+  # Maximum fuzzy campaign query length.
+  max_query_length: 200
+
+# Fixed ranking-tool policy.
+rankings:
+  # Maximum products returned by bottom-rate ranking tools.
+  bottom_rate_result_limit: 10
+  # Maximum products returned by interaction-duration ranking.
+  interaction_result_limit: 10
+  # Minimum interaction sample count required for duration ranking.
+  interaction_minimum_samples: 20
+
+# Specialist response-size policy exposed to prompts.
+responses:
+  # Maximum evidence bullets in an Operations specialist response.
+  operations_max_evidence_bullets: 6

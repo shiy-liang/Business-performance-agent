@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 from pydantic import BaseModel, Field
 
+from config.settings import load_application_settings
 from observability import logger
 from rag.agent import run_supervisor, stream_supervisor
 from rag.agent.model import create_agent_model
@@ -27,17 +28,24 @@ from rag.history_management import (
 
 
 router = APIRouter(prefix="/api", tags=["assistant"])
+_API_SETTINGS = load_application_settings().api
 
 
 class ChatRequest(BaseModel):
-    session_id: str = Field(min_length=1, max_length=100)
-    message: str = Field(min_length=1, max_length=2000)
+    session_id: str = Field(
+        min_length=1,
+        max_length=_API_SETTINGS.max_session_id_length,
+    )
+    message: str = Field(
+        min_length=1,
+        max_length=_API_SETTINGS.max_chat_message_length,
+    )
     auto_execute_sql: bool = False
 
 
 class SqlApprovalRequest(BaseModel):
     decision: Literal["execute", "cancel"]
-    run_id: str = Field(min_length=1, max_length=100)
+    run_id: str = Field(min_length=1, max_length=_API_SETTINGS.max_run_id_length)
 
 
 def _session_context(session_id: str, message: str) -> list[AnyMessage]:
@@ -143,7 +151,7 @@ async def stream_chat(request: ChatRequest) -> StreamingResponse:
     context = _session_context(request.session_id, request.message)
 
     async def events() -> AsyncIterator[str]:
-        yield "retry: 3000\n\n"
+        yield f"retry: {_API_SETTINGS.sse_retry_ms}\n\n"
         stream_kwargs: dict[str, object] = {"conversation_messages": context}
         if request.auto_execute_sql:
             stream_kwargs["auto_execute_sql"] = True

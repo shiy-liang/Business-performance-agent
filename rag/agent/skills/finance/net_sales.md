@@ -9,7 +9,8 @@ time series.
 
 ## Execution procedure
 
-1. Call `calculate_net_sales` exactly once. Do not retrieve schema, generate SQL,
+1. Call `calculate_net_sales` at most {{finance_metric_max_calls}} time(s). Do not
+   retrieve schema, generate SQL,
    or call `execute_finance_sql` for this calculation.
 2. Use `start_date` as an inclusive transaction-date bound and `end_date` as an
    exclusive bound. Leave both empty when no period is supplied; do not invent a

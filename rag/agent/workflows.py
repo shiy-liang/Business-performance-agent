@@ -9,6 +9,8 @@ from typing import Any
 
 import yaml
 
+from config.settings import AgentSettings, load_agent_settings, render_config_template
+
 
 AGENT_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = AGENT_ROOT.parents[1]
@@ -145,35 +147,34 @@ def _positive_integer(value: Any, name: str) -> int:
     return value
 
 
-@lru_cache(maxsize=1)
-def load_agent_runtime_config(
-    path: Path = DEFAULT_AGENT_CONFIG_PATH,
-) -> AgentRuntimeConfig:
-    """Load and validate supervisor and specialist graph runtime limits."""
-
+def _agent_settings(path: Path) -> AgentSettings:
+    if path == DEFAULT_AGENT_CONFIG_PATH:
+        return load_agent_settings()
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
         raise WorkflowConfigError(f"Agent config not found: {path}") from exc
     except yaml.YAMLError as exc:
         raise WorkflowConfigError(f"Invalid agent YAML in {path}: {exc}") from exc
+    try:
+        return AgentSettings.model_validate(raw)
+    except ValueError as exc:
+        raise WorkflowConfigError(f"Invalid Agent configuration in {path}: {exc}") from exc
 
-    root = _mapping(raw, "agent config")
-    runtime = _mapping(root.get("runtime"), "runtime")
-    supervisor = _mapping(runtime.get("supervisor"), "runtime.supervisor")
-    specialist = _mapping(runtime.get("specialist"), "runtime.specialist")
+
+@lru_cache(maxsize=1)
+def load_agent_runtime_config(
+    path: Path = DEFAULT_AGENT_CONFIG_PATH,
+) -> AgentRuntimeConfig:
+    """Load and validate supervisor and specialist graph runtime limits."""
+
+    settings = _agent_settings(path)
     return AgentRuntimeConfig(
         supervisor=GraphRuntimeConfig(
-            recursion_limit=_positive_integer(
-                supervisor.get("recursion_limit"),
-                "runtime.supervisor.recursion_limit",
-            )
+            recursion_limit=settings.runtime.supervisor.recursion_limit
         ),
         specialist=GraphRuntimeConfig(
-            recursion_limit=_positive_integer(
-                specialist.get("recursion_limit"),
-                "runtime.specialist.recursion_limit",
-            )
+            recursion_limit=settings.runtime.specialist.recursion_limit
         ),
     )
 
@@ -184,23 +185,7 @@ def load_operations_skill_config(
 ) -> OperationsSkillConfig:
     """Load and validate the Operations per-task skill limit."""
 
-    try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except FileNotFoundError as exc:
-        raise WorkflowConfigError(f"Agent config not found: {path}") from exc
-    except yaml.YAMLError as exc:
-        raise WorkflowConfigError(f"Invalid agent YAML in {path}: {exc}") from exc
-
-    root = _mapping(raw, "agent config")
-    operations = _mapping(root.get("operations"), "operations")
-    maximum = operations.get(
-        "max_skills_per_task",
-        operations.get("max_workflows_per_task"),
-    )
-    if not isinstance(maximum, int) or isinstance(maximum, bool) or maximum <= 0:
-        raise WorkflowConfigError(
-            "operations.max_skills_per_task must be a positive integer"
-        )
+    maximum = _agent_settings(path).operations.max_skills_per_task
     if maximum > len(OPERATIONS_SKILLS):
         raise WorkflowConfigError(
             "operations.max_skills_per_task cannot exceed the number of "
@@ -215,23 +200,7 @@ def load_finance_skill_config(
 ) -> FinanceSkillConfig:
     """Load and validate the Finance per-task skill limit."""
 
-    try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except FileNotFoundError as exc:
-        raise WorkflowConfigError(f"Agent config not found: {path}") from exc
-    except yaml.YAMLError as exc:
-        raise WorkflowConfigError(f"Invalid agent YAML in {path}: {exc}") from exc
-
-    root = _mapping(raw, "agent config")
-    finance = _mapping(root.get("finance"), "finance")
-    maximum = finance.get(
-        "max_skills_per_task",
-        finance.get("max_workflows_per_task"),
-    )
-    if not isinstance(maximum, int) or isinstance(maximum, bool) or maximum <= 0:
-        raise WorkflowConfigError(
-            "finance.max_skills_per_task must be a positive integer"
-        )
+    maximum = _agent_settings(path).finance.max_skills_per_task
     if maximum > len(FINANCE_SKILLS):
         raise WorkflowConfigError(
             "finance.max_skills_per_task cannot exceed the number of Finance skills"
@@ -319,22 +288,29 @@ def build_finance_skill_catalog() -> str:
 def load_operations_skill_bodies(skill_names: list[str]) -> dict[str, str]:
     """Load selected bodies, adding SQL safety when sql_query is assigned."""
 
-    bodies = {name: read_skill_body(name) for name in skill_names}
+    bodies = {name: render_config_template(read_skill_body(name)) for name in skill_names}
     if "sql_query" in bodies:
-        bodies["sql_safety"] = (
-            SKILL_ROOT / "common" / "sql_safety.md"
-        ).read_text(encoding="utf-8").strip()
+        bodies["sql_safety"] = render_config_template(
+            (SKILL_ROOT / "common" / "sql_safety.md")
+            .read_text(encoding="utf-8")
+            .strip()
+        )
     return bodies
 
 
 def load_finance_skill_bodies(skill_names: list[str]) -> dict[str, str]:
     """Load selected Finance bodies, adding SQL safety when sql_query is assigned."""
 
-    bodies = {name: read_finance_skill_body(name) for name in skill_names}
+    bodies = {
+        name: render_config_template(read_finance_skill_body(name))
+        for name in skill_names
+    }
     if "sql_query" in bodies:
-        bodies["sql_safety"] = (
-            SKILL_ROOT / "common" / "sql_safety.md"
-        ).read_text(encoding="utf-8").strip()
+        bodies["sql_safety"] = render_config_template(
+            (SKILL_ROOT / "common" / "sql_safety.md")
+            .read_text(encoding="utf-8")
+            .strip()
+        )
     return bodies
 
 

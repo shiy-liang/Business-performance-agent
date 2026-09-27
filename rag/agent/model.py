@@ -2,23 +2,26 @@
 
 from __future__ import annotations
 
-import os
 from functools import lru_cache
 
-from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 
-from model.config import PROJECT_ROOT, load_model_config
+from config.settings import load_environment_settings
+from model.config import load_model_config
 from model.factory import ModelEnvironmentError
 
 
 @lru_cache(maxsize=5)
 def create_agent_model(*, reasoning_profile: str | None = None) -> ChatOpenAI:
     """Create a streaming ChatOpenAI client backed by the Responses API."""
-    load_dotenv(PROJECT_ROOT / ".env")
     settings = load_model_config()
-    api_key = os.getenv(settings.api_key_env, "").strip()
-    workspace_id = os.getenv(settings.workspace_id_env, "").strip()
+    environment = load_environment_settings()
+    environment_values = {
+        "DASHSCOPE_API_KEY": environment.dashscope_api_key,
+        "DASHSCOPE_WORKSPACE_ID": environment.dashscope_workspace_id,
+    }
+    api_key = environment_values.get(settings.api_key_env, "").strip()
+    workspace_id = environment_values.get(settings.workspace_id_env, "").strip()
     if not api_key:
         raise ModelEnvironmentError(f"{settings.api_key_env} is not configured")
     if not workspace_id:

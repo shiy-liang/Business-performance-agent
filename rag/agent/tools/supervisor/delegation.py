@@ -10,18 +10,20 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
+from config.settings import load_agent_settings
 from observability import logger
 
 
 SpecialistHandler = Callable[
     [str, RunnableConfig | None], Awaitable[dict[str, object]]
 ]
+_PLANNING_SETTINGS = load_agent_settings().planning
 
 
 class DelegationInput(BaseModel):
     task_ids: list[str] = Field(
         min_length=1,
-        max_length=8,
+        max_length=_PLANNING_SETTINGS.max_subtasks_per_request,
         description=(
             "The exact ordered IDs of every formatted subtask assigned to this "
             "specialist. Do not rewrite task questions or skill assignments."
@@ -61,7 +63,7 @@ specialist_dispatcher = SpecialistDispatcher()
 
 
 def _claim_delegation(config: RunnableConfig, agent_name: str) -> bool:
-    """Allow one delegation per specialist for the current supervisor run."""
+    """Enforce the configured delegation count for one supervisor run."""
 
     configurable = config.get("configurable")
     if not isinstance(configurable, dict):
@@ -71,9 +73,10 @@ def _claim_delegation(config: RunnableConfig, agent_name: str) -> bool:
     if not isinstance(runtime_state, dict):
         runtime_state = {}
         configurable["delegation_runtime_state"] = runtime_state
-    if runtime_state.get(agent_name) is True:
+    calls = int(runtime_state.get(agent_name, 0))
+    if calls >= _PLANNING_SETTINGS.max_delegations_per_specialist:
         return False
-    runtime_state[agent_name] = True
+    runtime_state[agent_name] = calls + 1
     return True
 
 
@@ -83,7 +86,8 @@ def _duplicate_delegation_result(agent_name: str) -> str:
             "status": "duplicate_blocked",
             "agent": agent_name,
             "message": (
-                f"The {agent_name} specialist was already delegated for this request. "
+                f"The {agent_name} specialist reached its configured delegation "
+                f"limit of {_PLANNING_SETTINGS.max_delegations_per_specialist}. "
                 "Use the existing specialist evidence and complete the answer."
             ),
             "sources": [],
@@ -161,7 +165,7 @@ def _task_packet(
         "sub_tasks": planned,
         "execution_contract": (
             "Use each assigned primary skill only for its matching subtask. Load the "
-            "union of assigned skills once, execute subtasks in listed order, and "
+            "union of assigned skills, execute subtasks in listed order, and "
             "return one evidence section per subtask. Do not add or reroute tasks."
         ),
     }

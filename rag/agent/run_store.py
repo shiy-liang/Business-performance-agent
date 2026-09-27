@@ -7,34 +7,28 @@ tokens. A database outage must never make an otherwise valid Agent answer fail.
 
 from __future__ import annotations
 
-import os
 from hashlib import sha256
 from typing import Any
 from uuid import UUID
 
 import psycopg
-from dotenv import load_dotenv
 from psycopg.types.json import Jsonb
 
-from model.config import PROJECT_ROOT
+from config.settings import load_application_settings, load_environment_settings
 from observability import logger
 from rag.agent.state import PublicAgentEvent
 
 
-load_dotenv(PROJECT_ROOT / ".env")
+_APPLICATION_SETTINGS = load_application_settings()
+_AUDIT_SETTINGS = _APPLICATION_SETTINGS.audit
 
 
 def _enabled() -> bool:
-    return os.getenv("AGENT_RUN_PERSISTENCE", "true").strip().lower() not in {
-        "0",
-        "false",
-        "no",
-        "off",
-    }
+    return _AUDIT_SETTINGS.enabled
 
 
 def _database_url() -> str:
-    value = os.getenv("DATABASE_URL", "").strip()
+    value = load_environment_settings().database_url
     if not value:
         raise RuntimeError("DATABASE_URL is not configured")
     return value
@@ -46,18 +40,23 @@ def _safe_value(value: Any) -> Any:
     if value is None or isinstance(value, (bool, int, float)):
         return value
     if isinstance(value, str):
-        return value if len(value) <= 1000 else value[:1000] + "... [truncated]"
+        maximum = _AUDIT_SETTINGS.max_string_chars
+        return value if len(value) <= maximum else value[:maximum] + "... [truncated]"
     if isinstance(value, dict):
-        return {str(key)[:100]: _safe_value(item) for key, item in value.items()}
+        maximum = _AUDIT_SETTINGS.max_key_chars
+        return {str(key)[:maximum]: _safe_value(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
-        return [_safe_value(item) for item in value[:50]]
-    return str(value)[:1000]
+        return [
+            _safe_value(item)
+            for item in value[: _AUDIT_SETTINGS.max_collection_items]
+        ]
+    return str(value)[: _AUDIT_SETTINGS.max_string_chars]
 
 
 async def _open_connection() -> psycopg.AsyncConnection:
     return await psycopg.AsyncConnection.connect(
         _database_url(),
-        connect_timeout=5,
+        connect_timeout=_APPLICATION_SETTINGS.database.connect_timeout_seconds,
         prepare_threshold=None,
     )
 
@@ -112,7 +111,9 @@ class RunRecorder:
             # Parameters are intentionally visible to the requesting user but must
             # not be copied into durable audit storage.
             data.pop("parameters", None)
-        message = str(data.get("message") or event_type)[:1000]
+        message = str(data.get("message") or event_type)[
+            : _AUDIT_SETTINGS.max_event_message_chars
+        ]
         try:
             await self._insert_event(event_type, message, data)
             await self._connection.commit()
@@ -144,7 +145,7 @@ class RunRecorder:
     async def fail(self, error_code: str) -> None:
         if not self._available or self._connection is None:
             return
-        safe_code = error_code[:200]
+        safe_code = error_code[: _AUDIT_SETTINGS.max_error_code_chars]
         try:
             await self._insert_event(
                 "run.failed",
@@ -189,7 +190,12 @@ class RunRecorder:
             INSERT INTO run_events (run_id, event_type, message, payload)
             VALUES (%s, %s, %s, %s)
             """,
-            (self.run_id, event_type[:100], message[:1000], Jsonb(payload)),
+            (
+                self.run_id,
+                event_type[: _AUDIT_SETTINGS.max_event_type_chars],
+                message[: _AUDIT_SETTINGS.max_event_message_chars],
+                Jsonb(payload),
+            ),
         )
 
     async def _disable(self, error: Exception, event: str) -> None:

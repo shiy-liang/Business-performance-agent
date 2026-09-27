@@ -13,16 +13,18 @@ from pgvector import Vector
 from pgvector.psycopg import register_vector
 from pydantic import BaseModel, Field
 
+from config.settings import load_agent_settings
 from model import embedding_model
 from observability import logger
 from rag.agent.tools.common.sql_runtime import connect_readonly, set_readonly_guards
 
 
-PRODUCT_NAME_TOP_K = 5
-MIN_SIMILARITY = 0.70
-PRODUCT_NAME_SIMILARITY_THRESHOLDS = (0.70, 0.60, 0.55)
+_PRODUCT_SETTINGS = load_agent_settings().product_resolution
+PRODUCT_NAME_TOP_K = _PRODUCT_SETTINGS.top_k
+PRODUCT_NAME_SIMILARITY_THRESHOLDS = _PRODUCT_SETTINGS.similarity_thresholds
+MIN_SIMILARITY = PRODUCT_NAME_SIMILARITY_THRESHOLDS[0]
 MAX_PRODUCT_NAME_ATTEMPTS = len(PRODUCT_NAME_SIMILARITY_THRESHOLDS)
-MAX_SIMILARITY_GAP = 0.20
+MAX_SIMILARITY_GAP = _PRODUCT_SETTINGS.max_similarity_gap
 
 PRODUCT_NAME_SEARCH_SQL = """
 SELECT
@@ -34,7 +36,7 @@ FROM public.products
 WHERE embedding IS NOT NULL
   AND vector_dims(embedding) = %(dimensions)s
 ORDER BY similarity DESC, product_name ASC
-LIMIT 5
+LIMIT %(top_k)s
 """
 
 
@@ -43,7 +45,7 @@ class FindRealNameInput(BaseModel):
 
     query: str = Field(
         min_length=1,
-        max_length=200,
+        max_length=_PRODUCT_SETTINGS.max_query_length,
         description=(
             "A fuzzy, non-standard, or cross-language product name from the user."
         ),
@@ -64,6 +66,7 @@ def _search_product_candidates(query_vector: list[float]) -> list[dict[str, Any]
                 {
                     "query_embedding": vector,
                     "dimensions": len(query_vector),
+                    "top_k": PRODUCT_NAME_TOP_K,
                 },
             )
             rows = cursor.fetchall()
@@ -143,7 +146,7 @@ def canonical_product_name_error(
 
 @tool(args_schema=FindRealNameInput)
 async def find_real_name(query: str, config: RunnableConfig) -> str:
-    """Resolve a fuzzy product, stopping after the first match or three attempts."""
+    """Resolve a fuzzy product within the configured sequential-attempt policy."""
 
     tool_name = "find_real_name"
     state = _product_resolution_state(config)
@@ -197,7 +200,7 @@ async def find_real_name(query: str, config: RunnableConfig) -> str:
                 "result_status": "canonical_product_not_found",
                 "error_type": "canonical_product_not_found",
                 "error": (
-                    "No canonical product name was found after three attempts. "
+                    f"No canonical product name was found after {MAX_PRODUCT_NAME_ATTEMPTS} attempts. "
                     "Stop querying and ask the user for an exact product name."
                 ),
                 "call_number": attempts,
@@ -310,7 +313,7 @@ async def find_real_name(query: str, config: RunnableConfig) -> str:
         "rephrasing of the user's product wording."
         if not terminal
         else (
-            "No canonical product name was found after three attempts. "
+            f"No canonical product name was found after {MAX_PRODUCT_NAME_ATTEMPTS} attempts. "
             "Stop querying and ask the user for an exact product name."
         )
     )

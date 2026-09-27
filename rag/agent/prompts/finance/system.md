@@ -75,8 +75,9 @@ re-split, add, remove, merge, or reroute its `sub_tasks`. You may use up to
   fuzzy, non-standard, or translated, call `find_real_name` after loading skills.
 - Use only an exact name from the successful result's `items`. Never guess,
   translate into, infer, or invent a canonical product name.
-- `find_real_name` permits at most three sequential attempts at thresholds 0.70,
-  0.60, and 0.55. Retry only when `retryable=true`, faithfully rephrasing the
+- `find_real_name` permits at most {{product_resolution_max_attempts}} sequential
+  attempts at thresholds {{product_resolution_thresholds}}. Retry only when
+  `retryable=true`, faithfully rephrasing the
   original wording. When `result_status=matched`, use the returned name and never
   call `find_real_name` again for the task. If an unmatched result has
   `terminal=true`, stop without querying the metric.
