@@ -100,6 +100,27 @@ GROUP BY p.product_id, p.product_name, p.product_category
 HAVING COUNT(r.review_id) >= %(minimum_reviews)s
 """
 
+REVENUE_TREND_SQL = """
+WITH sale_rows AS (
+    SELECT t.transaction_id, t.transaction_date, t.net_sales,
+           COALESCE(SUM(r.refund_amount), 0) AS refunds
+    FROM transactions t
+    JOIN products p ON p.product_id = t.product_id
+    LEFT JOIN returns_refunds r
+      ON r.transaction_id = t.transaction_id
+     AND LOWER(r.refund_status) = 'completed'
+    WHERE t.transaction_date >= %(period_start)s
+      AND t.transaction_date < %(period_end)s
+      AND (%(store_id)s::text IS NULL OR t.store_id = %(store_id)s::text)
+    GROUP BY t.transaction_id, t.transaction_date, t.net_sales
+)
+SELECT DATE_TRUNC(%(grain)s::text, transaction_date::timestamp)::date AS date,
+       SUM(net_sales - refunds) AS revenue
+FROM sale_rows
+GROUP BY 1
+ORDER BY 1
+"""
+
 
 def _next_month(month_start: date) -> date:
     if month_start.month == 12:
@@ -321,6 +342,24 @@ def analyze_prepared_product_performance(
             )
             monthly_rows = [dict(row) for row in cursor.fetchall()]
 
+            grain = (
+                "day" if (period_end - prepared["period_start"]).days <= 90
+                else "month"
+            )
+            cursor.execute(
+                REVENUE_TREND_SQL,
+                {
+                    "period_start": prepared["period_start"],
+                    "period_end": period_end,
+                    "store_id": store_id,
+                    "grain": grain,
+                },
+            )
+            revenue_trend = [
+                {"date": row["date"].isoformat(), "revenue": _money(row["revenue"])}
+                for row in cursor.fetchall()
+            ]
+
             cursor.execute(
                 LIFETIME_RATINGS_SQL,
                 {"minimum_reviews": minimum_reviews},
@@ -336,7 +375,18 @@ def analyze_prepared_product_performance(
                 row["product_name"],
             ),
             reverse=True,
+
         )[:ranking_limit]
+   
+        category_totals = {}
+        for row in monthly_rows:
+            category = row["product_category"] or "Uncategorized"
+            category_totals[category] = category_totals.get(category, Decimal("0")) + row["refund_adjusted_revenue"]
+        category_share = [
+            {"category": category, "revenue": _money(revenue)}
+            for category, revenue in sorted(category_totals.items(), key=lambda item: item[1], reverse=True)
+        ]
+
         best_sellers = [
             {
                 "product_id": row["product_id"],
@@ -435,6 +485,8 @@ def analyze_prepared_product_performance(
                 },
             },
             "best_sellers": best_sellers,
+            "revenue_trend": revenue_trend,
+            "category_share": category_share,
             "top_rated": [_rating_item(row) for row in top_rated_rows],
             "high_return_rate": high_return_rate,
             "lowest_rated": [_rating_item(row) for row in lowest_rated_rows],

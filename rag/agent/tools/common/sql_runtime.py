@@ -167,6 +167,17 @@ class SqlValidationError(ValueError):
         self.validation_error_type = validation_error_type
 
 
+def _validation_error_message(error: SqlValidationError) -> str:
+    """Expose policy blocks as policy decisions, not infrastructure failures."""
+
+    if error.validation_error_type == "prohibited_column":
+        return (
+            "Query blocked by privacy policy: personal identity fields cannot be "
+            "returned. I can provide customer IDs or aggregated results instead."
+        )
+    return str(error)
+
+
 def _json_value(value: Any) -> Any:
     if isinstance(value, Decimal):
         return str(value)
@@ -948,8 +959,12 @@ def build_sql_tools(
                 "success": False,
                 "error_type": "validation_error",
                 "validation_error_type": error.validation_error_type,
-                "error": str(error),
-                "retryable": attempt < sql_max_attempts(),
+                "error": _validation_error_message(error),
+                "retryable": (
+                    False
+                    if error.validation_error_type == "prohibited_column"
+                    else attempt < sql_max_attempts()
+                ),
                 "sources": [],
             }
             _finish_attempt(config, success=False)
@@ -1110,8 +1125,12 @@ def build_sql_tools(
                 "success": False,
                 "error_type": "validation_error",
                 "validation_error_type": error.validation_error_type,
-                "error": str(error),
-                "retryable": attempt < sql_max_attempts(),
+                "error": _validation_error_message(error),
+                "retryable": (
+                    False
+                    if error.validation_error_type == "prohibited_column"
+                    else attempt < sql_max_attempts()
+                ),
                 "sources": [],
             }
         except psycopg.OperationalError:
