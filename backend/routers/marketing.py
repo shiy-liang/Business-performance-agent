@@ -17,7 +17,7 @@ from backend.runtime import RunNotFoundError, record_run_event
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 
-TOP_CAMPAIGNS_SQL = """
+PERIOD_CAMPAIGNS_SQL = """
 WITH selected_campaigns AS (
     SELECT
         c.campaign_id,
@@ -26,6 +26,8 @@ WITH selected_campaigns AS (
         c.start_date,
         c.end_date,
         c.budget,
+        c.impressions,
+        c.clicks,
         c.conversions,
         c.conversion_rate,
         c.roi,
@@ -34,7 +36,6 @@ WITH selected_campaigns AS (
     WHERE c.start_date < %(period_end)s::date
       AND c.end_date >= %(period_start)s::date
     ORDER BY c.roi DESC, c.conversions DESC, c.campaign_id
-    LIMIT 5
 )
 SELECT
     selected_campaigns.*,
@@ -245,7 +246,7 @@ def analyze_prepared_marketing_performance(
                 "period_start": period_start,
                 "period_end": period_end,
             }
-            cursor.execute(TOP_CAMPAIGNS_SQL, parameters)
+            cursor.execute(PERIOD_CAMPAIGNS_SQL, parameters)
             rows = cursor.fetchall()
 
             cursor.execute(CAMPAIGN_RISK_SUMMARY_SQL, parameters)
@@ -262,6 +263,8 @@ def analyze_prepared_marketing_performance(
                 "start_date": row["start_date"].isoformat(),
                 "end_date": row["end_date"].isoformat(),
                 "budget": _number(row["budget"]),
+                "impressions": row["impressions"],
+                "clicks": row["clicks"],
                 "conversions": row["conversions"],
                 "conversion_rate": _number(row["conversion_rate"]),
                 "roi": _number(row["roi"]),
@@ -387,7 +390,7 @@ def marketing_performance(
     start_date: date | None = None,
     end_date: date | None = None,
 ) -> dict[str, object]:
-    """Return the five highest reported-ROI campaigns overlapping the selected range."""
+    """Return every campaign overlapping the selected range, ordered by reported ROI."""
 
     return build_marketing_performance(
         month=month,

@@ -75,6 +75,7 @@ ranked AS (
     SELECT
         t.ticket_id,
         t.issue_category,
+        t.priority,
         t.submission_date,
         t.resolution_status,
         t.notes,
@@ -91,7 +92,7 @@ FROM ranked
 ORDER BY
     submission_date,
     ticket_id
-LIMIT 3
+LIMIT 10
 """
 
 
@@ -230,7 +231,7 @@ def analyze_prepared_action_center(
             critical_count = sum(
                 row["severity"] == "critical" for row in inventory_rows
             )
-            top_inventory = [
+            affected_inventory = [
                 {
                     "inventory_id": row["inventory_id"],
                     "product_id": row["product_id"],
@@ -243,8 +244,9 @@ def analyze_prepared_action_center(
                     "stock_ratio": _ratio(row["stock_ratio"]),
                     "severity": row["severity"],
                 }
-                for row in inventory_rows[:5]
+                for row in inventory_rows[:100]
             ]
+            top_inventory = affected_inventory[:5]
             inventory_snapshot = (
                 inventory_metadata["snapshot_date"].isoformat()
                 if inventory_metadata and inventory_metadata["snapshot_date"]
@@ -274,6 +276,7 @@ def analyze_prepared_action_center(
                 {
                     "ticket_id": row["ticket_id"],
                     "issue_category": row["issue_category"],
+                    "priority": row["priority"],
                     "submission_date": row["submission_date"].isoformat(),
                     "resolution_status": row["resolution_status"],
                     "open_days": row["open_days"],
@@ -302,6 +305,7 @@ def analyze_prepared_action_center(
                 "additional_reorder_count": len(inventory_rows) - critical_count,
                 "affected_ratio": affected_ratio,
                 "top_items": top_inventory,
+                "affected_items": affected_inventory,
             },
             "support_tickets": {
                 "scope": {
