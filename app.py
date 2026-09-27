@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend.database import connect
+from backend.database import close_pool, connect, open_pool
 from backend.middleware import register_logging_middleware
 from backend.routers.action_center import router as action_center_router
 from backend.routers.chat import router as chat_router
@@ -29,11 +29,13 @@ from rag.agent.sql_approval import sql_approval_manager
 async def lifespan(application: FastAPI):
     """Initialize reusable Agent graphs, clients, and tools before serving."""
 
+    open_pool()
     application.state.agent_runtime = initialize_agent_runtime()
     try:
         yield
     finally:
         await sql_approval_manager.clear()
+        close_pool()
 
 
 app = FastAPI(

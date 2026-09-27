@@ -61,10 +61,24 @@ def _sse(event: str, data: dict[str, object]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
 
 async def _generate_title(question: str, answer: str) -> str:
-    fallback = " ".join(question.strip().split())[:40] or "New Chat"
+    normalized_question = " ".join(question.strip().split())
+    # Use the user's question as the source of truth for title language.  The
+    # title prompt must not be hard-coded to Chinese, otherwise English chats
+    # are routinely given Chinese history titles.
+    chinese_chars = sum("\u4e00" <= char <= "\u9fff" for char in normalized_question)
+    latin_chars = sum(char.isascii() and char.isalpha() for char in normalized_question)
+    language = "Chinese" if chinese_chars > latin_chars else "English"
+    fallback = normalized_question[:40] or ("新对话" if language == "Chinese" else "New Chat")
     try:
         response = await create_agent_model(reasoning_profile="supervisor_routing").ainvoke([
-            {"role": "system", "content": "为业务分析对话生成简短中文标题。只返回标题，不加引号，不超过30个字。"},
+            {
+                "role": "system",
+                "content": (
+                    f"Generate a short {language} title for this business analysis conversation. "
+                    f"Use {language} only; do not mix languages. Return only the title, without "
+                    "quotes or explanation, and keep it under 30 characters."
+                ),
+            },
             {"role": "user", "content": f"用户问题：{question}\n助手回答：{answer}"},
         ])
         content = response.content
