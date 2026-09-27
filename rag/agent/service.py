@@ -12,6 +12,7 @@ from langchain_core.messages import AnyMessage, HumanMessage
 from model.config import load_model_config
 from observability import logger
 from rag.agent.bootstrap import initialize_agent_runtime
+from rag.agent.customer_privacy import check_customer_privacy
 from rag.agent.graph import build_supervisor_graph
 from rag.agent.middleware import AgentLoggingCallback, PublicEventMiddleware
 from rag.agent.run_store import RunRecorder
@@ -63,6 +64,27 @@ async def stream_supervisor(
         started_event = middleware.started(run_id)
         await recorder.record(started_event)
         yield started_event
+
+        privacy_allowed, privacy_message = check_customer_privacy(clean_question)
+        if not privacy_allowed:
+            token_event: PublicAgentEvent = {
+                "event": "token",
+                "data": {"text": privacy_message or "The request was blocked."},
+            }
+            await recorder.record(token_event)
+            yield token_event
+            duration_ms = round((perf_counter() - started_at) * 1000, 2)
+            await recorder.complete(duration_ms=duration_ms, evidence_count=0)
+            yield {
+                "event": "done",
+                "data": {
+                    "run_id": run_id,
+                    "answer": privacy_message or "The request was blocked.",
+                    "sources": [],
+                    "duration_ms": duration_ms,
+                },
+            }
+            return
 
         chat_settings = load_model_config().chat_model
         reasoning_profiles = chat_settings.agent_reasoning_effort

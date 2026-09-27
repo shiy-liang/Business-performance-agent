@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import os
+import argparse
+import csv
+import io
 from pathlib import Path
 
 import psycopg
@@ -63,23 +66,99 @@ def load_csv(connection: psycopg.Connection, table: str, path: Path) -> int:
         return int(cursor.fetchone()[0])
 
 
-def main() -> None:
-    validate_files()
-    with psycopg.connect(database_url(), autocommit=False) as connection:
+def load_csv_incremental(
+    connection: psycopg.Connection, table: str, path: Path
+) -> int:
+    """Load only new rows, preserving existing rows and vector columns."""
+
+    staging = f"_{table}_staging"
+    with path.open("r", encoding="utf-8", newline="") as source:
+        content = source.read()
+    reader = csv.DictReader(io.StringIO(content))
+    columns = reader.fieldnames or []
+    integer_columns = {
+        "age",
+        "customer_satisfaction_score",
+        "resolution_time_hours",
+        "return_quantity",
+        "quantity",
+    }
+    if any(column in integer_columns for column in columns):
+        rows = []
+        for row in reader:
+            for column in integer_columns.intersection(row):
+                if row[column] not in (None, ""):
+                    row[column] = str(int(float(row[column])))
+            rows.append(row)
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=columns, lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(rows)
+        content = output.getvalue()
+    source = io.StringIO(content)
+    try:
+        source.readline()
+        quoted_columns = sql.SQL(", ").join(map(sql.Identifier, columns))
         with connection.cursor() as cursor:
             cursor.execute(
-                """
-                TRUNCATE business_documents, campaign_attribution, returns_refunds,
-                         expenses, inventory, customer_reviews, support_tickets,
-                         interactions, transactions, campaigns, stores, products,
-                         customers RESTART IDENTITY CASCADE
-                """
+                sql.SQL(
+                    "CREATE TEMP TABLE {} (LIKE public.{} INCLUDING DEFAULTS) ON COMMIT DROP"
+                ).format(sql.Identifier(staging), sql.Identifier(table))
             )
+        copy_statement = sql.SQL(
+            "COPY {} ({}) FROM STDIN WITH (FORMAT CSV, NULL '')"
+        ).format(sql.Identifier(staging), quoted_columns)
+        with connection.cursor().copy(copy_statement) as copy:
+            while chunk := source.read(1024 * 1024):
+                copy.write(chunk)
+    finally:
+        source.close()
+
+    with connection.cursor() as cursor:
+        target_columns = sql.SQL(", ").join(map(sql.Identifier, columns))
+        cursor.execute(
+            sql.SQL(
+                "INSERT INTO public.{} ({}) SELECT {} FROM {} ON CONFLICT DO NOTHING"
+            ).format(
+                sql.Identifier(table),
+                target_columns,
+                target_columns,
+                sql.Identifier(staging),
+            )
+        )
+        return cursor.rowcount
+
+
+def main() -> None:
+    validate_files()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--mode",
+        choices=("incremental", "full"),
+        default="incremental",
+        help="Incremental append by default; use full only for an intentional reset.",
+    )
+    args = parser.parse_args()
+    with psycopg.connect(database_url(), autocommit=False) as connection:
+        if args.mode == "full":
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    TRUNCATE campaign_attribution, returns_refunds, expenses,
+                             inventory, customer_reviews, support_tickets,
+                             interactions, transactions, campaigns, stores,
+                             products, customers RESTART IDENTITY CASCADE
+                    """
+                )
         for table, path in DATASETS:
-            count = load_csv(connection, table, path)
-            print(f"Loaded {table}: {count} rows")
+            if args.mode == "incremental":
+                count = load_csv_incremental(connection, table, path)
+                print(f"Inserted {table}: {count} new rows")
+            else:
+                count = load_csv(connection, table, path)
+                print(f"Loaded {table}: {count} rows")
         connection.commit()
-    print("Database load completed successfully.")
+    print(f"Database {args.mode} load completed successfully.")
 
 
 if __name__ == "__main__":

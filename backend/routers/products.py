@@ -180,16 +180,25 @@ def build_product_performance(
     month: str | None,
     store_id: str | None,
     run_id: UUID | None,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> dict[str, object]:
     """Build Product Performance from prepared Products context."""
 
-    prepared = prepare_product_performance(month=month, store_id=store_id)
+    prepared = prepare_product_performance(
+        month=month,
+        store_id=store_id,
+        start_date=start_date,
+        end_date=end_date,
+    )
     return analyze_prepared_product_performance(prepared=prepared, run_id=run_id)
 
 
 def prepare_product_performance(
     month: str | None,
     store_id: str | None,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> dict[str, object]:
     """Validate Products inputs and prepare the context needed for analysis."""
 
@@ -236,22 +245,19 @@ def prepare_product_performance(
 
                 default_month = _latest_complete_month(coverage["last_date"])
                 selected_month = _parse_month(month) if month else default_month
-                first_data_month = coverage["first_date"].replace(day=1)
-                last_data_month = coverage["last_date"].replace(day=1)
-                if not first_data_month <= selected_month <= last_data_month:
+                period_start = start_date or selected_month.replace(day=1)
+                period_end = end_date or _next_month(selected_month)
+                if period_end <= period_start:
+                    raise HTTPException(status_code=422, detail="end_date must be after start_date")
+                if period_start < coverage["first_date"] or period_end - timedelta(days=1) > coverage["last_date"]:
                     raise HTTPException(
                         status_code=422,
                         detail=(
-                            "month is outside the available sales range "
-                            f"{first_data_month:%Y-%m} to {last_data_month:%Y-%m}"
+                            "date range is outside the available sales range "
+                            f"{coverage['first_date']} to {coverage['last_date']}"
                         ),
                     )
-
-                period_end = _next_month(selected_month)
-                is_complete = selected_month < last_data_month or (
-                    selected_month == last_data_month
-                    and coverage["last_date"] == period_end - timedelta(days=1)
-                )
+                is_complete = period_end - timedelta(days=1) <= coverage["last_date"]
     except HTTPException:
         raise
     except RuntimeError as exc:
@@ -263,8 +269,9 @@ def prepare_product_performance(
         "scope": scope,
         "coverage": dict(coverage),
         "selected_month": selected_month,
+        "period_start": period_start,
         "period_end": period_end,
-        "is_default": month is None,
+        "is_default": month is None and start_date is None and end_date is None,
         "is_complete": is_complete,
         "store_id": store_id,
     }
@@ -302,7 +309,7 @@ def analyze_prepared_product_performance(
             cursor.execute(
                 MONTHLY_PRODUCT_SQL,
                 {
-                    "period_start": selected_month,
+                    "period_start": prepared["period_start"],
                     "period_end": period_end,
                     "store_id": store_id,
                 },
@@ -389,7 +396,7 @@ def analyze_prepared_product_performance(
             "scope": scope,
             "period": {
                 "month": selected_month.strftime("%Y-%m"),
-                "start_date": selected_month.isoformat(),
+                "start_date": prepared["period_start"].isoformat(),
                 "end_date": (period_end - timedelta(days=1)).isoformat(),
                 "is_default": prepared["is_default"],
                 "is_complete": prepared["is_complete"],
@@ -474,6 +481,8 @@ def product_performance(
         description="Omit for the whole company, including Online and unassigned sales.",
     ),
     run_id: UUID | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> dict[str, object]:
     """Return four Top-5 product rankings for the dashboard."""
 
@@ -481,4 +490,6 @@ def product_performance(
         month=month,
         store_id=store_id,
         run_id=run_id,
+        start_date=start_date,
+        end_date=end_date,
     )

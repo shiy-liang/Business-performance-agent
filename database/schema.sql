@@ -128,6 +128,29 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   CHECK (started_at IS NULL OR started_at >= created_at),
   CHECK (completed_at IS NULL OR completed_at >= COALESCE(started_at, created_at))
 );
+
+CREATE TABLE IF NOT EXISTS chat_sessions (
+  session_id UUID PRIMARY KEY,
+  title TEXT NOT NULL DEFAULT 'New Chat',
+  summary TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  message_count INTEGER NOT NULL DEFAULT 0,
+  last_message_preview TEXT
+);
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+  message_id BIGSERIAL PRIMARY KEY,
+  session_id UUID NOT NULL REFERENCES chat_sessions(session_id) ON DELETE CASCADE,
+  role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+  content TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_updated
+  ON chat_sessions(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_session
+  ON chat_messages(session_id, created_at, message_id);
 CREATE TABLE IF NOT EXISTS run_events (
   event_id BIGSERIAL PRIMARY KEY,
   run_id UUID NOT NULL REFERENCES agent_runs(run_id) ON DELETE CASCADE,

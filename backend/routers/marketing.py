@@ -149,14 +149,20 @@ def _record_marketing_failure_if_started(
 def build_marketing_performance(
     month: str | None,
     run_id: UUID | None,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> dict[str, object]:
     """Build Marketing Performance from prepared Marketing context."""
 
-    prepared = prepare_marketing_performance(month=month)
+    prepared = prepare_marketing_performance(month=month, start_date=start_date, end_date=end_date)
     return analyze_prepared_marketing_performance(prepared=prepared, run_id=run_id)
 
 
-def prepare_marketing_performance(month: str | None) -> dict[str, object]:
+def prepare_marketing_performance(
+    month: str | None,
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> dict[str, object]:
     """Validate Marketing inputs and prepare the context needed for analysis."""
 
     try:
@@ -174,7 +180,11 @@ def prepare_marketing_performance(month: str | None) -> dict[str, object]:
                     raise HTTPException(status_code=404, detail="No transaction data found")
 
                 default_month = _latest_complete_month(coverage["last_date"])
-                selected_month = _parse_month(month) if month else default_month
+                selected_month = (
+                    _parse_month(month)
+                    if month
+                    else start_date.replace(day=1) if start_date else default_month
+                )
                 first_data_month = coverage["first_date"].replace(day=1)
                 last_data_month = coverage["last_date"].replace(day=1)
                 if not first_data_month <= selected_month <= last_data_month:
@@ -186,11 +196,11 @@ def prepare_marketing_performance(month: str | None) -> dict[str, object]:
                         ),
                     )
 
-                period_end = _next_month(selected_month)
-                is_complete = selected_month < last_data_month or (
-                    selected_month == last_data_month
-                    and coverage["last_date"] == period_end - timedelta(days=1)
-                )
+                period_start = start_date or selected_month
+                period_end = end_date or _next_month(selected_month)
+                if period_end <= period_start:
+                    raise HTTPException(status_code=422, detail="end_date must be after start_date")
+                is_complete = period_end - timedelta(days=1) <= coverage["last_date"]
     except HTTPException:
         raise
     except RuntimeError as exc:
@@ -201,8 +211,9 @@ def prepare_marketing_performance(month: str | None) -> dict[str, object]:
     return {
         "coverage": dict(coverage),
         "selected_month": selected_month,
+        "period_start": period_start,
         "period_end": period_end,
-        "is_default": month is None,
+        "is_default": month is None and start_date is None and end_date is None,
         "is_complete": is_complete,
     }
 
@@ -216,6 +227,7 @@ def analyze_prepared_marketing_performance(
     marketing_analysis_started = False
     coverage = prepared["coverage"]
     selected_month = prepared["selected_month"]
+    period_start = prepared["period_start"]
     period_end = prepared["period_end"]
 
     try:
@@ -230,7 +242,7 @@ def analyze_prepared_marketing_performance(
                 marketing_analysis_started = True
 
             parameters = {
-                "period_start": selected_month,
+                "period_start": period_start,
                 "period_end": period_end,
             }
             cursor.execute(TOP_CAMPAIGNS_SQL, parameters)
@@ -283,14 +295,14 @@ def analyze_prepared_marketing_performance(
             },
             "period": {
                 "month": selected_month.strftime("%Y-%m"),
-                "start_date": selected_month.isoformat(),
+                "start_date": period_start.isoformat(),
                 "end_date": (period_end - timedelta(days=1)).isoformat(),
                 "is_default": prepared["is_default"],
                 "is_complete": prepared["is_complete"],
                 "transaction_data_through": coverage["last_date"].isoformat(),
             },
             "basis": {
-                "selection": "campaign dates overlap the selected calendar month",
+                "selection": "campaign dates overlap the selected date range",
                 "ranking": "reported roi descending",
                 "limit": 5,
                 "metrics_period": "campaign_lifecycle",
@@ -372,7 +384,14 @@ def marketing_performance(
         ),
     ),
     run_id: UUID | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> dict[str, object]:
-    """Return the five highest reported-ROI campaigns overlapping a month."""
+    """Return the five highest reported-ROI campaigns overlapping the selected range."""
 
-    return build_marketing_performance(month=month, run_id=run_id)
+    return build_marketing_performance(
+        month=month,
+        run_id=run_id,
+        start_date=start_date,
+        end_date=end_date,
+    )

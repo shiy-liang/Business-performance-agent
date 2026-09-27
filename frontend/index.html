@@ -30,16 +30,12 @@
           <span class="sidebar-link-icon" aria-hidden="true">00</span>
           <span class="sidebar-link-label">Business overview</span>
         </a>
-        <a class="sidebar-link" href="#action-center" data-page-link="action-center" title="Action Center">
-          <span class="sidebar-link-icon" aria-hidden="true">01</span>
-          <span class="sidebar-link-label">Action Center</span>
-        </a>
         <a class="sidebar-link" href="#product-performance" data-page-link="product-performance" title="Product Performance">
-          <span class="sidebar-link-icon" aria-hidden="true">02</span>
+          <span class="sidebar-link-icon" aria-hidden="true">01</span>
           <span class="sidebar-link-label">Product Performance</span>
         </a>
         <a class="sidebar-link" href="#campaign-performance" data-page-link="campaign-performance" title="Campaign Performance">
-          <span class="sidebar-link-icon" aria-hidden="true">03</span>
+          <span class="sidebar-link-icon" aria-hidden="true">02</span>
           <span class="sidebar-link-label">Campaign Performance</span>
         </a>
       </nav>
@@ -143,37 +139,16 @@
             <p class="data-note">
               Profit uses synthetic product costs; company totals include online and unassigned transactions.
             </p>
-          </section>
 
-          <section id="action-center" class="panel action-panel" data-page="action-center" aria-label="Business Action Center" hidden>
-            <div class="action-panel-scroll">
+            <div class="overview-risk-block">
               <div class="subsection-heading action-section-heading">
                 <div>
                   <strong>Detected risks</strong>
-                  <span>Deterministic signals for the selected operating period</span>
+                  <span>Current operating alerts for the selected scope</span>
                 </div>
                 <span id="business-risk-count" class="soft-badge">Loading</span>
               </div>
               <div id="business-risk-list" class="risk-list loading-copy">Loading risks…</div>
-
-              <div class="section-divider"></div>
-
-              <div class="subsection-heading action-section-heading">
-                <div>
-                  <strong>Products with low-rated reviews</strong>
-                  <span>1–2 star customer reviews in the selected month · company-wide</span>
-                </div>
-              </div>
-              <div id="review-hotspot-list" class="review-hotspot-list loading-copy">Loading product reviews…</div>
-
-              <div class="section-divider"></div>
-
-              <div class="subsection-heading action-section-heading">
-                <div>
-                  <strong>Current inventory replenishment</strong>
-                  <span>Latest available snapshot · independent of selected month</span>
-                </div>
-              </div>
               <div id="inventory-risk-summary" class="inventory-risk-summary skeleton-line"></div>
               <div id="inventory-list" class="compact-list loading-copy">Loading inventory…</div>
             </div>
@@ -182,6 +157,12 @@
           <section id="assistant-panel" class="panel assistant-panel" role="dialog" aria-label="Business assistant" hidden>
             <div id="assistant-resize-handle" class="assistant-resize-handle" role="separator" aria-label="Resize chat panel" aria-orientation="vertical" aria-valuemin="320" aria-valuemax="900" aria-valuenow="520" tabindex="0"></div>
             <div class="assistant-header">
+              <div class="assistant-session-heading">
+                <button id="chat-history-toggle" class="chat-history-toggle" type="button" aria-expanded="false" aria-label="Open chat history" title="Chat history">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4.5A2.5 2.5 0 0 1 8.5 2H20v17H8.5A2.5 2.5 0 0 0 6 21.5v-17Z"/><path d="M6 4.5A2.5 2.5 0 0 0 3.5 7v13A2.5 2.5 0 0 1 6 17.5h14M10 6h6M10 10h6"/></svg>
+                </button>
+                <strong id="chat-session-title">New Chat</strong>
+              </div>
               <div class="assistant-header-actions">
                 <button id="new-chat-button" class="new-chat-button" type="button">
                   New Chat
@@ -193,6 +174,7 @@
                 <button id="assistant-close" class="assistant-close" type="button" aria-label="Close chat">×</button>
               </div>
             </div>
+            <div id="chat-session-history" class="chat-session-history" hidden aria-label="Chat history"></div>
 
             <div id="chat-conversation" class="chat-conversation">
               <div id="chat-welcome" class="chat-welcome">
@@ -307,6 +289,11 @@
 
           <section id="product-performance" class="panel product-panel" data-page="product-performance" aria-label="Product performance" hidden>
             <div class="panel-header product-header">
+              <div class="product-date-filter" aria-label="Product performance date range">
+                <label>From <input id="product-start-date" type="date" /></label>
+                <label>To <input id="product-end-date" type="date" /></label>
+                <button id="product-date-apply" type="button">Apply</button>
+              </div>
               <div id="product-tabs" class="tabs" role="group" aria-label="Product ranking type">
                 <button class="tab active" data-tab="best_sellers" type="button" aria-pressed="true">Best sellers</button>
                 <button class="tab" data-tab="top_rated" type="button" aria-pressed="false">Top rated</button>
@@ -315,7 +302,7 @@
               </div>
             </div>
             <div class="insight-layout">
-              <div class="insight-card">
+              <div class="insight-card" hidden>
                 <div class="insight-heading"><strong id="product-chart-title">Best sellers comparison</strong><span>Top five in the selected ranking</span></div>
                 <div id="product-chart" class="comparison-chart loading-copy">Loading product comparison…</div>
               </div>
@@ -324,29 +311,30 @@
                 <div id="product-table" class="table-scroll loading-copy">Loading product details…</div>
               </div>
             </div>
-            <div id="product-list" class="rank-list loading-copy">Analyzing products…</div>
+            <div id="product-list" class="rank-list loading-copy" hidden>Analyzing products…</div>
             <section id="product-reviews" class="insight-card product-reviews-panel" aria-labelledby="product-reviews-title">
               <div class="insight-heading"><strong id="product-reviews-title">Customer reviews</strong><span id="review-scope-note">Selected month · company-wide (reviews have no store field)</span></div>
-              <div class="review-controls">
-                <label class="filter-control review-filter-control"><span>Product</span>
-                  <select id="review-product-select" aria-label="Choose product to view reviews" disabled><option value="">Loading products…</option></select>
-                </label>
-                <label class="filter-control review-filter-control"><span>Rating</span>
-                  <select id="review-rating-filter" aria-label="Filter customer reviews by rating">
-                    <option value="low">1–2 stars</option>
-                    <option value="all">All ratings</option>
-                  </select>
-                </label>
+              <div id="review-summary-metrics" class="review-summary-metrics"></div>
+              <div class="review-ranking-grid">
+                <div><h3>Top rated products</h3><div id="review-high-list" class="review-rating-list"></div></div>
+                <div><h3>Lowest rated products</h3><div id="review-low-list" class="review-rating-list"></div></div>
               </div>
-              <div id="review-product-summary" class="review-product-summary" aria-live="polite">Choose a product to see its reviews.</div>
-              <div id="review-comments" class="review-comments" aria-live="polite"></div>
+              <div id="review-product-summary" hidden></div>
+              <div id="review-comments" hidden></div>
+              <select id="review-product-select" hidden></select>
+              <select id="review-rating-filter" hidden><option value="low">1–2 stars</option></select>
             </section>
           </section>
 
           <section id="campaign-performance" class="panel marketing-panel" data-page="campaign-performance" aria-label="Campaign performance" hidden>
+            <div class="campaign-date-filter" aria-label="Campaign performance date range">
+              <label>From <input id="campaign-start-date" type="date" /></label>
+              <label>To <input id="campaign-end-date" type="date" /></label>
+              <button id="campaign-date-apply" type="button">Apply</button>
+            </div>
             <div class="insight-layout">
               <div class="insight-card">
-                <div class="insight-heading"><strong>Reported ROI comparison</strong><span>Top five campaigns overlapping the selected month</span></div>
+                <div class="insight-heading"><strong>Reported ROI comparison</strong><span>Top five campaigns overlapping the selected range</span></div>
                 <div id="campaign-chart" class="comparison-chart loading-copy">Loading ROI comparison…</div>
               </div>
             </div>
@@ -445,7 +433,7 @@
         <div>
           <h3 id="new-chat-dialog-title">Start a new chat?</h3>
           <p id="new-chat-dialog-description">
-            Starting a new chat will permanently delete your current conversation. Do you want to continue?
+            Your current conversation will be kept in history. Do you want to start a new chat?
           </p>
         </div>
         <div class="confirmation-dialog-actions">

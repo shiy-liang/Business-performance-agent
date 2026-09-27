@@ -5,6 +5,10 @@ const state = {
   storeId: "",
   activeProductTab: "best_sellers",
   productData: null,
+  candidateIssues: [],
+  sharedDateRange: { start: "", end: "" },
+  productDateRange: { start: "", end: "" },
+  campaignDateRange: { start: "", end: "" },
   campaigns: [],
   selectedCampaignId: "",
   reviewProducts: [],
@@ -57,6 +61,9 @@ const elements = {
   inventoryRiskSummary: document.querySelector("#inventory-risk-summary"),
   inventoryList: document.querySelector("#inventory-list"),
   productTabs: document.querySelector("#product-tabs"),
+  productStartDate: document.querySelector("#product-start-date"),
+  productEndDate: document.querySelector("#product-end-date"),
+  productDateApply: document.querySelector("#product-date-apply"),
   productList: document.querySelector("#product-list"),
   productChart: document.querySelector("#product-chart"),
   productChartTitle: document.querySelector("#product-chart-title"),
@@ -64,6 +71,9 @@ const elements = {
   productTableNote: document.querySelector("#product-table-note"),
   productReviews: document.querySelector("#product-reviews"),
   reviewScopeNote: document.querySelector("#review-scope-note"),
+  reviewSummaryMetrics: document.querySelector("#review-summary-metrics"),
+  reviewHighList: document.querySelector("#review-high-list"),
+  reviewLowList: document.querySelector("#review-low-list"),
   reviewProductSelect: document.querySelector("#review-product-select"),
   reviewRatingFilter: document.querySelector("#review-rating-filter"),
   reviewProductSummary: document.querySelector("#review-product-summary"),
@@ -72,6 +82,9 @@ const elements = {
   campaignChart: document.querySelector("#campaign-chart"),
   campaignTable: document.querySelector("#campaign-table"),
   campaignPanel: document.querySelector("#campaign-performance"),
+  campaignStartDate: document.querySelector("#campaign-start-date"),
+  campaignEndDate: document.querySelector("#campaign-end-date"),
+  campaignDateApply: document.querySelector("#campaign-date-apply"),
   campaignDetail: document.querySelector("#campaign-detail"),
   campaignDetailTitle: document.querySelector("#campaign-detail-title"),
   campaignDetailStart: document.querySelector("#campaign-detail-start"),
@@ -83,6 +96,9 @@ const elements = {
   chatConversation: document.querySelector("#chat-conversation"),
   chatWelcome: document.querySelector("#chat-welcome"),
   chatHistory: document.querySelector("#chat-history"),
+  chatSessionTitle: document.querySelector("#chat-session-title"),
+  chatHistoryToggle: document.querySelector("#chat-history-toggle"),
+  chatSessionHistory: document.querySelector("#chat-session-history"),
   newChatButton: document.querySelector("#new-chat-button"),
   newChatDialog: document.querySelector("#new-chat-dialog"),
   chatInput: document.querySelector("#chat-input"),
@@ -478,8 +494,45 @@ function resetConversationUi() {
 async function createChatSession({ clearUi = false } = {}) {
   const data = await fetchJson("/api/sessions", { method: "POST" });
   state.chatSessionId = data.session_id;
+  elements.chatSessionTitle.textContent = "New Chat";
   if (clearUi) resetConversationUi();
   return state.chatSessionId;
+}
+
+async function loadChatSessions() {
+  const sessions = await fetchJson("/api/sessions");
+  elements.chatSessionHistory.replaceChildren();
+  sessions.filter((session) => session.message_count > 0).forEach((session) => {
+    const date = new Date(session.updated_at);
+    const ageDays = Math.floor((Date.now() - date.getTime()) / 86400000);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "chat-session-item";
+    button.dataset.sessionId = session.session_id;
+    button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A3.5 3.5 0 0 1 7.5 2H20v15H7.5A3.5 3.5 0 0 0 4 20.5v-15Z"/><path d="M4 5.5A3.5 3.5 0 0 0 .5 9v11A3.5 3.5 0 0 1 4 16.5h16M9 7h6M9 11h6"/></svg><span><strong>${escapeHtml(session.title || "New Chat")}</strong></span><time>${ageDays < 1 ? "today" : ageDays < 7 ? `${ageDays}d` : date.toLocaleDateString(undefined, { month: "short", day: "numeric" })}</time>`;
+    elements.chatSessionHistory.append(button);
+  });
+}
+
+async function openChatSession(sessionId) {
+  const session = await fetchJson(`/api/sessions/${encodeURIComponent(sessionId)}`);
+  state.chatSessionId = session.session_id;
+  resetConversationUi();
+  elements.chatSessionTitle.textContent = session.title || "New Chat";
+  elements.chatWelcome.hidden = session.messages.length > 0;
+  session.messages.forEach((message) => {
+    const card = document.createElement("article");
+    card.className = `chat-history-message ${message.role}`;
+    card.innerHTML = `<span class="message-label">${message.role === "user" ? "You" : "Assistant"}</span><div>${window.ChatRenderer?.renderMarkdown ? window.ChatRenderer.renderMarkdown(message.content) : escapeHtml(message.content)}</div>`;
+    elements.chatHistory.append(card);
+  });
+  elements.chatSessionHistory.hidden = true;
+  elements.chatHistoryToggle.setAttribute("aria-expanded", "false");
+}
+
+function closeChatHistory() {
+  elements.chatSessionHistory.hidden = true;
+  elements.chatHistoryToggle.setAttribute("aria-expanded", "false");
 }
 
 async function ensureChatSession() {
@@ -534,16 +587,9 @@ async function startNewChat() {
   const oldSessionId = state.chatSessionId;
   if (state.chatController) state.chatController.abort();
   state.chatSessionId = "";
+  closeChatHistory();
   elements.newChatButton.disabled = true;
   try {
-    if (oldSessionId) {
-      const response = await fetch(`/api/sessions/${encodeURIComponent(oldSessionId)}`, {
-        method: "DELETE",
-      });
-      if (!response.ok && response.status !== 404) {
-        throw new Error(`Could not delete the previous session (${response.status})`);
-      }
-    }
     await createChatSession({ clearUi: true });
     elements.chatInput.focus();
   } catch (error) {
@@ -1053,6 +1099,7 @@ async function submitSqlApproval(card, decision) {
 }
 
 function handleChatEvent(eventName, data) {
+  if (data?.session_title) elements.chatSessionTitle.textContent = data.session_title;
   const message = String(data?.message || "");
   if (eventName === "status") {
     setThinking(message || "Working on your request");
@@ -1461,6 +1508,8 @@ function issueContext(issue) {
     (scope.type === "company" ? "Company-wide" : scope.store_id || "Current scope");
   const periodLabel = period.snapshot_date
     ? `Snapshot ${period.snapshot_date}`
+    : period.data_through
+      ? `Data through ${period.data_through}`
     : period.month || "Current period";
   return `${scopeLabel} · ${periodLabel}`;
 }
@@ -1515,10 +1564,18 @@ function issueEvidenceLines(issue) {
       `${numberFormatter.format(finiteNumber(evidence.review_count))} reviews`,
     ];
   }
+  if (issue.issue_type === "support_ticket_backlog") {
+    return [
+      `${numberFormatter.format(finiteNumber(evidence.unresolved_high_priority_count))} unresolved high-priority tickets`,
+      `Oldest ticket open ${numberFormatter.format(finiteNumber(evidence.oldest_open_days))} days`,
+      `Data through ${evidence.data_through || "latest available date"}`,
+    ];
+  }
   return genericEvidence(evidence);
 }
 
 function renderDetectedRisks(candidateIssues) {
+  state.candidateIssues = candidateIssues;
   const hasInventoryIssue = candidateIssues.some(
     (issue) => issue.issue_type === "inventory_replenishment_risk",
   );
@@ -1533,21 +1590,29 @@ function renderDetectedRisks(candidateIssues) {
     : "No material risks";
 
   if (visibleIssues.length === 0) {
+    if (hasInventoryIssue) {
+      elements.businessRiskList.hidden = true;
+      elements.businessRiskList.replaceChildren();
+      return;
+    }
+    elements.businessRiskList.hidden = false;
     renderEmpty(
       elements.businessRiskList,
-      hasInventoryIssue
-        ? "Inventory risk is summarized below; no additional risks were detected."
-        : "No material business risks detected for the selected period.",
+      "No material business risks detected for the selected period.",
     );
     return;
   }
 
+  elements.businessRiskList.hidden = false;
   elements.businessRiskList.className = "risk-list";
   elements.businessRiskList.innerHTML = visibleIssues
     .map((issue) => {
       const severity = issue.severity === "high" ? "high" : "medium";
+      const supportButton = issue.issue_type === "support_ticket_backlog"
+        ? `<button class="risk-details-button" type="button" data-support-risk>View support tickets</button>`
+        : "";
       return `
-        <article class="risk-card ${severity}">
+        <article class="risk-card ${severity}${issue.issue_type === "support_ticket_backlog" ? " risk-card-clickable" : ""}" ${issue.issue_type === "support_ticket_backlog" ? "tabindex=\"0\" data-support-risk-card" : ""}>
           <div class="risk-card-header">
             <span class="severity-badge ${severity}">${escapeHtml(severity.toUpperCase())}</span>
             <span class="risk-context">${escapeHtml(issueContext(issue))}</span>
@@ -1561,10 +1626,44 @@ function renderDetectedRisks(candidateIssues) {
           ${issue.issue_type === "customer_experience_deterioration"
             ? `<a class="review-investigate" href="#product-performance" data-review-investigate>See products and customer comments</a>`
             : ""}
+          ${supportButton}
         </article>
       `;
     })
     .join("");
+}
+
+function expandSupportTicketCard(card, issue) {
+  const tickets = Array.isArray(issue?.evidence?.representative_tickets)
+    ? issue.evidence.representative_tickets
+    : [];
+  card.classList.add("risk-card-expanded");
+  card.innerHTML = `
+    <div class="risk-card-header">
+      <div class="support-ticket-expanded-title">
+        <span class="severity-badge high">HIGH</span>
+        <strong>${escapeHtml(issue.title || "High-priority support backlog")}</strong>
+      </div>
+      <button class="risk-details-button" type="button" data-support-risk-collapse>Collapse</button>
+    </div>
+    <div class="support-ticket-inline-list">
+      ${tickets.length
+    ? tickets.map((ticket) => `
+      <article class="support-ticket-item">
+        <div class="support-ticket-item-header">
+          <strong>${escapeHtml(ticket.issue_category || "Support request")}</strong>
+          <span>${escapeHtml(ticket.resolution_status || "unknown")}</span>
+        </div>
+        <div class="support-ticket-item-meta">
+          <span>Submitted ${escapeHtml(ticket.submission_date || "—")}</span>
+          <span>${numberFormatter.format(finiteNumber(ticket.open_days))} days open</span>
+        </div>
+        ${ticket.notes ? `<p>${escapeHtml(ticket.notes)}</p>` : ""}
+      </article>
+    `).join("")
+    : `<p class="loading-copy">No representative ticket details available.</p>`}
+    </div>
+  `;
 }
 
 function renderInventorySection(inventory, inventoryIssue) {
@@ -1677,7 +1776,69 @@ function productMetrics(tab, item) {
 
 function renderProducts(data) {
   state.productData = data;
+  if (!state.sharedDateRange.start && data?.period) {
+    setSharedDateRange(data.period.start_date || "", data.period.end_date || "");
+  }
   renderProductTab();
+}
+
+function setSharedDateRange(start, end) {
+  state.sharedDateRange = { start, end };
+  state.productDateRange = { start, end };
+  state.campaignDateRange = { start, end };
+  elements.productStartDate.value = start;
+  elements.productEndDate.value = end;
+  elements.campaignStartDate.value = start;
+  elements.campaignEndDate.value = end;
+}
+
+function exclusiveDateForRange(end) {
+  const exclusiveEnd = new Date(`${end}T00:00:00Z`);
+  exclusiveEnd.setUTCDate(exclusiveEnd.getUTCDate() + 1);
+  return exclusiveEnd.toISOString().slice(0, 10);
+}
+
+async function applySharedDateRange(start, end, source) {
+  if (!start || !end || start > end) {
+    showGlobalError("Choose a valid shared date range.");
+    return;
+  }
+  const exclusiveEnd = exclusiveDateForRange(end);
+  const productQuery = new URLSearchParams({
+    start_date: start,
+    end_date: exclusiveEnd,
+  });
+  if (state.storeId) productQuery.set("store_id", state.storeId);
+  const reviewQuery = new URLSearchParams({ start_date: start, end_date: exclusiveEnd });
+  const campaignQuery = new URLSearchParams({ start_date: start, end_date: exclusiveEnd });
+  elements.productDateApply.disabled = true;
+  elements.campaignDateApply.disabled = true;
+  if (state.reviewOverviewController) state.reviewOverviewController.abort();
+  clearGlobalError();
+  try {
+    const [productData, reviewData, campaignData] = await Promise.all([
+      fetchJson(`/api/dashboard/product-performance?${productQuery}`),
+      fetchJson(`/api/dashboard/product-reviews?${reviewQuery}`),
+      fetchJson(`/api/dashboard/marketing-performance?${campaignQuery}`),
+    ]);
+    setSharedDateRange(start, end);
+    renderProducts(productData);
+    renderReviewOverview(reviewData);
+    renderMarketing(campaignData);
+  } catch (error) {
+    showGlobalError(`${source} shared date range failed: ${error.message}`);
+  } finally {
+    elements.productDateApply.disabled = false;
+    elements.campaignDateApply.disabled = false;
+  }
+}
+
+function applyProductDateRange() {
+  return applySharedDateRange(
+    elements.productStartDate.value,
+    elements.productEndDate.value,
+    "Product",
+  );
 }
 
 function productChartMetric(tab, item) {
@@ -1776,18 +1937,38 @@ function renderProductTab() {
 
 function renderReviewOverview(data) {
   state.reviewProducts = data.products;
-  elements.reviewScopeNote.textContent = `${formatMonth(data.month)} · company-wide (reviews have no store field)`;
-  const hotspots = data.products.filter((product) => product.low_rating_count > 0).slice(0, 5);
-  if (!hotspots.length) {
-    renderEmpty(elements.reviewHotspotList, "No 1–2 star product reviews in the selected month.");
-  } else {
-    elements.reviewHotspotList.className = "review-hotspot-list";
-    elements.reviewHotspotList.innerHTML = hotspots.map((product) => `
-      <button class="review-hotspot" type="button" data-review-product-id="${escapeHtml(product.product_id)}">
-        <span><strong>${escapeHtml(product.product_name)}</strong><small>${escapeHtml(product.product_category)}</small></span>
-        <span>${numberFormatter.format(product.low_rating_count)} low of ${numberFormatter.format(product.review_count)} reviews <span aria-hidden="true">→</span></span>
-      </button>
-    `).join("");
+  const products = data.products.filter((product) => product.review_count > 0);
+  const totalReviews = products.reduce((sum, product) => sum + Number(product.review_count || 0), 0);
+  const lowReviews = products.reduce((sum, product) => sum + Number(product.low_rating_count || 0), 0);
+  const weightedRating = products.reduce((sum, product) => sum + Number(product.average_rating || 0) * Number(product.review_count || 0), 0);
+  const highReviews = products.reduce((sum, product) => sum + Number(product.high_rating_count || 0), 0);
+  elements.reviewSummaryMetrics.innerHTML = `
+    <div><strong>${numberFormatter.format(totalReviews)}</strong><span>Total reviews</span></div>
+    <div><strong>${totalReviews ? (weightedRating / totalReviews).toFixed(2) : "—"}</strong><span>Average rating</span></div>
+    <div><strong>${totalReviews ? `${((lowReviews / totalReviews) * 100).toFixed(1)}%` : "—"}</strong><span>Low rating share</span></div>
+    <div><strong>${totalReviews ? `${((highReviews / totalReviews) * 100).toFixed(1)}%` : "—"}</strong><span>High rating share</span></div>`;
+  const high = [...products].sort((a, b) => Number(b.average_rating || 0) - Number(a.average_rating || 0) || Number(b.review_count) - Number(a.review_count)).slice(0, 5);
+  const low = [...products].sort((a, b) => Number(a.average_rating || 0) - Number(b.average_rating || 0) || Number(b.review_count) - Number(a.review_count)).slice(0, 5);
+  const ratingRows = (items) => items.length ? items.map((product) => `<div class="review-rating-row"><span><strong>${escapeHtml(product.product_name)}</strong><small>${escapeHtml(product.product_category)} · ${product.review_count} reviews</small></span><b>★ ${Number(product.average_rating || 0).toFixed(2)}</b></div>`).join("") : `<p class="review-empty">No reviews in this range.</p>`;
+  elements.reviewHighList.innerHTML = ratingRows(high);
+  elements.reviewLowList.innerHTML = ratingRows(low);
+  const hotspots = products.filter((product) => product.low_rating_count > 0).slice(0, 5);
+  const rangeLabel = data.start_date && data.end_date
+    ? `${formatShortDate(data.start_date)} – ${formatShortDate(data.end_date)}`
+    : formatMonth(data.month);
+  elements.reviewScopeNote.textContent = `${rangeLabel} · company-wide (reviews have no store field)`;
+  if (elements.reviewHotspotList) {
+    if (!hotspots.length) {
+      renderEmpty(elements.reviewHotspotList, "No 1–2 star product reviews in the selected range.");
+    } else {
+      elements.reviewHotspotList.className = "review-hotspot-list";
+      elements.reviewHotspotList.innerHTML = hotspots.map((product) => `
+        <button class="review-hotspot" type="button" data-review-product-id="${escapeHtml(product.product_id)}">
+          <span><strong>${escapeHtml(product.product_name)}</strong><small>${escapeHtml(product.product_category)}</small></span>
+          <span>${numberFormatter.format(product.low_rating_count)} low of ${numberFormatter.format(product.review_count)} reviews <span aria-hidden="true">→</span></span>
+        </button>
+      `).join("");
+    }
   }
 
   const selected = data.products.some((product) => product.product_id === state.reviewSelectedProductId)
@@ -1813,21 +1994,26 @@ function renderReviewOverview(data) {
   loadProductReviews();
 }
 
-async function loadReviewOverview(month) {
+async function loadReviewOverview(month, range = null) {
   if (state.reviewOverviewController) state.reviewOverviewController.abort();
   const controller = new AbortController();
   state.reviewOverviewController = controller;
-  elements.reviewHotspotList.className = "review-hotspot-list loading-copy";
-  elements.reviewHotspotList.textContent = "Loading product reviews…";
+  if (elements.reviewHotspotList) {
+    elements.reviewHotspotList.className = "review-hotspot-list loading-copy";
+    elements.reviewHotspotList.textContent = "Loading product reviews…";
+  }
   try {
-    const data = await fetchJson(`/api/dashboard/product-reviews?month=${encodeURIComponent(month)}`, {
+    const query = range
+      ? `start_date=${encodeURIComponent(range.start)}&end_date=${encodeURIComponent(range.end)}`
+      : `month=${encodeURIComponent(month)}`;
+    const data = await fetchJson(`/api/dashboard/product-reviews?${query}`, {
       signal: controller.signal,
     });
-    if (controller.signal.aborted || month !== state.month) return;
+    if (controller.signal.aborted) return;
     renderReviewOverview(data);
   } catch (error) {
     if (controller.signal.aborted) return;
-    renderEmpty(elements.reviewHotspotList, "Product reviews are temporarily unavailable.");
+    if (elements.reviewHotspotList) renderEmpty(elements.reviewHotspotList, "Product reviews are temporarily unavailable.");
     renderEmpty(elements.reviewComments, "Could not load customer reviews.");
   }
 }
@@ -1836,23 +2022,26 @@ async function loadProductReviews() {
   if (state.reviewDetailController) state.reviewDetailController.abort();
   const productId = state.reviewSelectedProductId;
   const product = state.reviewProducts.find((item) => item.product_id === productId);
-  if (!product || !state.month) {
+  if (!product || (!state.month && !state.productDateRange.start)) {
     elements.reviewProductSummary.textContent = "Choose a product to see its reviews.";
     elements.reviewComments.replaceChildren();
     return;
   }
 
   elements.reviewProductSummary.textContent =
-    `${numberFormatter.format(product.low_rating_count)} of ${numberFormatter.format(product.review_count)} reviews rated 1–2 stars in ${formatMonth(state.month)}.`;
+    `${numberFormatter.format(product.low_rating_count)} of ${numberFormatter.format(product.review_count)} reviews rated 1–2 stars in the selected range.`;
   elements.reviewComments.className = "review-comments loading-copy";
   elements.reviewComments.textContent = "Loading customer comments…";
   const controller = new AbortController();
   state.reviewDetailController = controller;
   const lowOnly = elements.reviewRatingFilter.value === "low";
   const month = state.month;
+  const range = state.productDateRange.start
+    ? `start_date=${encodeURIComponent(state.productDateRange.start)}&end_date=${encodeURIComponent(state.productDateRange.end)}`
+    : `month=${encodeURIComponent(month)}`;
   try {
     const data = await fetchJson(
-      `/api/dashboard/products/${encodeURIComponent(productId)}/reviews?month=${encodeURIComponent(month)}&low_only=${lowOnly}`,
+      `/api/dashboard/products/${encodeURIComponent(productId)}/reviews?${range}&low_only=${lowOnly}`,
       { signal: controller.signal },
     );
     if (controller.signal.aborted || state.reviewSelectedProductId !== productId || state.month !== month) return;
@@ -1912,13 +2101,16 @@ function renderCampaignInsights(campaigns) {
 }
 
 function renderMarketing(data) {
+  if (!state.sharedDateRange.start && data?.period) {
+    setSharedDateRange(data.period.start_date || "", data.period.end_date || "");
+  }
   state.campaigns = data.campaigns;
   renderCampaignInsights(data.campaigns);
 
   if (!data.campaigns.length) {
     state.selectedCampaignId = "";
     elements.campaignDetail.hidden = true;
-    renderEmpty(elements.campaignList, "No active campaigns overlap the selected month");
+    renderEmpty(elements.campaignList, "No campaigns overlap the selected range");
     return;
   }
 
@@ -1943,6 +2135,14 @@ function renderMarketing(data) {
     })
     .join("");
   showCampaignDetail(state.selectedCampaignId);
+}
+
+function applyCampaignDateRange() {
+  return applySharedDateRange(
+    elements.campaignStartDate.value,
+    elements.campaignEndDate.value,
+    "Campaign",
+  );
 }
 
 function showCampaignDetail(campaignId, scrollIntoView = false) {
@@ -2049,7 +2249,13 @@ async function loadDashboard() {
     );
     renderProducts(data.result.products);
     renderMarketing(data.result.marketing);
-    loadReviewOverview(state.month);
+    const initialReviewRange = state.sharedDateRange.start
+      ? {
+          start: state.sharedDateRange.start,
+          end: exclusiveDateForRange(state.sharedDateRange.end),
+        }
+      : null;
+    loadReviewOverview(state.month, initialReviewRange);
 
     setConnectionStatus("ok", "Database connected");
   } catch (error) {
@@ -2091,21 +2297,47 @@ elements.productTabs.addEventListener("click", (event) => {
   renderProductTab();
 });
 
+elements.productDateApply.addEventListener("click", applyProductDateRange);
+elements.campaignDateApply.addEventListener("click", applyCampaignDateRange);
+
 document.querySelector("#product-performance").addEventListener("click", (event) => {
   const button = event.target.closest("[data-review-product-id]");
   if (button) openProductReviews(button.dataset.reviewProductId);
 });
 
-elements.reviewHotspotList.addEventListener("click", (event) => {
+elements.reviewHotspotList?.addEventListener("click", (event) => {
   const button = event.target.closest("[data-review-product-id]");
   if (button) openProductReviews(button.dataset.reviewProductId);
 });
 
 elements.businessRiskList.addEventListener("click", (event) => {
+  if (event.target.closest("[data-support-risk-collapse]")) {
+    renderDetectedRisks(state.candidateIssues);
+    return;
+  }
+  const supportCard = event.target.closest("[data-support-risk-card]");
+  if (supportCard) {
+    const issue = state.candidateIssues.find(
+      (candidate) => candidate.issue_type === "support_ticket_backlog",
+    );
+    if (issue) expandSupportTicketCard(supportCard, issue);
+    return;
+  }
   if (event.target.closest("[data-review-investigate]")) {
     event.preventDefault();
     openProductReviews();
   }
+});
+
+elements.businessRiskList.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const supportCard = event.target.closest("[data-support-risk-card]");
+  if (!supportCard) return;
+  event.preventDefault();
+  const issue = state.candidateIssues.find(
+    (candidate) => candidate.issue_type === "support_ticket_backlog",
+  );
+  if (issue) expandSupportTicketCard(supportCard, issue);
 });
 
 elements.reviewProductSelect.addEventListener("change", () => {
@@ -2311,6 +2543,19 @@ elements.knowledgeFileList.addEventListener("click", (event) => {
 
 elements.reviewSyncButton.addEventListener("click", syncCustomerReviews);
 elements.newChatButton.addEventListener("click", confirmNewChat);
+elements.chatHistoryToggle.addEventListener("click", async () => {
+  const opening = elements.chatSessionHistory.hidden;
+  elements.chatSessionHistory.hidden = !opening;
+  elements.chatHistoryToggle.setAttribute("aria-expanded", String(opening));
+  if (opening) {
+    try { await loadChatSessions(); } catch (error) { showGlobalError(`Could not load chat history: ${error.message}`); }
+  }
+});
+elements.chatSessionHistory.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-session-id]");
+  if (!button) return;
+  try { await openChatSession(button.dataset.sessionId); } catch (error) { showGlobalError(`Could not open chat: ${error.message}`); }
+});
 elements.newChatDialog.addEventListener("close", () => {
   if (elements.newChatDialog.returnValue === "confirm") startNewChat();
 });

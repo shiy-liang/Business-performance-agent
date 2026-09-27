@@ -499,7 +499,16 @@ ENTITY_FIELDS: Final[dict[str, tuple[str, str, frozenset[SqlAgentName]]]] = {
 
 
 PROHIBITED_COLUMNS: Final[frozenset[str]] = frozenset(
-    {"email", "phone", "street_address", "zip_code", "embedding"}
+    {
+        # Customer personally identifiable information.
+        "full_name",
+        "email",
+        "phone",
+        "street_address",
+        "zip_code",
+        # Internal vector data must never be exposed to the model.
+        "embedding",
+    }
 )
 
 

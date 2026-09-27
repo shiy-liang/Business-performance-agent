@@ -20,6 +20,7 @@ INVENTORY_ALERTS_SQL = """
 WITH latest_snapshot AS (
     SELECT MAX(snapshot_date) AS snapshot_date
     FROM inventory
+    WHERE snapshot_date <= CURRENT_DATE
 )
 SELECT
     i.inventory_id,
@@ -205,6 +206,7 @@ def analyze_prepared_action_center(
                 WITH latest_snapshot AS (
                     SELECT MAX(snapshot_date) AS snapshot_date
                     FROM inventory
+                    WHERE snapshot_date <= CURRENT_DATE
                 )
                 SELECT
                     latest.snapshot_date,

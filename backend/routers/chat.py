@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from observability import logger
 from rag.agent import run_supervisor, stream_supervisor
+from rag.agent.model import create_agent_model
 from rag.agent.sql_approval import (
     SqlApprovalAlreadyDecidedError,
     SqlApprovalNotFoundError,
@@ -58,6 +59,29 @@ def _to_agent_message(message: ConversationMessage) -> AnyMessage:
 
 def _sse(event: str, data: dict[str, object]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
+
+async def _generate_title(question: str, answer: str) -> str:
+    fallback = " ".join(question.strip().split())[:40] or "New Chat"
+    try:
+        response = await create_agent_model(reasoning_profile="supervisor_routing").ainvoke([
+            {"role": "system", "content": "为业务分析对话生成简短中文标题。只返回标题，不加引号，不超过30个字。"},
+            {"role": "user", "content": f"用户问题：{question}\n助手回答：{answer}"},
+        ])
+        content = response.content
+        if isinstance(content, list):
+            parts = []
+            for item in content:
+                if isinstance(item, dict):
+                    text = item.get("text", "")
+                else:
+                    text = getattr(item, "text", "")
+                if text:
+                    parts.append(str(text))
+            content = " ".join(parts)
+        return str(content).strip().replace("\n", " ")[:40] or fallback
+    except Exception as exc:
+        logger.warning("chat.title_generation_failed", error_type=type(exc).__name__)
+        return fallback
 
 
 @router.post("/chat/sql-approvals/{approval_id}")
@@ -122,6 +146,13 @@ async def stream_chat(request: ChatRequest) -> StreamingResponse:
                             "assistant",
                             answer,
                         )
+                        if len(session_manager.get_history(request.session_id)) == 2:
+                            title = await _generate_title(request.message, answer)
+                            session_manager.update_title(
+                                request.session_id,
+                                title,
+                            )
+                            event["data"]["session_title"] = title
                     except SessionNotFoundError:
                         # The user may delete the session while a stream is active.
                         pass
@@ -163,4 +194,10 @@ async def chat(request: ChatRequest) -> dict[str, object]:
             session_manager.add_message(request.session_id, "assistant", answer)
         except SessionNotFoundError:
             pass
-    return {"status": "completed", **result}
+        if len(session_manager.get_history(request.session_id)) == 2:
+            session_manager.update_title(
+                request.session_id,
+                await _generate_title(request.message, answer),
+            )
+    title = session_manager.get_session(request.session_id)["title"]
+    return {"status": "completed", "session_title": title, **result}

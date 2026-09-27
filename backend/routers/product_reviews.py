@@ -21,6 +21,7 @@ SELECT
     p.product_category,
     COUNT(r.review_id)::bigint AS review_count,
     COUNT(r.review_id) FILTER (WHERE r.rating <= 2)::bigint AS low_rating_count,
+    COUNT(r.review_id) FILTER (WHERE r.rating >= 4)::bigint AS high_rating_count,
     ROUND(AVG(r.rating)::numeric, 2) AS average_rating
 FROM products p
 LEFT JOIN customer_reviews r
@@ -46,7 +47,13 @@ LIMIT 30
 """
 
 
-def _month_bounds(month: str) -> tuple[date, date]:
+def _period_bounds(month: str | None, start_date: date | None, end_date: date | None) -> tuple[date, date]:
+    if start_date or end_date:
+        if not start_date or not end_date or end_date <= start_date:
+            raise HTTPException(status_code=422, detail="start_date and end_date must define a valid range")
+        return start_date, end_date
+    if not month:
+        raise HTTPException(status_code=422, detail="month or start_date/end_date is required")
     try:
         start = date.fromisoformat(f"{month}-01")
     except ValueError as exc:
@@ -57,11 +64,13 @@ def _month_bounds(month: str) -> tuple[date, date]:
 
 @router.get("/product-reviews")
 def review_products(
-    month: str = Query(pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
+    month: str | None = Query(default=None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> dict[str, object]:
     """Summarize selected-month reviews for every catalog product."""
 
-    start, end = _month_bounds(month)
+    start, end = _period_bounds(month, start_date, end_date)
     try:
         with connect() as connection, connection.cursor(row_factory=dict_row) as cursor:
             cursor.execute(REVIEW_PRODUCTS_SQL, {"period_start": start, "period_end": end})
@@ -73,6 +82,8 @@ def review_products(
 
     return {
         "month": month,
+        "start_date": start.isoformat(),
+        "end_date": (end - date.resolution).isoformat(),
         "scope": "Company-wide; reviews have no store field",
         "products": [
             {
@@ -81,6 +92,7 @@ def review_products(
                 "product_category": row["product_category"],
                 "review_count": row["review_count"],
                 "low_rating_count": row["low_rating_count"],
+                "high_rating_count": row["high_rating_count"],
                 "average_rating": float(row["average_rating"]) if row["average_rating"] is not None else None,
             }
             for row in rows
@@ -91,12 +103,14 @@ def review_products(
 @router.get("/products/{product_id}/reviews")
 def product_reviews(
     product_id: str,
-    month: str = Query(pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
+    month: str | None = Query(default=None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
+    start_date: date | None = None,
+    end_date: date | None = None,
     low_only: bool = False,
 ) -> dict[str, object]:
     """Return the latest selected-month review comments without customer identifiers."""
 
-    start, end = _month_bounds(month)
+    start, end = _period_bounds(month, start_date, end_date)
     try:
         with connect() as connection, connection.cursor(row_factory=dict_row) as cursor:
             cursor.execute(
@@ -127,6 +141,8 @@ def product_reviews(
     return {
         "product": dict(product),
         "month": month,
+        "start_date": start.isoformat(),
+        "end_date": (end - date.resolution).isoformat(),
         "low_only": low_only,
         "limit": 30,
         "reviews": [

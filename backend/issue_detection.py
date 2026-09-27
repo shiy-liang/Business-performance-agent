@@ -217,6 +217,56 @@ def detect_inventory_replenishment_risk(
     }
 
 
+def detect_support_ticket_backlog(
+    action_center_result: dict[str, object],
+) -> dict[str, object] | None:
+    """Return a high-priority unresolved support-ticket backlog candidate."""
+
+    if not isinstance(action_center_result, dict):
+        return None
+
+    support_tickets = action_center_result.get("support_tickets")
+    if not isinstance(support_tickets, dict):
+        return None
+
+    scope = support_tickets.get("scope")
+    data_through = support_tickets.get("data_through")
+    unresolved_count = support_tickets.get("unresolved_high_priority_count")
+    oldest = support_tickets.get("oldest")
+    if (
+        not isinstance(scope, dict)
+        or not isinstance(data_through, str)
+        or not data_through.strip()
+        or not isinstance(unresolved_count, int)
+        or isinstance(unresolved_count, bool)
+        or unresolved_count <= 0
+        or not isinstance(oldest, list)
+    ):
+        return None
+
+    oldest_open_days = 0
+    if oldest and isinstance(oldest[0], dict):
+        value = oldest[0].get("open_days")
+        if isinstance(value, int) and not isinstance(value, bool):
+            oldest_open_days = value
+
+    severity = "high" if unresolved_count >= 10 or oldest_open_days >= 30 else "medium"
+    return {
+        "rule_id": "OPS_HIGH_PRIORITY_SUPPORT_BACKLOG",
+        "issue_type": "support_ticket_backlog",
+        "severity": severity,
+        "scope": scope,
+        "period": {"data_through": data_through},
+        "title": "High-priority support backlog",
+        "evidence": {
+            "unresolved_high_priority_count": unresolved_count,
+            "oldest_open_days": oldest_open_days,
+            "data_through": data_through,
+            "representative_tickets": oldest[:5],
+        },
+    }
+
+
 def detect_campaign_inefficiency(
     marketing_result: dict[str, object],
 ) -> dict[str, object] | None:
@@ -410,6 +460,7 @@ def detect_candidate_issues(
         detect_profit_deterioration(finance_result),
         detect_refund_pressure(finance_result),
         detect_inventory_replenishment_risk(action_center_result),
+        detect_support_ticket_backlog(action_center_result),
         detect_campaign_inefficiency(marketing_result),
         detect_customer_experience_deterioration(reviews_result),
     ]
