@@ -178,7 +178,7 @@ def detect_inventory_replenishment_risk(
     additional_reorder_count = inventory.get("additional_reorder_count")
     affected_ratio = inventory.get("affected_ratio")
     is_synthetic = inventory.get("is_synthetic")
-    representative_items = inventory.get("top_items")
+    representative_items = inventory.get("affected_items", inventory.get("top_items"))
 
     if (
         not isinstance(scope, dict)
@@ -277,7 +277,7 @@ def detect_support_ticket_backlog(
             "unresolved_high_priority_count": unresolved_count,
             "oldest_open_days": oldest_open_days,
             "data_through": data_through,
-            "representative_tickets": oldest[:5],
+            "representative_tickets": oldest[:10],
         },
     }
 

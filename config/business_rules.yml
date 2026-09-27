@@ -1,11 +1,9 @@
 # Dashboard list sizes and minimum sample requirements.
 dashboard:
   # Number of most urgent inventory alerts displayed.
-  inventory_alert_limit: 5
+  inventory_alert_limit: 100
   # Number of high-priority unresolved tickets displayed.
-  oldest_ticket_limit: 3
-  # Number of highest-ROI active campaigns displayed.
-  top_campaign_limit: 5
+  oldest_ticket_limit: 10
   # Number of lowest negative-ROI campaigns retained as evidence.
   negative_roi_campaign_limit: 3
   # Number of products displayed in each product ranking.

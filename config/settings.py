@@ -256,7 +256,6 @@ class AgentSettings(FrozenSettings):
 class DashboardRules(FrozenSettings):
     inventory_alert_limit: int = Field(gt=0)
     oldest_ticket_limit: int = Field(gt=0)
-    top_campaign_limit: int = Field(gt=0)
     negative_roi_campaign_limit: int = Field(gt=0)
     product_ranking_limit: int = Field(gt=0)
     product_minimum_reviews: int = Field(gt=0)

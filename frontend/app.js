@@ -7,14 +7,14 @@ const state = {
   financeChartView: "trend",
   financeTrend: [],
   storeId: "",
-  activeProductTab: "best_sellers",
+  activeProductTab: "overview",
+  selectedRankingProductId: "",
   productData: null,
   candidateIssues: [],
   sharedDateRange: { start: "", end: "" },
+  sharedDateRangeController: null,
   productDateRange: { start: "", end: "" },
   campaignDateRange: { start: "", end: "" },
-  campaigns: [],
-  selectedCampaignId: "",
   reviewProducts: [],
   reviewSelectedProductId: "",
   reviewOverviewController: null,
@@ -29,7 +29,9 @@ const state = {
   chatAnswerText: "",
   chatRenderFrame: null,
   chatTurnComplete: false,
+  chatActivityAutoCollapsed: false,
   chatSubtasks: new Map(),
+  chatCitationTargets: new Map(),
 };
 
 const elements = {
@@ -67,11 +69,11 @@ const elements = {
   businessRiskList: document.querySelector("#business-risk-list"),
   reviewHotspotList: document.querySelector("#review-hotspot-list"),
   inventoryRiskSummary: document.querySelector("#inventory-risk-summary"),
-  inventoryList: document.querySelector("#inventory-list"),
   productTabs: document.querySelector("#product-tabs"),
+  productOverview: document.querySelector("#product-overview"),
+  productRankings: document.querySelector("#product-rankings"),
   productStartDate: document.querySelector("#product-start-date"),
   productEndDate: document.querySelector("#product-end-date"),
-  productDateApply: document.querySelector("#product-date-apply"),
   productList: document.querySelector("#product-list"),
   productChart: document.querySelector("#product-chart"),
   productRevenueChart: document.querySelector("#product-revenue-chart"),
@@ -80,6 +82,7 @@ const elements = {
   productCategoryPeriod: document.querySelector("#product-category-period"),
   productChartTitle: document.querySelector("#product-chart-title"),
   productTable: document.querySelector("#product-table"),
+  productDetail: document.querySelector("#product-detail"),
   productTableNote: document.querySelector("#product-table-note"),
   productReviews: document.querySelector("#product-reviews"),
   reviewScopeNote: document.querySelector("#review-scope-note"),
@@ -90,20 +93,20 @@ const elements = {
   reviewRatingFilter: document.querySelector("#review-rating-filter"),
   reviewProductSummary: document.querySelector("#review-product-summary"),
   reviewComments: document.querySelector("#review-comments"),
-  campaignList: document.querySelector("#campaign-list"),
+  reviewDetail: document.querySelector("#review-detail"),
+  reviewDetailTitle: document.querySelector("#review-detail-title"),
   campaignChart: document.querySelector("#campaign-chart"),
   campaignTable: document.querySelector("#campaign-table"),
-  campaignPanel: document.querySelector("#campaign-performance"),
   campaignStartDate: document.querySelector("#campaign-start-date"),
   campaignEndDate: document.querySelector("#campaign-end-date"),
-  campaignDateApply: document.querySelector("#campaign-date-apply"),
-  campaignDetail: document.querySelector("#campaign-detail"),
-  campaignDetailTitle: document.querySelector("#campaign-detail-title"),
-  campaignDetailStart: document.querySelector("#campaign-detail-start"),
-  campaignDetailEnd: document.querySelector("#campaign-detail-end"),
-  campaignDetailCount: document.querySelector("#campaign-detail-count"),
-  campaignDetailAxisStart: document.querySelector("#campaign-detail-axis-start"),
-  campaignDetailAxisEnd: document.querySelector("#campaign-detail-axis-end"),
+  dateRangeDialog: document.querySelector("#date-range-dialog"),
+  dateRangeMonth: document.querySelector("#date-range-month"),
+  dateRangeYear: document.querySelector("#date-range-year"),
+  dateRangeDays: document.querySelector("#date-range-days"),
+  dateRangeStartLabel: document.querySelector("#date-range-start-label"),
+  dateRangeEndLabel: document.querySelector("#date-range-end-label"),
+  dateRangeInstruction: document.querySelector("#date-range-instruction"),
+  dateRangeUse: document.querySelector("#date-range-use"),
   chatForm: document.querySelector("#chat-form"),
   chatConversation: document.querySelector("#chat-conversation"),
   chatWelcome: document.querySelector("#chat-welcome"),
@@ -117,7 +120,6 @@ const elements = {
   chatResponse: document.querySelector("#chat-response"),
   chatQuestion: document.querySelector("#chat-question"),
   chatTrace: document.querySelector(".chat-trace"),
-  chatTraceSummary: document.querySelector(".chat-trace > summary"),
   chatTraceContent: document.querySelector(".trace-content"),
   chatAnswerCard: document.querySelector(".chat-answer-card"),
   chatProgress: document.querySelector("#chat-progress"),
@@ -199,7 +201,7 @@ elements.sidebar.querySelectorAll(".sidebar-link").forEach((link) => {
   });
 });
 
-for (const button of [elements.knowledgeOpen, elements.knowledgeDropZone, elements.assistantOpen, elements.productDateApply, elements.campaignDateApply]) {
+for (const button of [elements.knowledgeOpen, elements.knowledgeDropZone, elements.assistantOpen, ...elements.productTabs.querySelectorAll(".tab")]) {
   button.addEventListener("pointermove", (event) => {
     const bounds = button.getBoundingClientRect();
     button.style.setProperty("--hover-x", `${event.clientX - bounds.left}px`);
@@ -266,9 +268,11 @@ const numberFormatter = new Intl.NumberFormat("en-US", {
 });
 
 const firstOperatingYear = 2020;
-const narrowChatLayout = window.matchMedia("(max-width: 760px)");
-let activitySizingInitialized = false;
-let activityResizeObserver = null;
+const calendarMonthNames = Array.from({ length: 12 }, (_, month) =>
+  new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC" })
+    .format(new Date(Date.UTC(2020, month, 1))),
+);
+let dateRangeDraft = null;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -513,6 +517,8 @@ function resizeChatInput() {
 
 function resetConversationUi() {
   state.chatAnswerText = "";
+  state.chatActivityAutoCollapsed = false;
+  state.chatCitationTargets.clear();
   state.chatTurnComplete = false;
   if (state.chatRenderFrame !== null) {
     window.cancelAnimationFrame(state.chatRenderFrame);
@@ -593,7 +599,10 @@ function archiveCompletedTurn() {
   archived.removeAttribute("aria-live");
   archived.hidden = false;
   archived.classList.add("chat-turn--archived");
-
+  const archivedTrace = archived.querySelector(".chat-trace");
+  if (archivedTrace) {
+    archivedTrace.open = false;
+  }
   archived.querySelector(".answer-actions")?.remove();
   archived.querySelectorAll("[id]").forEach((node) => node.removeAttribute("id"));
   archived.querySelector("[aria-labelledby]")?.removeAttribute("aria-labelledby");
@@ -602,8 +611,11 @@ function archiveCompletedTurn() {
 
 function prepareChatResponse(question) {
   state.chatAnswerText = "";
+  state.chatActivityAutoCollapsed = false;
+  state.chatCitationTargets.clear();
   state.chatTurnComplete = false;
   elements.chatTrace.open = true;
+  elements.chatTrace.closest(".chat-result-grid")?.classList.remove("has-answer");
   elements.chatTraceContent.scrollTop = 0;
   elements.chatWelcome.hidden = true;
   elements.chatResponse.hidden = false;
@@ -658,12 +670,53 @@ function renderChatAnswer() {
     elements.chatConversation.scrollTop - elements.chatConversation.clientHeight < 80;
   elements.chatAnswerCard.hidden = false;
   elements.chatAnswerCard.classList.remove("is-approval-only");
+  elements.chatTrace.closest(".chat-result-grid")?.classList.add("has-answer");
+  if (!state.chatActivityAutoCollapsed) {
+    elements.chatTrace.open = false;
+    state.chatActivityAutoCollapsed = true;
+  }
   if (window.ChatRenderer?.renderMarkdown) {
     elements.chatAnswer.innerHTML = window.ChatRenderer.renderMarkdown(state.chatAnswerText);
   } else {
     elements.chatAnswer.innerHTML = `<p>${escapeHtml(state.chatAnswerText).replaceAll("\n", "<br>")}</p>`;
   }
+  decorateAnswerCitations();
   if (followAnswer) elements.chatConversation.scrollTop = elements.chatConversation.scrollHeight;
+}
+
+function decorateAnswerCitations() {
+  if (!state.chatCitationTargets.size) return;
+  const citations = [...state.chatCitationTargets.keys()]
+    .sort((a, b) => b.length - a.length)
+    .map((citation) => citation.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const pattern = new RegExp(citations.join("|"), "g");
+  const walker = document.createTreeWalker(elements.chatAnswer, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    if (node.parentElement?.closest("a, button, code, pre, svg")) continue;
+    if (pattern.test(node.textContent)) nodes.push(node);
+    pattern.lastIndex = 0;
+  }
+  nodes.forEach((node) => {
+    const content = node.textContent;
+    const fragment = document.createDocumentFragment();
+    let last = 0;
+    for (const match of content.matchAll(pattern)) {
+      if (match.index > last) fragment.append(document.createTextNode(content.slice(last, match.index)));
+      const badge = document.createElement("button");
+      badge.type = "button";
+      badge.className = "chat-citation";
+      badge.dataset.sourceIndex = String(state.chatCitationTargets.get(match[0]));
+      badge.title = match[0];
+      badge.setAttribute("aria-label", `View evidence ${match[0]}`);
+      badge.textContent = String(state.chatCitationTargets.get(match[0]) + 1);
+      fragment.append(badge);
+      last = match.index + match[0].length;
+    }
+    fragment.append(document.createTextNode(content.slice(last)));
+    node.replaceWith(fragment);
+  });
 }
 
 function scheduleChatAnswerRender() {
@@ -689,47 +742,6 @@ function updateActivityContent(update) {
   update();
 
   if (shouldAutoScroll) scrollActivityToBottom();
-}
-
-function syncActivityHeight() {
-  const shouldStayAtBottom = isActivityNearBottom();
-
-  if (narrowChatLayout.matches || elements.chatResponse.hidden) {
-    elements.chatTrace.style.removeProperty("--activity-panel-height");
-    elements.chatTrace.style.removeProperty("--activity-content-max-height");
-  } else {
-    const responseHeight = elements.chatAnswerCard.getBoundingClientRect().height;
-    const headerHeight = elements.chatTraceSummary.getBoundingClientRect().height;
-    const traceBorderHeight =
-      elements.chatTrace.offsetHeight - elements.chatTrace.clientHeight;
-    const contentHeight = Math.max(
-      0,
-      Math.floor(responseHeight - headerHeight - traceBorderHeight),
-    );
-
-    elements.chatTrace.style.setProperty(
-      "--activity-panel-height",
-      `${Math.round(responseHeight)}px`,
-    );
-    elements.chatTrace.style.setProperty(
-      "--activity-content-max-height",
-      `${contentHeight}px`,
-    );
-  }
-
-  if (shouldStayAtBottom) scrollActivityToBottom();
-}
-
-function initializeActivitySizing() {
-  if (activitySizingInitialized) return;
-  activitySizingInitialized = true;
-
-  if (typeof ResizeObserver === "function") {
-    activityResizeObserver = new ResizeObserver(syncActivityHeight);
-    activityResizeObserver.observe(elements.chatAnswerCard);
-  }
-  narrowChatLayout.addEventListener("change", syncActivityHeight);
-  syncActivityHeight();
 }
 
 function appendChatActivity(kind, label, message) {
@@ -854,6 +866,20 @@ function setThinking(message, visible = true) {
   if (message) elements.chatThinkingLabel.textContent = message;
 }
 
+function safeSourceUrl(value) {
+  if (value === null || value === undefined) return null;
+  const candidate = String(value).trim();
+  if (!candidate) return null;
+
+  try {
+    const url = new URL(candidate, window.location.origin);
+    if (!["http:", "https:"].includes(url.protocol)) return null;
+    return url.href;
+  } catch (_error) {
+    return null;
+  }
+}
+
 function groupChatSources(sources) {
   const entries = [];
   const knowledgeFiles = new Map();
@@ -884,20 +910,61 @@ function groupChatSources(sources) {
       chunk_index: source.chunk_index,
       citation: source.citation,
       similarity: source.similarity,
+      excerpt: source.excerpt,
     });
   });
 
   return entries;
 }
 
+async function downloadChatSource(source, trigger, status) {
+  const href = safeSourceUrl(source.download_url);
+  if (!href) return;
+
+  const idleLabel = status.textContent;
+  trigger.disabled = true;
+  status.textContent = "Downloading…";
+  try {
+    const response = await fetch(href, { credentials: "same-origin" });
+    if (!response.ok) throw new Error(`Download failed (${response.status})`);
+
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const download = document.createElement("a");
+    download.href = objectUrl;
+    download.download = String(source.filename || "knowledge-source");
+    download.hidden = true;
+    document.body.append(download);
+    download.click();
+    download.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    status.textContent = "Downloaded";
+    window.setTimeout(() => {
+      if (status.isConnected) status.textContent = idleLabel;
+    }, 1400);
+  } catch (error) {
+    console.error("Reference download failed", error);
+    status.textContent = "Download failed · retry";
+  } finally {
+    trigger.disabled = false;
+  }
+}
+
 function renderChatSources(sources) {
   elements.chatSources.replaceChildren();
+  state.chatCitationTargets.clear();
   if (!Array.isArray(sources) || sources.length === 0) {
     elements.chatSources.hidden = true;
     return;
   }
 
   const entries = groupChatSources(sources);
+  entries.forEach((entry, index) => {
+    const evidence = entry.kind === "knowledge-file" ? entry.chunks : [entry.source];
+    evidence.forEach((item) => {
+      if (item.citation) state.chatCitationTargets.set(String(item.citation), index);
+    });
+  });
 
   const heading = document.createElement("div");
   heading.className = "sources-heading";
@@ -912,8 +979,10 @@ function renderChatSources(sources) {
   entries.forEach((entryData, index) => {
     const isKnowledgeFile = entryData.kind === "knowledge-file";
     const source = isKnowledgeFile ? entryData : entryData.source;
-    const entry = document.createElement("div");
+    const href = safeSourceUrl(source.download_url);
+    const entry = document.createElement("details");
     entry.className = "source-entry";
+    const summary = document.createElement("summary");
 
     const number = document.createElement("span");
     number.className = "source-index";
@@ -945,11 +1014,43 @@ function renderChatSources(sources) {
       ].filter(Boolean).join(" · ");
     }
     copy.append(filename, detail);
-    entry.append(number, copy);
+    const open = document.createElement("span");
+    open.className = "source-open";
+    open.textContent = "View evidence";
+    summary.append(number, copy, open);
+    entry.append(summary);
+
+    const body = document.createElement("div");
+    body.className = "source-evidence";
+    const evidence = isKnowledgeFile ? source.chunks : [source];
+    evidence.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "source-evidence-item";
+      const citation = document.createElement("strong");
+      citation.textContent = String(item.citation || "Source evidence");
+      row.append(citation);
+      if (item.excerpt) {
+        const excerpt = document.createElement("p");
+        excerpt.textContent = String(item.excerpt);
+        row.append(excerpt);
+      }
+      body.append(row);
+    });
+    if (href) {
+      const download = document.createElement("button");
+      download.type = "button";
+      download.className = "source-download";
+      download.textContent = "Download file";
+      download.dataset.sourceUrl = href;
+      download.dataset.sourceFilename = String(source.filename || "knowledge-source");
+      body.append(download);
+    }
+    entry.append(body);
     list.append(entry);
   });
   elements.chatSources.append(heading, list);
   elements.chatSources.hidden = false;
+  decorateAnswerCitations();
 }
 
 function renderSqlApproval(data) {
@@ -1572,7 +1673,7 @@ function renderFinanceChart(points) {
       const segmentHeight = y(bottom) - y(top);
       if (segmentHeight <= 0) return "";
       const shape = `x="${left.toFixed(1)}" y="${y(top).toFixed(1)}" width="${barWidth.toFixed(1)}" height="${segmentHeight.toFixed(1)}" rx="2"`;
-      return `<rect ${shape} fill="${color}" fill-opacity=".53" /><rect ${shape} fill="url(#finance-bar-grain)" fill-opacity=".16" pointer-events="none" />`;
+      return `<g class="finance-bar-segment"><rect class="finance-bar-fill" ${shape} fill="${color}" fill-opacity=".53" /><rect ${shape} fill="url(#finance-bar-grain)" fill-opacity=".16" pointer-events="none" /></g>`;
     };
     return segment(kept, 0, "#167d5a") + segment(kept + refunds, kept, "#d48679") + segment(0, negativeRevenue, "#ad584e");
   }).join("");
@@ -1584,7 +1685,7 @@ function renderFinanceChart(points) {
     )
     .join("；");
 
-  elements.financeChart.className = "line-chart";
+  elements.financeChart.className = stacked ? "line-chart finance-bars-view" : "line-chart";
   elements.financeChart.innerHTML = `
     <svg viewBox="0 0 ${width} ${height}" role="img" aria-labelledby="finance-chart-title finance-chart-desc">
       <title id="finance-chart-title">Twelve-month ${stacked ? "sales and refunds" : "financial trend"}</title>
@@ -1739,53 +1840,95 @@ function genericEvidence(evidence) {
   return items.length ? items : ["Structured evidence is available"];
 }
 
-function issueEvidenceLines(issue) {
+function riskIcon(issueType) {
+  const paths = {
+    profit_deterioration: '<path d="M4 6h16M5 9l5 5 4-3 5 6M16 17h3v-3" />',
+    refund_pressure: '<path d="M7 7H3v4M3 11a9 9 0 1 1 3 7" />',
+    campaign_inefficiency: '<path d="M3 10v4h4l10 5V5L7 10H3ZM7 14l2 6h3" />',
+    customer_experience_deterioration: '<path d="m12 3 2.8 5.8 6.4.9-4.6 4.5 1.1 6.3L12 17.5l-5.7 3 1.1-6.3-4.6-4.5 6.4-.9Z" />',
+    support_ticket_backlog: '<path d="M4 5h16v11H9l-5 4V5ZM8 9h8M8 12h6" />',
+    inventory_replenishment_risk: '<path d="m3 7 9-4 9 4v10l-9 4-9-4V7ZM3 7l9 4 9-4M12 11v10" />',
+  };
+  return `<span class="risk-icon" aria-hidden="true"><svg viewBox="0 0 24 24">${paths[issueType] || '<circle cx="12" cy="12" r="9" /><path d="M12 8v5M12 17h.01" />'}</svg></span>`;
+}
+
+function issueEvidenceMetrics(issue) {
   const evidence = issue && typeof issue.evidence === "object" ? issue.evidence : {};
   if (issue.issue_type === "profit_deterioration") {
     return [
-      `Gross profit decreased ${Math.abs(finiteNumber(evidence.change_pct)).toFixed(2)}%`,
-      `${formatMoney(evidence.baseline_value)} → ${formatMoney(evidence.current_value)}`,
-      `vs ${evidence.baseline_period || "previous period"}`,
+      ["Gross profit change", `↓ ${Math.abs(finiteNumber(evidence.change_pct)).toFixed(2)}%`],
+      ["Previous → current", `${formatMoney(evidence.baseline_value)} → ${formatMoney(evidence.current_value)}`],
+      ["Compared with", evidence.baseline_period || "Previous period"],
     ];
   }
   if (issue.issue_type === "refund_pressure") {
     return [
-      `Completed refunds increased ${fixedNumber(evidence.change_pct)}%`,
-      `+${formatMoney(Math.abs(finiteNumber(evidence.absolute_increase)))}`,
-      `${formatMoney(evidence.baseline_value)} → ${formatMoney(evidence.current_value)}`,
+      ["Refund increase", `↑ ${fixedNumber(evidence.change_pct)}%`],
+      ["Additional refunds", `+${formatMoney(Math.abs(finiteNumber(evidence.absolute_increase)))}`],
+      ["Previous → current", `${formatMoney(evidence.baseline_value)} → ${formatMoney(evidence.current_value)}`],
     ];
   }
   if (issue.issue_type === "inventory_replenishment_risk") {
     return [
-      `${numberFormatter.format(finiteNumber(evidence.affected_inventory_count))} of ${numberFormatter.format(finiteNumber(evidence.total_inventory_count))} inventory records need replenishment`,
-      `${fixedNumber(evidence.affected_ratio)}% affected`,
-      `${numberFormatter.format(finiteNumber(evidence.critical_count))} critical records`,
+      ["Needs replenishment", `${numberFormatter.format(finiteNumber(evidence.affected_inventory_count))} of ${numberFormatter.format(finiteNumber(evidence.total_inventory_count))} records`],
+      ["Affected", `${fixedNumber(evidence.affected_ratio)}%`],
+      ["Critical", `${numberFormatter.format(finiteNumber(evidence.critical_count))} records`],
     ];
   }
   if (issue.issue_type === "campaign_inefficiency") {
     return [
-      `${numberFormatter.format(finiteNumber(evidence.negative_roi_campaign_count))} of ${numberFormatter.format(finiteNumber(evidence.active_campaign_count))} active campaigns have negative reported ROI`,
-      `${fixedNumber(evidence.negative_roi_ratio, 1)}% affected`,
-      `Lowest reported lifecycle ROI: ${fixedNumber(evidence.lowest_reported_roi)}%`,
+      ["Negative ROI", `${numberFormatter.format(finiteNumber(evidence.negative_roi_campaign_count))} of ${numberFormatter.format(finiteNumber(evidence.active_campaign_count))} campaigns`],
+      ["Affected", `${fixedNumber(evidence.negative_roi_ratio, 1)}%`],
+      ["Lowest ROI", `${fixedNumber(evidence.lowest_reported_roi)}%`],
     ];
   }
   if (issue.issue_type === "customer_experience_deterioration") {
     const ratingChange = finiteNumber(evidence.average_rating_change);
     const ratioChange = finiteNumber(evidence.low_rating_ratio_change_pp);
     return [
-      `Average rating: ${fixedNumber(evidence.previous_average_rating)} → ${fixedNumber(evidence.average_rating)} (${ratingChange > 0 ? "+" : ""}${ratingChange.toFixed(2)})`,
-      `1–2 star share: ${fixedNumber(evidence.previous_low_rating_ratio)}% → ${fixedNumber(evidence.low_rating_ratio)}% (${ratioChange > 0 ? "+" : ""}${ratioChange.toFixed(2)}pp)`,
-      `${numberFormatter.format(finiteNumber(evidence.review_count))} reviews`,
+      ["Average rating", `${fixedNumber(evidence.previous_average_rating)} → ${fixedNumber(evidence.average_rating)} (${ratingChange > 0 ? "+" : ""}${ratingChange.toFixed(2)})`],
+      ["1–2 star share", `${fixedNumber(evidence.previous_low_rating_ratio)}% → ${fixedNumber(evidence.low_rating_ratio)}% (${ratioChange > 0 ? "+" : ""}${ratioChange.toFixed(2)}pp)`],
+      ["Reviews", numberFormatter.format(finiteNumber(evidence.review_count))],
     ];
   }
   if (issue.issue_type === "support_ticket_backlog") {
     return [
-      `${numberFormatter.format(finiteNumber(evidence.unresolved_high_priority_count))} unresolved high-priority tickets`,
-      `Oldest ticket open ${numberFormatter.format(finiteNumber(evidence.oldest_open_days))} days`,
-      `Data through ${evidence.data_through || "latest available date"}`,
+      ["Unresolved tickets", numberFormatter.format(finiteNumber(evidence.unresolved_high_priority_count))],
+      ["Oldest open", `${numberFormatter.format(finiteNumber(evidence.oldest_open_days))} days`],
+      ["Data through", evidence.data_through || "Latest available"],
     ];
   }
-  return genericEvidence(evidence);
+  return genericEvidence(evidence).map((line) => ["Evidence", line]);
+}
+
+function issueEvidenceLines(issue) {
+  return issueEvidenceMetrics(issue).map(([label, value]) => `${label}: ${value}`);
+}
+
+function supportTicketDetails(issue) {
+  const tickets = Array.isArray(issue?.evidence?.representative_tickets)
+    ? issue.evidence.representative_tickets
+    : [];
+  return `
+    <details class="inventory-risk-details support-ticket-details">
+      <summary>View support tickets</summary>
+      <p class="support-ticket-summary">${numberFormatter.format(finiteNumber(issue.evidence?.unresolved_high_priority_count))} unresolved high-priority tickets · Showing ${tickets.length} oldest</p>
+      <div class="support-ticket-inline-list">
+        ${tickets.length ? tickets.map((ticket) => `
+          <article class="support-ticket-item">
+            <div class="support-ticket-item-header">
+              <strong>${escapeHtml(ticket.issue_category || "Support request")}</strong>
+              <span>${escapeHtml(ticket.priority || "High")} priority · ${escapeHtml(ticket.resolution_status || "unknown")}</span>
+            </div>
+            <div class="support-ticket-item-meta">
+              <span>Ticket ${escapeHtml(ticket.ticket_id || "—")} · Submitted ${escapeHtml(ticket.submission_date || "—")}</span>
+              <span>${numberFormatter.format(finiteNumber(ticket.open_days))} days open</span>
+            </div>
+            ${ticket.notes ? `<p>${escapeHtml(ticket.notes)}</p>` : ""}
+          </article>
+        `).join("") : `<p class="loading-copy">No representative ticket details available.</p>`}
+      </div>
+    </details>`;
 }
 
 function candidatePromptText(value, maxLength = 160) {
@@ -1976,68 +2119,31 @@ function renderDetectedRisks(candidateIssues) {
   elements.businessRiskList.innerHTML = visibleIssues
     .map(({ issue, issueIndex }) => {
       const severity = issue.severity === "high" ? "high" : "medium";
-      const supportButton = issue.issue_type === "support_ticket_backlog"
-        ? `<button class="risk-details-button" type="button" data-support-risk>View support tickets</button>`
+      const supportDetails = issue.issue_type === "support_ticket_backlog"
+        ? supportTicketDetails(issue)
         : "";
       return `
-        <article class="risk-card ${severity}${issue.issue_type === "support_ticket_backlog" ? " risk-card-clickable" : ""}" data-issue-index="${issueIndex}" ${issue.issue_type === "support_ticket_backlog" ? "tabindex=\"0\" data-support-risk-card" : ""}>
+        <article class="risk-card ${severity}" data-issue-index="${issueIndex}">
           <div class="risk-card-header">
-            <span class="severity-badge ${severity}">${escapeHtml(severity.toUpperCase())}</span>
+            <div class="risk-heading">${riskIcon(issue.issue_type)}<strong class="risk-title">${escapeHtml(issue.title || issue.issue_type || "Business risk")}</strong></div>
             <span class="risk-context">${escapeHtml(issueContext(issue))}</span>
           </div>
-          <strong class="risk-title">${escapeHtml(issue.title || issue.issue_type || "Business risk")}</strong>
           <div class="risk-evidence">
-            ${issueEvidenceLines(issue)
-              .map((line) => `<span>${escapeHtml(line)}</span>`)
+            ${issueEvidenceMetrics(issue)
+              .map(([label, value]) => `<span class="risk-evidence-item"><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong></span>`)
               .join("")}
           </div>
+          ${issue.issue_type === "customer_experience_deterioration"
+            ? `<a class="review-investigate" href="#product-performance" data-review-investigate>See products and customer comments</a>`
+            : ""}
           <div class="risk-card-actions">
-            ${issue.issue_type === "customer_experience_deterioration"
-              ? `<a class="review-investigate" href="#product-performance" data-review-investigate>See products and customer comments</a>`
-              : ""}
-            ${supportButton}
+            ${supportDetails}
             ${candidateIssueAskButton(issue, issueIndex)}
           </div>
         </article>
       `;
     })
     .join("");
-}
-
-function expandSupportTicketCard(card, issue, issueIndex) {
-  const tickets = Array.isArray(issue?.evidence?.representative_tickets)
-    ? issue.evidence.representative_tickets
-    : [];
-  card.classList.add("risk-card-expanded");
-  card.innerHTML = `
-    <div class="risk-card-header">
-      <div class="support-ticket-expanded-title">
-        <span class="severity-badge high">HIGH</span>
-        <strong>${escapeHtml(issue.title || "High-priority support backlog")}</strong>
-      </div>
-      <button class="risk-details-button" type="button" data-support-risk-collapse>Collapse</button>
-    </div>
-    <div class="support-ticket-inline-list">
-      ${tickets.length
-    ? tickets.map((ticket) => `
-      <article class="support-ticket-item">
-        <div class="support-ticket-item-header">
-          <strong>${escapeHtml(ticket.issue_category || "Support request")}</strong>
-          <span>${escapeHtml(ticket.resolution_status || "unknown")}</span>
-        </div>
-        <div class="support-ticket-item-meta">
-          <span>Submitted ${escapeHtml(ticket.submission_date || "—")}</span>
-          <span>${numberFormatter.format(finiteNumber(ticket.open_days))} days open</span>
-        </div>
-        ${ticket.notes ? `<p>${escapeHtml(ticket.notes)}</p>` : ""}
-      </article>
-    `).join("")
-    : `<p class="loading-copy">No representative ticket details available.</p>`}
-    </div>
-    <div class="risk-card-actions">
-      ${candidateIssueAskButton(issue, issueIndex)}
-    </div>
-  `;
 }
 
 function renderInventorySection(inventory, inventoryIssue, inventoryIssueIndex) {
@@ -2047,6 +2153,24 @@ function renderInventorySection(inventory, inventoryIssue, inventoryIssueIndex) 
   const totalCount = finiteNumber(inventory.total_inventory_count);
   const affectedRatio = finiteNumber(inventory.affected_ratio);
   const topItems = Array.isArray(inventory.top_items) ? inventory.top_items : [];
+  const affectedItems = Array.isArray(inventoryIssue?.evidence?.representative_items)
+    ? inventoryIssue.evidence.representative_items
+    : (Array.isArray(inventory.affected_items) ? inventory.affected_items : topItems);
+  const inventoryDetails = affectedCount > 0 ? `
+    <details class="inventory-risk-details">
+      <summary>View affected stock</summary>
+      <p>Latest stock snapshot${inventory.snapshot_date ? ` · ${escapeHtml(inventory.snapshot_date)}` : ""}. Items are flagged when their stock is below the replenishment threshold. Critical means stock is at or below 25% of that threshold (or no threshold is set); high means at or below 50%.</p>
+      <div class="inventory-risk-detail-list">
+        ${affectedItems.length ? affectedItems.map((item) => `
+          <article class="inventory-row">
+            <i class="severity-dot ${escapeHtml(item.severity || "warning")}" aria-hidden="true"></i>
+            <div><span class="row-title">${escapeHtml(item.product_name || "Unknown product")}</span><span class="row-subtitle">${escapeHtml(item.store_location || "Unknown location")}</span></div>
+            <span class="stock-value"><strong>Stock: ${numberFormatter.format(finiteNumber(item.stock_quantity))}</strong></span>
+          </article>
+        `).join("") : "<p>No item-level records are available.</p>"}
+      </div>
+      ${affectedCount > affectedItems.length ? `<small>Showing ${affectedItems.length} of ${numberFormatter.format(affectedCount)} affected records.</small>` : ""}
+    </details>` : "";
 
   if (inventoryIssue) {
     const severity = inventoryIssue.severity === "high" ? "high" : "medium";
@@ -2054,16 +2178,16 @@ function renderInventorySection(inventory, inventoryIssue, inventoryIssueIndex) 
     elements.inventoryRiskSummary.dataset.issueIndex = String(inventoryIssueIndex);
     elements.inventoryRiskSummary.innerHTML = `
       <div class="risk-card-header">
-        <span class="severity-badge ${severity}">${escapeHtml(severity.toUpperCase())}</span>
+        <div class="risk-heading">${riskIcon(inventoryIssue.issue_type)}<strong class="risk-title">${escapeHtml(inventoryIssue.title || "Inventory replenishment risk")}</strong></div>
         <span class="risk-context">${escapeHtml(issueContext(inventoryIssue))}</span>
       </div>
-      <strong class="risk-title">${escapeHtml(inventoryIssue.title || "Inventory replenishment risk")}</strong>
       <div class="inventory-risk-metrics">
         <span><strong>${numberFormatter.format(affectedCount)} / ${numberFormatter.format(totalCount)}</strong> records</span>
         <span><strong>${fixedNumber(affectedRatio)}%</strong> affected</span>
         <span><strong>${numberFormatter.format(criticalCount)}</strong> critical</span>
       </div>
       <div class="risk-card-actions">
+        ${inventoryDetails}
         ${candidateIssueAskButton(inventoryIssue, inventoryIssueIndex)}
       </div>
     `;
@@ -2075,6 +2199,7 @@ function renderInventorySection(inventory, inventoryIssue, inventoryIssueIndex) 
         <strong>${numberFormatter.format(affectedCount)} items need replenishment</strong>
         <span>${fixedNumber(affectedRatio)}% affected · No portfolio-level inventory risk detected</span>
       </div>
+      ${inventoryDetails}
     `;
   } else {
     elements.inventoryRiskSummary.className = "inventory-risk-summary";
@@ -2086,33 +2211,6 @@ function renderInventorySection(inventory, inventoryIssue, inventoryIssueIndex) 
       </div>
     `;
   }
-
-  if (affectedCount === 0 || topItems.length === 0) {
-    renderEmpty(elements.inventoryList, "No inventory replenishment items detected.");
-    return;
-  }
-
-  elements.inventoryList.className = "compact-list";
-  elements.inventoryList.innerHTML = `
-    <p class="inventory-list-label">Top affected items</p>
-    ${topItems
-      .map(
-        (item) => `
-          <article class="inventory-row">
-            <i class="severity-dot ${escapeHtml(item.severity)}" aria-hidden="true"></i>
-            <div>
-              <span class="row-title">${escapeHtml(item.product_name || "Unknown product")}</span>
-              <span class="row-subtitle">${escapeHtml(item.store_location || "Unknown location")} · ${escapeHtml({ critical: "Critical", high: "High", warning: "Warning" }[item.severity] || item.severity || "Needs replenishment")}</span>
-            </div>
-            <span class="stock-value">
-              <strong>Stock: ${numberFormatter.format(finiteNumber(item.stock_quantity))}</strong>
-              Reorder level ${numberFormatter.format(finiteNumber(item.reorder_level))}
-            </span>
-          </article>
-        `,
-      )
-      .join("")}
-  `;
 }
 
 function renderBusinessActionCenter(data, candidateIssues) {
@@ -2182,6 +2280,80 @@ function setSharedDateRange(start, end) {
   elements.campaignEndDate.value = end;
 }
 
+const calendarDayFormatter = new Intl.DateTimeFormat("en-US", {
+  day: "numeric", month: "long", year: "numeric", timeZone: "UTC",
+});
+
+function formatCalendarDate(date) {
+  if (!date) return "";
+  return calendarDayFormatter.format(new Date(`${date}T00:00:00Z`));
+}
+
+function renderDateRangePicker() {
+  if (!dateRangeDraft) return;
+  const { year, month, start, end, phase } = dateRangeDraft;
+  elements.dateRangeMonth.value = String(month);
+  elements.dateRangeYear.value = String(year);
+  elements.dateRangeStartLabel.textContent = start ? formatCalendarDate(start) : "Start date";
+  elements.dateRangeEndLabel.textContent = end ? formatCalendarDate(end) : "End date";
+  elements.dateRangeInstruction.textContent = phase === "end"
+    ? "Choose an end date. You can change the month and year above."
+    : "Choose a start date.";
+  elements.dateRangeUse.disabled = !start || !end || start > end;
+
+  const leadingDays = (new Date(Date.UTC(year, month, 1)).getUTCDay() + 6) % 7;
+  const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const blanks = Array.from({ length: leadingDays }, () => '<span class="date-range-empty" aria-hidden="true"></span>').join("");
+  const days = Array.from({ length: daysInMonth }, (_, index) => {
+    const day = index + 1;
+    const date = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const classes = [date === start ? "is-start" : "", date === end ? "is-end" : "", start && end && date > start && date < end ? "is-between" : ""]
+      .filter(Boolean).join(" ");
+    return `<button class="${classes}" type="button" data-range-date="${date}" aria-label="${formatCalendarDate(date)}" aria-pressed="${date === start || date === end}">${day}</button>`;
+  }).join("");
+  elements.dateRangeDays.innerHTML = blanks + days;
+}
+
+function openDateRangePicker(source) {
+  const startInput = source === "campaign" ? elements.campaignStartDate : elements.productStartDate;
+  const endInput = source === "campaign" ? elements.campaignEndDate : elements.productEndDate;
+  const start = startInput.value || state.sharedDateRange.start;
+  const end = endInput.value || state.sharedDateRange.end;
+  const viewed = start || end || new Date().toISOString().slice(0, 10);
+  const [year, month] = viewed.split("-").map(Number);
+  dateRangeDraft = { source, start, end, year, month: month - 1, phase: "start" };
+  const firstYear = Math.min(2000, year);
+  const lastYear = Math.max(2100, year);
+  elements.dateRangeYear.replaceChildren(...Array.from(
+    { length: lastYear - firstYear + 1 },
+    (_, index) => new Option(String(firstYear + index), String(firstYear + index)),
+  ));
+  renderDateRangePicker();
+  elements.dateRangeDialog.showModal();
+}
+
+function shiftDateRangeMonth(offset) {
+  if (!dateRangeDraft) return;
+  const viewed = new Date(Date.UTC(dateRangeDraft.year, dateRangeDraft.month + offset, 1));
+  if (viewed.getUTCFullYear() < 2000 || viewed.getUTCFullYear() > 2100) return;
+  dateRangeDraft.year = viewed.getUTCFullYear();
+  dateRangeDraft.month = viewed.getUTCMonth();
+  renderDateRangePicker();
+}
+
+function selectDateRangeDay(date) {
+  if (!dateRangeDraft) return;
+  if (dateRangeDraft.phase === "end" && date >= dateRangeDraft.start) {
+    dateRangeDraft.end = date;
+    dateRangeDraft.phase = "start";
+  } else {
+    dateRangeDraft.start = date;
+    dateRangeDraft.end = "";
+    dateRangeDraft.phase = "end";
+  }
+  renderDateRangePicker();
+}
+
 function exclusiveDateForRange(end) {
   const exclusiveEnd = new Date(`${end}T00:00:00Z`);
   exclusiveEnd.setUTCDate(exclusiveEnd.getUTCDate() + 1);
@@ -2191,7 +2363,7 @@ function exclusiveDateForRange(end) {
 async function applySharedDateRange(start, end, source) {
   if (!start || !end || start > end) {
     showGlobalError("Choose a valid shared date range.");
-    return;
+    return false;
   }
   const exclusiveEnd = exclusiveDateForRange(end);
   const productQuery = new URLSearchParams({
@@ -2201,34 +2373,30 @@ async function applySharedDateRange(start, end, source) {
   if (state.storeId) productQuery.set("store_id", state.storeId);
   const reviewQuery = new URLSearchParams({ start_date: start, end_date: exclusiveEnd });
   const campaignQuery = new URLSearchParams({ start_date: start, end_date: exclusiveEnd });
-  elements.productDateApply.disabled = true;
-  elements.campaignDateApply.disabled = true;
+  state.sharedDateRangeController?.abort();
+  const controller = new AbortController();
+  state.sharedDateRangeController = controller;
   if (state.reviewOverviewController) state.reviewOverviewController.abort();
   clearGlobalError();
   try {
     const [productData, reviewData, campaignData] = await Promise.all([
-      fetchJson(`/api/dashboard/product-performance?${productQuery}`),
-      fetchJson(`/api/dashboard/product-reviews?${reviewQuery}`),
-      fetchJson(`/api/dashboard/marketing-performance?${campaignQuery}`),
+      fetchJson(`/api/dashboard/product-performance?${productQuery}`, { signal: controller.signal }),
+      fetchJson(`/api/dashboard/product-reviews?${reviewQuery}`, { signal: controller.signal }),
+      fetchJson(`/api/dashboard/marketing-performance?${campaignQuery}`, { signal: controller.signal }),
     ]);
+    if (controller.signal.aborted) return false;
     setSharedDateRange(start, end);
     renderProducts(productData);
     renderReviewOverview(reviewData);
     renderMarketing(campaignData);
+    return true;
   } catch (error) {
+    if (error.name === "AbortError") return false;
     showGlobalError(`${source} shared date range failed: ${error.message}`);
+    return false;
   } finally {
-    elements.productDateApply.disabled = false;
-    elements.campaignDateApply.disabled = false;
+    if (state.sharedDateRangeController === controller) state.sharedDateRangeController = null;
   }
-}
-
-function applyProductDateRange() {
-  return applySharedDateRange(
-    elements.productStartDate.value,
-    elements.productEndDate.value,
-    "Product",
-  );
 }
 
 function productChartMetric(tab, item) {
@@ -2276,13 +2444,33 @@ function renderProductInsights(items) {
   elements.productTable.className = "table-scroll";
   elements.productTable.innerHTML = `<table class="insight-table">
     <thead><tr><th scope="col">Product</th><th scope="col">Category</th>${columnLabels.map((label) => `<th scope="col">${label}</th>`).join("")}</tr></thead>
-    <tbody>${items.map((item) => `<tr><th scope="row"><button class="review-product-link" type="button" data-review-product-id="${escapeHtml(item.product_id)}">${escapeHtml(item.product_name)}</button></th><td>${escapeHtml(item.product_category)}</td>${cells(item).map((value) => `<td>${escapeHtml(value)}</td>`).join("")}</tr>`).join("")}</tbody>
+    <tbody>${items.map((item) => `<tr><th scope="row"><button class="review-product-link" type="button" data-product-detail-id="${escapeHtml(item.product_id)}" aria-controls="product-detail" aria-expanded="${state.selectedRankingProductId === item.product_id}">${escapeHtml(item.product_name)}</button></th><td>${escapeHtml(item.product_category)}</td>${cells(item).map((value) => `<td>${escapeHtml(value)}</td>`).join("")}</tr>`).join("")}</tbody>
   </table>`;
 }
 
+function renderSelectedProductDetail() {
+  const items = state.productData?.[state.activeProductTab] || [];
+  const product = items.find((item) => String(item.product_id) === String(state.selectedRankingProductId));
+  elements.productTable.querySelectorAll("[data-product-detail-id]").forEach((button) => {
+    button.setAttribute("aria-expanded", String(Boolean(product) && String(button.dataset.productDetailId) === String(product.product_id)));
+  });
+  if (!product) {
+    elements.productDetail.hidden = true;
+    elements.productDetail.replaceChildren();
+    return;
+  }
+  const metrics = productMetrics(state.activeProductTab, product);
+  const review = state.reviewProducts.find((item) => String(item.product_id) === String(product.product_id));
+  elements.productDetail.hidden = false;
+  elements.productDetail.innerHTML = `
+    <div class="product-detail-heading"><div><span>Selected product</span><strong>${escapeHtml(product.product_name)}</strong><small>${escapeHtml(product.product_category || "Uncategorized")}</small></div><button type="button" data-close-product-detail aria-label="Close product details">×</button></div>
+    <div class="product-detail-metrics">${metrics.map(([value, label]) => `<div><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`).join("")}</div>
+    <p>${review ? `${numberFormatter.format(finiteNumber(review.review_count))} customer reviews in the selected review period.` : "Review totals are loading for the selected period."}</p>
+    <button class="product-detail-reviews" type="button" data-open-product-reviews="${escapeHtml(product.product_id)}">Read customer reviews</button>
+  `;
+}
+
 function renderProductTab() {
-  if (!state.productData) return;
-  const items = state.productData[state.activeProductTab] || [];
   const tabs = elements.productTabs.querySelectorAll(".tab");
   tabs.forEach((button) => {
     const isActive = button.dataset.tab === state.activeProductTab;
@@ -2290,7 +2478,14 @@ function renderProductTab() {
     button.setAttribute("aria-pressed", String(isActive));
   });
 
+  const isOverview = state.activeProductTab === "overview";
+  elements.productOverview.hidden = !isOverview;
+  elements.productRankings.hidden = isOverview;
+  if (isOverview || !state.productData) return;
+  const items = state.productData[state.activeProductTab] || [];
+
   renderProductInsights(items);
+  renderSelectedProductDetail();
 
   if (items.length === 0) {
     renderEmpty(elements.productList, "Not enough data for this ranking");
@@ -2307,7 +2502,7 @@ function renderProductTab() {
           <article class="rank-row">
             <span class="rank-number">${String(index + 1).padStart(2, "0")}</span>
             <div>
-              <button class="review-product-link row-title" type="button" data-review-product-id="${escapeHtml(item.product_id)}">${escapeHtml(item.product_name)}</button>
+              <button class="review-product-link row-title" type="button" data-product-detail-id="${escapeHtml(item.product_id)}">${escapeHtml(item.product_name)}</button>
               <span class="row-subtitle">${escapeHtml(item.product_category)}</span>
             </div>
             <span class="rank-metric">
@@ -2339,14 +2534,14 @@ function renderReviewOverview(data) {
     <div><strong>${totalReviews ? `${((highReviews / totalReviews) * 100).toFixed(1)}%` : "—"}</strong><span>High rating share</span></div>`;
   const high = [...products].sort((a, b) => Number(b.average_rating || 0) - Number(a.average_rating || 0) || Number(b.review_count) - Number(a.review_count)).slice(0, 5);
   const low = [...products].sort((a, b) => Number(a.average_rating || 0) - Number(b.average_rating || 0) || Number(b.review_count) - Number(a.review_count)).slice(0, 5);
-  const ratingRows = (items) => items.length ? items.map((product) => `<div class="review-rating-row"><span><strong>${escapeHtml(product.product_name)}</strong><small>${escapeHtml(product.product_category)} · ${product.review_count} reviews</small></span><b>★ ${Number(product.average_rating || 0).toFixed(2)}</b></div>`).join("") : `<p class="review-empty">No reviews in this range.</p>`;
+  const ratingRows = (items) => items.length ? items.map((product) => `<button class="review-rating-row" type="button" data-review-product-id="${escapeHtml(product.product_id)}"><span><strong>${escapeHtml(product.product_name)}</strong><small>${escapeHtml(product.product_category)} · ${product.review_count} reviews</small></span><b>★ ${Number(product.average_rating || 0).toFixed(2)}</b></button>`).join("") : `<p class="review-empty">No reviews in this range.</p>`;
   elements.reviewHighList.innerHTML = ratingRows(high);
   elements.reviewLowList.innerHTML = ratingRows(low);
   const hotspots = products.filter((product) => product.low_rating_count > 0).slice(0, 5);
   const rangeLabel = data.start_date && data.end_date
     ? `${formatShortDate(data.start_date)} – ${formatShortDate(data.end_date)}`
     : formatMonth(data.month);
-  elements.reviewScopeNote.textContent = `${rangeLabel} · company-wide (reviews have no store field)`;
+  elements.reviewScopeNote.textContent = `${rangeLabel} · company-wide`;
   if (elements.reviewHotspotList) {
     if (!hotspots.length) {
       renderEmpty(elements.reviewHotspotList, "No 1–2 star product reviews in the selected range.");
@@ -2381,6 +2576,7 @@ function renderReviewOverview(data) {
     elements.reviewProductSelect.disabled = false;
   }
   elements.reviewProductSelect.value = selected;
+  renderSelectedProductDetail();
   loadProductReviews();
 }
 
@@ -2413,13 +2609,15 @@ async function loadProductReviews() {
   const productId = state.reviewSelectedProductId;
   const product = state.reviewProducts.find((item) => item.product_id === productId);
   if (!product || (!state.month && !state.productDateRange.start)) {
+    elements.reviewDetailTitle.textContent = "Selected product reviews";
     elements.reviewProductSummary.textContent = "Choose a product to see its reviews.";
     elements.reviewComments.replaceChildren();
     return;
   }
 
+  elements.reviewDetailTitle.textContent = `Reviews for ${product.product_name}`;
   elements.reviewProductSummary.textContent =
-    `${numberFormatter.format(product.low_rating_count)} of ${numberFormatter.format(product.review_count)} reviews rated 1–2 stars in the selected range.`;
+    `${numberFormatter.format(product.review_count)} reviews in this period · ${numberFormatter.format(product.low_rating_count)} rated 1–2 stars.`;
   elements.reviewComments.className = "review-comments loading-copy";
   elements.reviewComments.textContent = "Loading customer comments…";
   const controller = new AbortController();
@@ -2437,8 +2635,8 @@ async function loadProductReviews() {
     if (controller.signal.aborted || state.reviewSelectedProductId !== productId || state.month !== month) return;
     if (!data.reviews.length) {
       renderEmpty(elements.reviewComments, lowOnly
-        ? "No 1–2 star comments for this product this month. Try All ratings."
-        : "No reviews for this product this month.");
+        ? "No 1–2 star comments for this product in the selected period. Try All ratings."
+        : "No reviews for this product in the selected period.");
       return;
     }
     elements.reviewComments.className = "review-comments";
@@ -2455,14 +2653,14 @@ async function loadProductReviews() {
   }
 }
 
-function openProductReviews(productId) {
+function openProductReviews(productId, lowOnly = false) {
   if (productId) state.reviewSelectedProductId = productId;
-  elements.reviewRatingFilter.value = "low";
+  elements.reviewRatingFilter.value = lowOnly ? "low" : "all";
   elements.reviewProductSelect.value = state.reviewSelectedProductId;
   loadProductReviews();
-  window.location.hash = "product-performance";
+  if (document.querySelector("#product-performance").hidden) window.location.hash = "product-performance";
   window.setTimeout(() => {
-    elements.productReviews.scrollIntoView({ behavior: "smooth", block: "start" });
+    elements.reviewDetail.scrollIntoView({ behavior: "smooth", block: "start" });
   }, 80);
 }
 
@@ -2486,81 +2684,23 @@ function renderCampaignInsights(campaigns) {
   }).join("");
 
   elements.campaignTable.className = "table-scroll";
-  elements.campaignTable.innerHTML = `<table class="insight-table"><thead><tr><th scope="col">Campaign</th><th scope="col">Type</th><th scope="col">Budget</th><th scope="col">Conversions</th><th scope="col">Conversion rate</th><th scope="col">Reported ROI</th><th scope="col">Dates</th></tr></thead>
-    <tbody>${campaigns.map((campaign) => `<tr><th scope="row"><button class="campaign-select" type="button" data-campaign-id="${escapeHtml(campaign.campaign_id)}" aria-controls="campaign-detail" aria-expanded="false">${escapeHtml(campaign.campaign_name)}</button></th><td>${escapeHtml(campaign.campaign_type)}</td><td>${escapeHtml(formatMoney(campaign.budget))}</td><td>${escapeHtml(numberFormatter.format(finiteNumber(campaign.conversions)))}</td><td>${escapeHtml(fixedNumber(campaign.conversion_rate, 1))}%</td><td class="${finiteNumber(campaign.roi) < 0 ? "roi-negative" : "roi-positive"}">${finiteNumber(campaign.roi) > 0 ? "+" : ""}${escapeHtml(fixedNumber(campaign.roi, 0))}%</td><td>${escapeHtml(campaign.start_date)} – ${escapeHtml(campaign.end_date)}</td></tr>`).join("")}</tbody></table>`;
+  elements.campaignTable.innerHTML = `<table class="insight-table"><thead><tr><th scope="col">Campaign</th><th scope="col">Type</th><th scope="col">Click-through rate</th><th scope="col">Conversions</th><th scope="col">Conversion rate</th><th scope="col">Dates</th></tr></thead>
+    <tbody>${campaigns.map((campaign) => {
+      const clicks = finiteNumber(campaign.clicks);
+      const impressions = finiteNumber(campaign.impressions);
+      const clickThroughRate = impressions > 0 ? `${fixedNumber(clicks / impressions * 100, 2)}%` : "—";
+      const rateDescription = impressions > 0
+        ? `${numberFormatter.format(clicks)} clicks / ${numberFormatter.format(impressions)} impressions`
+        : "No impressions recorded";
+      return `<tr><th scope="row"><span class="campaign-table-name">${escapeHtml(campaign.campaign_name)}</span><span class="campaign-table-meta">Budget ${escapeHtml(formatMoney(campaign.budget))}</span></th><td>${escapeHtml(campaign.campaign_type)}</td><td title="${escapeHtml(rateDescription)}">${escapeHtml(clickThroughRate)}</td><td>${escapeHtml(numberFormatter.format(finiteNumber(campaign.conversions)))}</td><td class="campaign-conversion-rate">${escapeHtml(fixedNumber(campaign.conversion_rate, 1))}%</td><td>${escapeHtml(campaign.start_date)} – ${escapeHtml(campaign.end_date)}</td></tr>`;
+    }).join("")}</tbody></table>`;
 }
 
 function renderMarketing(data) {
   if (!state.sharedDateRange.start && data?.period) {
     setSharedDateRange(data.period.start_date || "", data.period.end_date || "");
   }
-  state.campaigns = data.campaigns;
   renderCampaignInsights(data.campaigns);
-
-  if (!data.campaigns.length) {
-    state.selectedCampaignId = "";
-    elements.campaignDetail.hidden = true;
-    renderEmpty(elements.campaignList, "No campaigns overlap the selected range");
-    return;
-  }
-
-  elements.campaignList.className = "campaign-list";
-  elements.campaignList.innerHTML = data.campaigns
-    .map((campaign) => {
-      const roi = Number(campaign.roi) || 0;
-      return `
-        <article class="campaign-row">
-          <div>
-            <button class="campaign-select row-title" type="button" data-campaign-id="${escapeHtml(campaign.campaign_id)}" aria-controls="campaign-detail" aria-expanded="false">${escapeHtml(campaign.campaign_name)}</button>
-            <span class="row-subtitle">${escapeHtml(campaign.campaign_type)} · Budget ${escapeHtml(formatMoney(campaign.budget))}</span>
-          </div>
-          <span aria-label="Conversion rate ${escapeHtml(campaign.conversion_rate)}%">
-            ${escapeHtml(Number(campaign.conversion_rate).toFixed(1))}%
-          </span>
-          <span class="${roi >= 0 ? "roi-positive" : "roi-negative"}" aria-label="ROI ${escapeHtml(roi)}%">
-            ${roi >= 0 ? "+" : ""}${escapeHtml(roi.toFixed(0))}%
-          </span>
-        </article>
-      `;
-    })
-    .join("");
-  showCampaignDetail(state.selectedCampaignId);
-}
-
-function applyCampaignDateRange() {
-  return applySharedDateRange(
-    elements.campaignStartDate.value,
-    elements.campaignEndDate.value,
-    "Campaign",
-  );
-}
-
-function showCampaignDetail(campaignId, scrollIntoView = false) {
-  const campaign = state.campaigns.find((item) => String(item.campaign_id) === campaignId);
-  state.selectedCampaignId = campaign ? campaignId : "";
-  elements.campaignPanel.querySelectorAll("[data-campaign-id]").forEach((button) => {
-    const isSelected = Boolean(campaign) && button.dataset.campaignId === campaignId;
-    button.setAttribute("aria-expanded", String(isSelected));
-    button.classList.toggle("active", isSelected);
-  });
-  elements.campaignDetail.hidden = !campaign;
-  if (!campaign) return;
-
-  const start = formatShortDate(campaign.start_date, true);
-  const end = formatShortDate(campaign.end_date, true);
-  elements.campaignDetailTitle.textContent = campaign.campaign_name;
-  elements.campaignDetailStart.textContent = start;
-  elements.campaignDetailEnd.textContent = end;
-  elements.campaignDetailCount.textContent = numberFormatter.format(
-    finiteNumber(campaign.transactions_during_campaign),
-  );
-  elements.campaignDetailAxisStart.textContent = start;
-  elements.campaignDetailAxisEnd.textContent = end;
-  if (scrollIntoView) {
-    window.requestAnimationFrame(() => {
-      elements.campaignDetail.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    });
-  }
 }
 
 function panelError(panel, message) {
@@ -2575,7 +2715,6 @@ function panelError(panel, message) {
     elements.businessRiskCount.textContent = "Unavailable";
     renderEmpty(elements.businessRiskList, message);
     renderEmpty(elements.inventoryRiskSummary, "Inventory summary is temporarily unavailable");
-    renderEmpty(elements.inventoryList, "Inventory data is temporarily unavailable");
   } else if (panel === "products") {
     state.productData = null;
     renderEmpty(elements.productList, message);
@@ -2584,10 +2723,6 @@ function panelError(panel, message) {
     renderEmpty(elements.productRevenueChart, message);
     renderEmpty(elements.productCategoryChart, message);
   } else if (panel === "marketing") {
-    state.campaigns = [];
-    state.selectedCampaignId = "";
-    elements.campaignDetail.hidden = true;
-    renderEmpty(elements.campaignList, message);
     renderEmpty(elements.campaignChart, message);
     renderEmpty(elements.campaignTable, message);
   }
@@ -2700,54 +2835,86 @@ document.querySelector(".chart-view-toggle").addEventListener("click", (event) =
   renderFinanceChart(state.financeTrend);
 });
 
-elements.productDateApply.addEventListener("click", applyProductDateRange);
-elements.campaignDateApply.addEventListener("click", applyCampaignDateRange);
+for (const [startInput, endInput, source] of [
+  [elements.productStartDate, elements.productEndDate, "Product"],
+  [elements.campaignStartDate, elements.campaignEndDate, "Campaign"],
+]) {
+  for (const input of [startInput, endInput]) {
+    input.addEventListener("change", () => {
+      const start = startInput.value;
+      const end = endInput.value;
+      if (start && end && start <= end && (start !== state.sharedDateRange.start || end !== state.sharedDateRange.end)) {
+        applySharedDateRange(start, end, source);
+      }
+    });
+  }
+}
+
+document.querySelectorAll("[data-range-picker]").forEach((button) => {
+  button.addEventListener("click", () => openDateRangePicker(button.dataset.rangePicker));
+});
+
+elements.dateRangeDialog.querySelector("#date-range-close").addEventListener("click", () => elements.dateRangeDialog.close());
+elements.dateRangeDialog.querySelector("#date-range-cancel").addEventListener("click", () => elements.dateRangeDialog.close());
+elements.dateRangeDialog.querySelector("#date-range-prev").addEventListener("click", () => shiftDateRangeMonth(-1));
+elements.dateRangeDialog.querySelector("#date-range-next").addEventListener("click", () => shiftDateRangeMonth(1));
+elements.dateRangeDialog.addEventListener("close", () => { dateRangeDraft = null; });
+elements.dateRangeMonth.replaceChildren(...calendarMonthNames.map((name, index) => new Option(name, String(index))));
+elements.dateRangeMonth.addEventListener("change", () => {
+  if (!dateRangeDraft) return;
+  dateRangeDraft.month = Number(elements.dateRangeMonth.value);
+  renderDateRangePicker();
+});
+elements.dateRangeYear.addEventListener("change", () => {
+  if (!dateRangeDraft) return;
+  dateRangeDraft.year = Number(elements.dateRangeYear.value);
+  renderDateRangePicker();
+});
+elements.dateRangeDays.addEventListener("click", (event) => {
+  const day = event.target.closest("[data-range-date]");
+  if (day) selectDateRangeDay(day.dataset.rangeDate);
+});
+elements.dateRangeUse.addEventListener("click", async () => {
+  if (!dateRangeDraft?.start || !dateRangeDraft?.end) return;
+  elements.dateRangeUse.disabled = true;
+  const applied = await applySharedDateRange(dateRangeDraft.start, dateRangeDraft.end, "Calendar");
+  if (applied && elements.dateRangeDialog.open) elements.dateRangeDialog.close();
+  else renderDateRangePicker();
+});
 
 document.querySelector("#product-performance").addEventListener("click", (event) => {
-  const button = event.target.closest("[data-review-product-id]");
-  if (button) openProductReviews(button.dataset.reviewProductId);
+  if (event.target.closest("[data-close-product-detail]")) {
+    state.selectedRankingProductId = "";
+    renderSelectedProductDetail();
+    return;
+  }
+  const ranking = event.target.closest("[data-product-detail-id]");
+  if (ranking) {
+    state.selectedRankingProductId = ranking.dataset.productDetailId;
+    renderSelectedProductDetail();
+    return;
+  }
+  const reviewButton = event.target.closest("[data-open-product-reviews], [data-review-product-id]");
+  if (reviewButton) openProductReviews(reviewButton.dataset.openProductReviews || reviewButton.dataset.reviewProductId);
 });
 
 elements.reviewHotspotList?.addEventListener("click", (event) => {
   const button = event.target.closest("[data-review-product-id]");
-  if (button) openProductReviews(button.dataset.reviewProductId);
+  if (button) openProductReviews(button.dataset.reviewProductId, true);
 });
 
 elements.businessRiskList.addEventListener("click", (event) => {
   const askButton = event.target.closest("[data-ask-agent]");
   if (askButton) {
     event.preventDefault();
-    event.stopPropagation();
     const issue = candidateIssueFromElement(askButton);
     if (issue && !state.chatController) askAgentAboutIssue(issue);
-    return;
-  }
-  if (event.target.closest("[data-support-risk-collapse]")) {
-    renderDetectedRisks(state.candidateIssues);
-    return;
-  }
-  const supportCard = event.target.closest("[data-support-risk-card]");
-  if (supportCard) {
-    const issue = candidateIssueFromElement(supportCard);
-    const issueIndex = Number(supportCard.dataset.issueIndex);
-    if (issue) expandSupportTicketCard(supportCard, issue, issueIndex);
     return;
   }
   if (event.target.closest("[data-review-investigate]")) {
     event.preventDefault();
     openProductReviews();
   }
-});
-
-elements.businessRiskList.addEventListener("keydown", (event) => {
-  if (event.key !== "Enter" && event.key !== " ") return;
-  if (event.target.closest("button, a")) return;
-  const supportCard = event.target.closest("[data-support-risk-card]");
-  if (!supportCard) return;
-  event.preventDefault();
-  const issue = candidateIssueFromElement(supportCard);
-  const issueIndex = Number(supportCard.dataset.issueIndex);
-  if (issue) expandSupportTicketCard(supportCard, issue, issueIndex);
 });
 
 elements.inventoryRiskSummary.addEventListener("click", (event) => {
@@ -2764,12 +2931,6 @@ elements.reviewProductSelect.addEventListener("change", () => {
 });
 
 elements.reviewRatingFilter.addEventListener("change", loadProductReviews);
-
-elements.campaignPanel.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-campaign-id]");
-  if (!button || !elements.campaignPanel.contains(button)) return;
-  showCampaignDetail(button.dataset.campaignId, true);
-});
 
 elements.storeFilter.addEventListener("change", () => {
   state.storeId = elements.storeFilter.value;
@@ -2978,6 +3139,45 @@ elements.newChatDialog.addEventListener("close", () => {
   if (elements.newChatDialog.returnValue === "confirm") startNewChat();
 });
 
+elements.chatConversation.addEventListener("click", (event) => {
+  const download = event.target.closest(".source-download");
+  if (download) {
+    downloadChatSource({ download_url: download.dataset.sourceUrl, filename: download.dataset.sourceFilename }, download, download);
+    return;
+  }
+  const citation = event.target.closest(".chat-citation");
+  if (citation) {
+    const turn = citation.closest(".chat-response");
+    const card = turn?.querySelectorAll(".source-entry")[Number(citation.dataset.sourceIndex)];
+    if (card) {
+      card.open = true;
+      card.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      card.querySelector("summary")?.focus();
+    }
+    return;
+  }
+  const link = event.target.closest(".chat-answer a, .chat-history-message a");
+  if (!link) return;
+  event.preventDefault();
+  const turn = link.closest(".chat-response");
+  const cited = [...(turn?.querySelectorAll(".source-entry") || [])].find((entry) =>
+    [...entry.querySelectorAll(".source-evidence-item strong")].some((label) => label.textContent === link.textContent.trim()));
+  if (cited) {
+    cited.open = true;
+    cited.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    cited.querySelector("summary")?.focus();
+    return;
+  }
+  const rawHref = link.getAttribute("href") || "";
+  if (rawHref.startsWith("#")) {
+    const target = document.getElementById(rawHref.slice(1));
+    target?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    return;
+  }
+  const href = safeSourceUrl(rawHref);
+  if (href) window.open(href, "_blank", "noopener,noreferrer");
+});
+
 elements.chatInput.addEventListener("input", resizeChatInput);
 elements.chatInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
@@ -3023,7 +3223,6 @@ elements.chatCopyButton.addEventListener("click", async () => {
 });
 
 async function initialise() {
-  initializeActivitySizing();
   try {
     await createChatSession({ clearUi: true });
   } catch (error) {

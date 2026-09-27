@@ -84,7 +84,7 @@ def review_products(
         "month": month,
         "start_date": start.isoformat(),
         "end_date": (end - date.resolution).isoformat(),
-        "scope": "Company-wide; reviews have no store field",
+        "scope": "Company-wide",
         "products": [
             {
                 "product_id": row["product_id"],

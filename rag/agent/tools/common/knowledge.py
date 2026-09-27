@@ -161,6 +161,7 @@ async def search_knowledge(
                 "chunk_index": match["chunk_index"],
                 "citation": match["citation"],
                 "similarity": match["similarity"],
+                "excerpt": str(match["content"])[:500],
                 "download_url": f"/api/knowledge/files/{match['file_id']}/download",
             }
         )
