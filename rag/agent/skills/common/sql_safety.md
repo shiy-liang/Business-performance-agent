@@ -14,7 +14,8 @@ the mandatory SQL sequence for those dedicated-owned subtasks.
 1. If a product name is fuzzy, non-standard, or cross-language, resolve it with
    `find_real_name` and use only exact values from the successful result's `items`.
    Never invent, infer, translate into, or guess a product name. The resolver
-   allows three sequential attempts at thresholds 0.70, 0.60, and 0.55. Retry
+   allows {{product_resolution_max_attempts}} sequential attempts at thresholds
+   {{product_resolution_thresholds}}. Retry
    only when `retryable=true`. When `result_status=matched`, reuse the returned
    name and never call the resolver again. When no match returns `terminal=true`,
    stop and request the exact product name.
@@ -30,11 +31,13 @@ the mandatory SQL sequence for those dedicated-owned subtasks.
    approve the complete SQL and parameters. Do not claim that the query has run
    while approval is pending.
 6. Distinguish validation errors, SQL errors, empty results, and successful data.
-7. Correct only from concrete schema or error evidence, with no more than three
+7. Correct only from concrete schema or error evidence, with no more than
+   {{sql_max_attempts}}
    execution attempts.
 8. Return only the final successful query and its database citation.
 9. Stop SQL execution after the cumulative result limits are reached. You may run
-   at most three sequential queries when separate evidence is necessary; the
+   at most {{sql_max_attempts}} sequential queries when separate evidence is
+   necessary; the
    successful rows and result characters across all queries must stay within the
    configured limits. Do not issue parallel alternatives or optional extra queries.
 

@@ -39,7 +39,8 @@ are execution steps inside a skill, not separate subtasks.
    steps.
 7. Number the complete plan sequentially as `t1`, `t2`, and so on. Call
    `format_sub_task` as the only tool in that model turn.
-8. After the plan is accepted, call each required specialist at most once using
+8. After the plan is accepted, call each required specialist at most
+   {{max_delegations_per_specialist}} time(s) using
    the exact task IDs in its group. Independent Operations and Finance groups
    should be dispatched together. Do not rewrite, add, or remove subtasks after
    formatting.

@@ -11,8 +11,18 @@ from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 from langchain_core.outputs import LLMResult
 
+from config.settings import load_agent_settings
 from observability import logger
 from rag.agent.state import PublicAgentEvent
+
+
+_AGENT_SETTINGS = load_agent_settings()
+_PRODUCT_MAX_ATTEMPTS = len(
+    _AGENT_SETTINGS.product_resolution.similarity_thresholds
+)
+_CAMPAIGN_MAX_ATTEMPTS = len(
+    _AGENT_SETTINGS.campaign_resolution.similarity_thresholds
+)
 
 
 def content_text(content: Any) -> str:
@@ -122,7 +132,7 @@ class PublicEventMiddleware:
             if (
                 resolution_scope in self._product_resolution_resolved
                 or resolution_scope in self._product_resolution_in_flight
-                or calls >= 3
+                or calls >= _PRODUCT_MAX_ATTEMPTS
             ):
                 if event_run_id:
                     self._suppressed_tool_runs.add(event_run_id)
@@ -476,7 +486,11 @@ class PublicEventMiddleware:
             ):
                 return {
                     "stage": "evidence_gap",
-                    "message": "No canonical product matched after three attempts; the user must provide an exact product name.",
+                    "message": (
+                        "No canonical product matched after "
+                        f"{_PRODUCT_MAX_ATTEMPTS} attempts; the user must provide "
+                        "an exact product name."
+                    ),
                 }
             return {
                 "stage": "query_planning",
@@ -494,7 +508,11 @@ class PublicEventMiddleware:
             ):
                 return {
                     "stage": "evidence_gap",
-                    "message": "No canonical campaign matched after three attempts; the user must provide an exact campaign name.",
+                    "message": (
+                        "No canonical campaign matched after "
+                        f"{_CAMPAIGN_MAX_ATTEMPTS} attempts; the user must provide "
+                        "an exact campaign name."
+                    ),
                 }
             return {
                 "stage": "query_planning",
@@ -523,7 +541,11 @@ class PublicEventMiddleware:
         if name in {"check_less_like", "check_less_purchase"}:
             return {
                 "stage": "evidence_validation",
-                "message": "The Bottom-10 product ranking is ready for validation.",
+                "message": (
+                    "The Bottom-"
+                    f"{_AGENT_SETTINGS.rankings.bottom_rate_result_limit} product "
+                    "ranking is ready for validation."
+                ),
             }
         if name == "check_most_interact":
             return {
@@ -637,7 +659,10 @@ class PublicEventMiddleware:
                 payload.get("terminal") is True
                 and payload.get("result_status") == "canonical_product_not_found"
             ):
-                return f"{name} found no canonical product after three attempts; resolution stopped."
+                return (
+                    f"{name} found no canonical product after "
+                    f"{_PRODUCT_MAX_ATTEMPTS} attempts; resolution stopped."
+                )
             suffix = (
                 f" on attempt {call_number} at threshold {threshold}"
                 if call_number is not None and threshold is not None
@@ -654,7 +679,10 @@ class PublicEventMiddleware:
                 payload.get("terminal") is True
                 and payload.get("result_status") == "canonical_campaign_not_found"
             ):
-                return f"{name} found no canonical campaign after three attempts; resolution stopped."
+                return (
+                    f"{name} found no canonical campaign after "
+                    f"{_CAMPAIGN_MAX_ATTEMPTS} attempts; resolution stopped."
+                )
             suffix = (
                 f" on attempt {call_number} at threshold {threshold}"
                 if call_number is not None and threshold is not None

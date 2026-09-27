@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from datetime import date
 from time import perf_counter
 from typing import Any, Literal
@@ -15,13 +14,15 @@ from pgvector import Vector
 from pgvector.psycopg import register_vector
 from pydantic import BaseModel, Field, model_validator
 
+from config.settings import load_agent_settings
 from model import embedding_model
 from observability import logger
 from rag.agent.tools.common.sql_runtime import connect_readonly, set_readonly_guards
 
 
-MAX_SEMANTIC_REVIEW_CALLS = 3
-MAX_OTHER_COMMENT_CALLS = 2
+_REVIEW_SETTINGS = load_agent_settings().review_retrieval
+MAX_SEMANTIC_REVIEW_CALLS = _REVIEW_SETTINGS.max_semantic_calls_per_subtask
+MAX_OTHER_COMMENT_CALLS = _REVIEW_SETTINGS.max_expansion_calls_per_subtask
 
 OTHER_PRODUCT_COMMENTS_SQL = """
 SELECT
@@ -38,7 +39,7 @@ WHERE LOWER(product_name) = LOWER(%(product_name)s::text)
   AND rating < %(rating)s::numeric
   AND NOT (review_id = ANY(%(excluded_review_ids)s::text[]))
 ORDER BY review_date DESC, review_id
-LIMIT 10
+LIMIT %(result_limit)s
 """
 
 OTHER_CATEGORY_COMMENTS_SQL = """
@@ -56,22 +57,18 @@ WHERE LOWER(product_category) = LOWER(%(product_category)s::text)
   AND rating < %(rating)s::numeric
   AND NOT (review_id = ANY(%(excluded_review_ids)s::text[]))
 ORDER BY review_date DESC, review_id
-LIMIT 10
+LIMIT %(result_limit)s
 """
 
 
 def _minimum_similarity() -> float:
-    try:
-        value = float(os.getenv("AGENT_REVIEW_MIN_SIMILARITY", "0.25"))
-    except ValueError:
-        return 0.25
-    return value if -1.0 <= value <= 1.0 else 0.25
+    return _REVIEW_SETTINGS.min_similarity
 
 
 class ReviewSearchInput(BaseModel):
     query: str = Field(
-        min_length=2,
-        max_length=500,
+        min_length=_REVIEW_SETTINGS.min_query_length,
+        max_length=_REVIEW_SETTINGS.max_query_length,
         description="A concise description of the customer feedback theme to find.",
     )
     start_date: date | None = Field(
@@ -82,15 +79,25 @@ class ReviewSearchInput(BaseModel):
         default=None,
         description="Optional exclusive review-date upper bound.",
     )
-    product_name: str | None = Field(default=None, max_length=200)
-    product_category: str | None = Field(default=None, max_length=200)
+    product_name: str | None = Field(
+        default=None,
+        max_length=_REVIEW_SETTINGS.max_scope_value_length,
+    )
+    product_category: str | None = Field(
+        default=None,
+        max_length=_REVIEW_SETTINGS.max_scope_value_length,
+    )
     comparison_mode: bool = Field(
         default=False,
         description="True only when the user explicitly requests a comparison across products.",
     )
     min_rating: int | None = Field(default=None, ge=1, le=5)
     max_rating: int | None = Field(default=None, ge=1, le=5)
-    top_k: int = Field(default=5, ge=1, le=8)
+    top_k: int = Field(
+        default=_REVIEW_SETTINGS.default_top_k,
+        ge=1,
+        le=_REVIEW_SETTINGS.max_top_k,
+    )
 
     @model_validator(mode="after")
     def validate_ranges(self) -> "ReviewSearchInput":
@@ -112,11 +119,11 @@ class ReviewSearchInput(BaseModel):
 class OtherProductCommentInput(BaseModel):
     product_name: str = Field(
         min_length=1,
-        max_length=200,
+        max_length=_REVIEW_SETTINGS.max_scope_value_length,
         description="One exact product_name selected from search_customer_reviews.",
     )
     rating: float = Field(
-        default=5,
+        default=_REVIEW_SETTINGS.default_expansion_rating_threshold,
         ge=1,
         le=5,
         description="Return reviews whose rating is strictly below this threshold.",
@@ -126,11 +133,11 @@ class OtherProductCommentInput(BaseModel):
 class OtherCategoryCommentInput(BaseModel):
     product_category: str = Field(
         min_length=1,
-        max_length=200,
+        max_length=_REVIEW_SETTINGS.max_scope_value_length,
         description="One exact product_category selected from search_customer_reviews.",
     )
     rating: float = Field(
-        default=5,
+        default=_REVIEW_SETTINGS.default_expansion_rating_threshold,
         ge=1,
         le=5,
         description="Return reviews whose rating is strictly below this threshold.",
@@ -382,6 +389,7 @@ def _find_other_comments(
         scope_parameter: value,
         "rating": rating,
         "excluded_review_ids": excluded_review_ids,
+        "result_limit": _REVIEW_SETTINGS.expansion_result_limit,
     }
     with connect_readonly() as connection:
         with connection.cursor() as guard_cursor:
@@ -434,7 +442,7 @@ async def search_customer_reviews(
     comparison_mode: bool = False,
     min_rating: int | None = None,
     max_rating: int | None = None,
-    top_k: int = 5,
+    top_k: int = _REVIEW_SETTINGS.default_top_k,
 ) -> str:
     """Search reviews for one filtered product; repeat only for complex or comparative tasks."""
 
@@ -661,9 +669,9 @@ async def _run_other_comment_tool(
 async def find_other_comment_product(
     product_name: str,
     config: RunnableConfig,
-    rating: float = 5,
+    rating: float = _REVIEW_SETTINGS.default_expansion_rating_threshold,
 ) -> str:
-    """Find up to ten unseen reviews for one product below a rating threshold."""
+    """Find unseen reviews for one product below a rating threshold."""
 
     return await _run_other_comment_tool(
         tool_name="find_other_comment_product",
@@ -678,9 +686,9 @@ async def find_other_comment_product(
 async def find_other_comment_category(
     product_category: str,
     config: RunnableConfig,
-    rating: float = 5,
+    rating: float = _REVIEW_SETTINGS.default_expansion_rating_threshold,
 ) -> str:
-    """Find up to ten unseen reviews for one product category below a rating threshold."""
+    """Find unseen reviews for one product category below a rating threshold."""
 
     return await _run_other_comment_tool(
         tool_name="find_other_comment_category",

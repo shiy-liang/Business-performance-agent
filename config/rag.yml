@@ -1,23 +1,37 @@
+# Knowledge-file upload policy.
 file_upload:
+  # Project-relative directory used to store uploaded knowledge files.
   storage_directory: data/knowledge_files
+  # Maximum accepted upload size in bytes (25 MiB).
   max_file_size_bytes: 26214400
+  # Number of bytes read from an upload stream at a time (1 MiB).
   stream_chunk_size_bytes: 1048576
+  # Maximum sanitized original filename length.
   max_filename_length: 255
+  # Whether a missing or unknown MIME type may be accepted by extension.
   allow_unknown_mime_type: true
+  # Allowed extensions and MIME types for knowledge uploads.
   allowed_file_types:
+    # Plain-text knowledge files.
     .txt:
       - text/plain
+    # PDF knowledge files.
     .pdf:
       - application/pdf
+    # CSV knowledge files and common browser-provided MIME aliases.
     .csv:
       - text/csv
       - application/csv
       - application/vnd.ms-excel
       - text/plain
 
+# Text splitting policy for uploaded documents.
 document_processing:
+  # Maximum characters in one document chunk.
   chunk_size: 700
+  # Characters repeated between adjacent chunks.
   chunk_overlap: 150
+  # Separators attempted in descending priority order.
   separators:
     - "\n\n"
     - "\n"

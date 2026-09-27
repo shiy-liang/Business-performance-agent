@@ -10,6 +10,10 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
+from config.settings import load_agent_settings
+
+
+_PLANNING_SETTINGS = load_agent_settings().planning
 
 SubTaskStatus = Literal["running", "completed", "blocked", "empty"]
 TERMINAL_STATUSES = frozenset({"completed", "blocked", "empty"})
@@ -37,8 +41,8 @@ class UpdateSubTaskStatusInput(BaseModel):
         )
     )
     message: str = Field(
-        min_length=2,
-        max_length=240,
+        min_length=_PLANNING_SETTINGS.min_status_message_length,
+        max_length=_PLANNING_SETTINGS.max_status_message_length,
         description="A short public progress description without private reasoning.",
     )
 

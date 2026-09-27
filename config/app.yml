@@ -1,0 +1,45 @@
+# Database client behavior shared by API and Agent connections.
+database:
+  # Maximum seconds allowed while establishing a database connection.
+  connect_timeout_seconds: 5
+
+# In-memory conversation behavior.
+conversation:
+  # Maximum recent user/assistant messages supplied to an Agent turn.
+  max_context_messages: 20
+
+# Public API input and transport limits.
+api:
+  # Maximum chat session identifier length.
+  max_session_id_length: 100
+  # Maximum user chat message length.
+  max_chat_message_length: 2000
+  # Maximum Agent run identifier length accepted by approval endpoints.
+  max_run_id_length: 100
+  # Browser retry delay advertised by Server-Sent Events.
+  sse_retry_ms: 3000
+
+# Best-effort Agent run audit behavior.
+audit:
+  # Whether Agent run lifecycle events are persisted.
+  enabled: true
+  # Maximum characters retained for one audit string value.
+  max_string_chars: 1000
+  # Maximum characters retained for one audit object key.
+  max_key_chars: 100
+  # Maximum items retained from one audit list or tuple.
+  max_collection_items: 50
+  # Maximum event type length written to the database.
+  max_event_type_chars: 100
+  # Maximum event message length written to the database.
+  max_event_message_chars: 1000
+  # Maximum failure code length written to the database.
+  max_error_code_chars: 200
+
+# Browser-only timing settings injected into the dashboard HTML.
+frontend:
+  # Delay before applying a dashboard filter change.
+  dashboard_filter_debounce_ms: 300
+  # Duration of the "Copied" confirmation label.
+  copy_feedback_ms: 1400
+

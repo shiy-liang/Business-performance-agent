@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import os
 from abc import ABC, abstractmethod
 from functools import lru_cache
 from time import perf_counter
 from typing import Any, AsyncIterator, Generic, Sequence, TypeVar
 
-from dotenv import load_dotenv
 from openai import (
     APIConnectionError,
     APITimeoutError,
@@ -18,8 +16,8 @@ from openai import (
 )
 from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt, wait_exponential
 
+from config.settings import load_environment_settings
 from model.config import (
-    PROJECT_ROOT,
     ChatModelConfig,
     EmbeddingModelConfig,
     load_model_config,
@@ -48,9 +46,10 @@ class ModelEnvironmentError(RuntimeError):
 
 
 def _api_key() -> str:
-    load_dotenv(PROJECT_ROOT / ".env")
     environment_name = load_model_config().api_key_env
-    value = os.getenv(environment_name, "").strip()
+    environment = load_environment_settings()
+    values = {"DASHSCOPE_API_KEY": environment.dashscope_api_key}
+    value = values.get(environment_name, "").strip()
     if value.lower() in API_KEY_PLACEHOLDERS:
         raise ModelEnvironmentError(
             f"{environment_name} is missing. Replace its placeholder in the project .env file."
@@ -59,9 +58,10 @@ def _api_key() -> str:
 
 
 def _base_url() -> str:
-    load_dotenv(PROJECT_ROOT / ".env")
     settings = load_model_config()
-    workspace_id = os.getenv(settings.workspace_id_env, "").strip()
+    environment = load_environment_settings()
+    values = {"DASHSCOPE_WORKSPACE_ID": environment.dashscope_workspace_id}
+    workspace_id = values.get(settings.workspace_id_env, "").strip()
     if workspace_id.lower() in WORKSPACE_ID_PLACEHOLDERS:
         raise ModelEnvironmentError(
             f"{settings.workspace_id_env} is missing. "
@@ -77,11 +77,19 @@ def _shared_client() -> AsyncOpenAI:
     return AsyncOpenAI(api_key=_api_key(), base_url=_base_url(), max_retries=0)
 
 
-def _retrying(max_retries: int) -> AsyncRetrying:
+def _retrying(
+    max_retries: int,
+    retry_initial_seconds: float,
+    retry_max_seconds: float,
+) -> AsyncRetrying:
     return AsyncRetrying(
         retry=retry_if_exception_type(RETRYABLE_ERRORS),
         stop=stop_after_attempt(max_retries + 1),
-        wait=wait_exponential(multiplier=0.5, min=0.5, max=2),
+        wait=wait_exponential(
+            multiplier=retry_initial_seconds,
+            min=retry_initial_seconds,
+            max=retry_max_seconds,
+        ),
         reraise=True,
     )
 
@@ -142,7 +150,11 @@ class ChatModel:
         return self._client or _shared_client()
 
     async def _create_with_retries(self, params: dict[str, Any]) -> Any:
-        async for attempt in _retrying(self.settings.max_retries):
+        async for attempt in _retrying(
+            self.settings.max_retries,
+            self.settings.retry_initial_seconds,
+            self.settings.retry_max_seconds,
+        ):
             with attempt:
                 return await self.client.chat.completions.create(**params)
         raise RuntimeError("Unreachable retry state")
@@ -358,7 +370,11 @@ class EmbeddingModel:
                 if self.settings.dimensions is not None:
                     params["dimensions"] = self.settings.dimensions
 
-                async for attempt in _retrying(self.settings.max_retries):
+                async for attempt in _retrying(
+                    self.settings.max_retries,
+                    self.settings.retry_initial_seconds,
+                    self.settings.retry_max_seconds,
+                ):
                     with attempt:
                         response = await self.client.embeddings.create(**params)
                         ordered = sorted(response.data, key=lambda item: item.index)

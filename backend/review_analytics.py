@@ -12,6 +12,10 @@ from psycopg.rows import dict_row
 
 from backend.database import connect
 from backend.runtime import RunNotFoundError, record_run_event
+from config.settings import load_business_rules
+
+
+_CUSTOMER_EXPERIENCE_RULES = load_business_rules().customer_experience
 
 
 REVIEW_EXPERIENCE_SQL = """
@@ -30,11 +34,15 @@ SELECT
     p.period_name,
     COUNT(r.review_id)::bigint AS review_count,
     ROUND(AVG(r.rating)::numeric, 2) AS average_rating,
-    COUNT(r.review_id) FILTER (WHERE r.rating <= 2)::bigint AS low_rating_count,
+    COUNT(r.review_id) FILTER (
+        WHERE r.rating <= %(low_rating_max)s::integer
+    )::bigint AS low_rating_count,
     CASE
         WHEN COUNT(r.review_id) = 0 THEN 0::numeric
         ELSE ROUND(
-            100.0 * COUNT(r.review_id) FILTER (WHERE r.rating <= 2)
+            100.0 * COUNT(r.review_id) FILTER (
+                WHERE r.rating <= %(low_rating_max)s::integer
+            )
             / COUNT(r.review_id),
             2
         )
@@ -185,6 +193,7 @@ def analyze_prepared_review_experience(
                     "current_end": period_end,
                     "previous_start": previous_month,
                     "previous_end": selected_month,
+                    "low_rating_max": _CUSTOMER_EXPERIENCE_RULES.low_rating_max,
                 },
             )
             rows = {row["period_name"]: dict(row) for row in cursor.fetchall()}
@@ -210,7 +219,10 @@ def analyze_prepared_review_experience(
             },
             "basis": {
                 "date_field": "review_date",
-                "low_rating_definition": "rating <= 2",
+                "low_rating_definition": (
+                    "rating <= "
+                    f"{_CUSTOMER_EXPERIENCE_RULES.low_rating_max}"
+                ),
             },
             "current": _metrics(rows["current"]),
             "previous": _metrics(rows["previous"]),

@@ -1,0 +1,78 @@
+# Dashboard list sizes and minimum sample requirements.
+dashboard:
+  # Number of most urgent inventory alerts displayed.
+  inventory_alert_limit: 5
+  # Number of high-priority unresolved tickets displayed.
+  oldest_ticket_limit: 3
+  # Number of highest-ROI active campaigns displayed.
+  top_campaign_limit: 5
+  # Number of lowest negative-ROI campaigns retained as evidence.
+  negative_roi_campaign_limit: 3
+  # Number of products displayed in each product ranking.
+  product_ranking_limit: 5
+  # Minimum reviews required for a product rating ranking.
+  product_minimum_reviews: 5
+  # Minimum sold units required for a product return-rate ranking.
+  product_minimum_units_for_return_rate: 5
+
+# Inventory severity thresholds relative to reorder level.
+inventory_severity:
+  # Stock/reorder ratio at or below which inventory is critical.
+  critical_stock_ratio: 0.25
+  # Stock/reorder ratio at or below which inventory is high risk.
+  high_stock_ratio: 0.50
+
+# Gross-profit deterioration detection thresholds.
+profit_deterioration:
+  # Minimum percentage drop that creates an issue.
+  trigger_drop_pct: 10.0
+  # Minimum percentage drop that creates a high-severity issue.
+  high_drop_pct: 20.0
+
+# Completed-refund pressure detection thresholds.
+refund_pressure:
+  # Minimum percentage increase that creates an issue.
+  trigger_growth_pct: 30.0
+  # Minimum absolute increase that creates an issue.
+  trigger_absolute_increase: 5000.0
+  # Minimum percentage increase for high severity.
+  high_growth_pct: 50.0
+  # Minimum absolute increase for high severity.
+  high_absolute_increase: 10000.0
+
+# Inventory replenishment issue thresholds.
+inventory_replenishment:
+  # Minimum affected inventory rows that create an issue.
+  trigger_affected_count: 5
+  # Minimum affected percentage that creates an issue.
+  trigger_affected_ratio_pct: 10.0
+  # Minimum critical inventory rows for high severity.
+  high_critical_count: 3
+  # Minimum affected percentage for high severity when critical rows exist.
+  high_affected_ratio_pct: 15.0
+
+# Campaign inefficiency issue thresholds.
+campaign_inefficiency:
+  # Minimum negative-ROI campaigns that create an issue.
+  trigger_negative_count: 2
+  # Minimum negative-ROI campaign percentage that creates an issue.
+  trigger_negative_ratio_pct: 30.0
+  # Minimum negative-ROI campaigns for high severity.
+  high_negative_count: 3
+  # Minimum negative-ROI campaign percentage for high severity.
+  high_negative_ratio_pct: 40.0
+
+# Customer-experience deterioration thresholds.
+customer_experience:
+  # Ratings at or below this value are treated as low ratings.
+  low_rating_max: 2
+  # Minimum reviews required in both compared periods.
+  minimum_reviews_per_period: 20
+  # Minimum average-rating drop that creates an issue.
+  trigger_average_rating_drop: 0.25
+  # Minimum low-rating-ratio increase, in percentage points, that creates an issue.
+  trigger_low_rating_ratio_increase_pp: 5.0
+  # Minimum average-rating drop for high severity.
+  high_average_rating_drop: 0.50
+  # Minimum low-rating-ratio increase, in percentage points, for high severity.
+  high_low_rating_ratio_increase_pp: 10.0

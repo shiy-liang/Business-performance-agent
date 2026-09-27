@@ -11,9 +11,9 @@ effective like rate or purchase rate across the current product metrics view.
 2. For lowest purchase-rate requests, call `check_less_purchase` with no
    arguments.
 3. Do not search schema, generate SQL, resolve product names, or call the
-   single-product rate tools for a Bottom-10 request.
+   single-product rate tools for a Bottom-{{bottom_rate_result_limit}} request.
 4. Preserve the returned order. The first item is the lowest-rate product, and
-   the list contains at most ten products.
+   the list contains at most {{bottom_rate_result_limit}} products.
 5. Display the exact `like_rate` or `purchase_rate` returned beside each product.
    Do not invent causes, time ranges, or recommendations from this ranking. If
    deeper diagnosis is requested, treat it as a separate evidence requirement.

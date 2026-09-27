@@ -12,9 +12,11 @@ from psycopg.rows import dict_row
 
 from backend.database import connect
 from backend.runtime import RunNotFoundError, record_run_event
+from config.settings import load_business_rules
 
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
+_DASHBOARD_RULES = load_business_rules().dashboard
 
 
 MONTHLY_PRODUCT_SQL = """
@@ -304,8 +306,11 @@ def analyze_prepared_product_performance(
 ) -> dict[str, object]:
     """Execute Products SQL and Runtime events using prepared Products context."""
 
-    minimum_reviews = 5
-    minimum_units_for_return_rate = 5
+    minimum_reviews = _DASHBOARD_RULES.product_minimum_reviews
+    minimum_units_for_return_rate = (
+        _DASHBOARD_RULES.product_minimum_units_for_return_rate
+    )
+    ranking_limit = _DASHBOARD_RULES.product_ranking_limit
     products_analysis_started = False
     scope = prepared["scope"]
     coverage = prepared["coverage"]
@@ -370,7 +375,9 @@ def analyze_prepared_product_performance(
                 row["product_name"],
             ),
             reverse=True,
-        )[:5]
+
+        )[:ranking_limit]
+   
         category_totals = {}
         for row in monthly_rows:
             category = row["product_category"] or "Uncategorized"
@@ -379,6 +386,7 @@ def analyze_prepared_product_performance(
             {"category": category, "revenue": _money(revenue)}
             for category, revenue in sorted(category_totals.items(), key=lambda item: item[1], reverse=True)
         ]
+
         best_sellers = [
             {
                 "product_id": row["product_id"],
@@ -407,7 +415,7 @@ def analyze_prepared_product_performance(
                 row["product_name"],
             ),
             reverse=True,
-        )[:5]
+        )[:ranking_limit]
         high_return_rate = [
             {
                 "product_id": row["product_id"],
@@ -429,7 +437,7 @@ def analyze_prepared_product_performance(
                 row["product_name"],
             ),
             reverse=True,
-        )[:5]
+        )[:ranking_limit]
         lowest_rated_rows = sorted(
             rating_rows,
             key=lambda row: (
@@ -437,7 +445,7 @@ def analyze_prepared_product_performance(
                 -row["review_count"],
                 row["product_name"],
             ),
-        )[:5]
+        )[:ranking_limit]
 
         response = {
             "scope": scope,
