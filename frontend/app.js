@@ -849,20 +849,6 @@ function setThinking(message, visible = true) {
   if (message) elements.chatThinkingLabel.textContent = message;
 }
 
-function safeSourceUrl(value) {
-  if (value === null || value === undefined) return null;
-  const candidate = String(value).trim();
-  if (!candidate) return null;
-
-  try {
-    const url = new URL(candidate, window.location.origin);
-    if (!['http:', 'https:'].includes(url.protocol)) return null;
-    return url.href;
-  } catch (_error) {
-    return null;
-  }
-}
-
 function groupChatSources(sources) {
   const entries = [];
   const knowledgeFiles = new Map();
@@ -899,39 +885,6 @@ function groupChatSources(sources) {
   return entries;
 }
 
-async function downloadChatSource(source, trigger, status) {
-  const href = safeSourceUrl(source.download_url);
-  if (!href) return;
-
-  const idleLabel = status.textContent;
-  trigger.disabled = true;
-  status.textContent = "Downloading…";
-  try {
-    const response = await fetch(href, { credentials: "same-origin" });
-    if (!response.ok) throw new Error(`Download failed (${response.status})`);
-
-    const blob = await response.blob();
-    const objectUrl = URL.createObjectURL(blob);
-    const download = document.createElement("a");
-    download.href = objectUrl;
-    download.download = String(source.filename || "knowledge-source");
-    download.hidden = true;
-    document.body.append(download);
-    download.click();
-    download.remove();
-    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
-    status.textContent = "Downloaded";
-    window.setTimeout(() => {
-      if (status.isConnected) status.textContent = idleLabel;
-    }, 1400);
-  } catch (error) {
-    console.error("Reference download failed", error);
-    status.textContent = "Download failed · retry";
-  } finally {
-    trigger.disabled = false;
-  }
-}
-
 function renderChatSources(sources) {
   elements.chatSources.replaceChildren();
   if (!Array.isArray(sources) || sources.length === 0) {
@@ -954,9 +907,7 @@ function renderChatSources(sources) {
   entries.forEach((entryData, index) => {
     const isKnowledgeFile = entryData.kind === "knowledge-file";
     const source = isKnowledgeFile ? entryData : entryData.source;
-    const href = safeSourceUrl(source.download_url);
-    const entry = document.createElement(href ? "button" : "div");
-    if (href) entry.type = "button";
+    const entry = document.createElement("div");
     entry.className = "source-entry";
 
     const number = document.createElement("span");
@@ -989,16 +940,7 @@ function renderChatSources(sources) {
       ].filter(Boolean).join(" · ");
     }
     copy.append(filename, detail);
-    const open = document.createElement("span");
-    open.className = "source-open";
-    open.textContent = href ? "Download" : "";
-    if (href) {
-      entry.addEventListener("click", (event) => {
-        event.preventDefault();
-        downloadChatSource(source, entry, open);
-      });
-    }
-    entry.append(number, copy, open);
+    entry.append(number, copy);
     list.append(entry);
   });
   elements.chatSources.append(heading, list);
@@ -1974,18 +1916,24 @@ function candidateIssueFromElement(element) {
   return issue && typeof issue === "object" ? issue : null;
 }
 
-async function askAgentAboutIssue(issue) {
+function askAgentAboutIssue(issue) {
   if (!issue || typeof issue !== "object" || state.chatController) return;
   const prompt = buildCandidateIssuePrompt(issue);
   if (!prompt) return;
 
-  setRiskAskAgentButtonsDisabled(true);
   setAssistantOpen(true);
-  try {
-    await submitChat(prompt, { abortExisting: false });
-  } finally {
-    if (!state.chatController) setRiskAskAgentButtonsDisabled(false);
+  const existingDraft = elements.chatInput.value.trim();
+  if (
+    existingDraft
+    && existingDraft !== prompt
+    && !window.confirm("Replace your unsent chat draft with this risk investigation prompt?")
+  ) {
+    return;
   }
+
+  elements.chatInput.value = prompt;
+  resizeChatInput();
+  elements.chatInput.focus();
 }
 
 function renderDetectedRisks(candidateIssues) {
