@@ -7,15 +7,17 @@ across different systems and reports, business owners spend considerable time
 reviewing data before understanding overall business performance and identifying
 issues that require immediate attention.
 
-This prototype combines those sources in a FastAPI application with a Chinese
-management dashboard. It currently includes:
+This prototype combines those sources in a FastAPI application with a browser-based
+business performance dashboard. It currently includes:
 
 - company-wide or store-level financial pulse
 - urgent inventory alerts and the oldest unresolved priority tickets
 - best-selling, highly rated, high-return and low-rated product rankings
 - campaign ROI and conversion rankings
-- a three-agent business assistant with governed SQL, pgvector retrieval, and
-  evidence citations
+- a LangGraph-based Supervisor with Finance and Operations specialists, governed SQL,
+  pgvector retrieval, and evidence citations
+- deterministic business risk detection with standardized Candidate Issues and Ask Agent
+  investigation
 
 ## Run the dashboard on this computer
 
@@ -38,49 +40,6 @@ conda activate agent_project
 python -m pip install -r requirements-dev.txt
 python -m pytest -v
 ```
-
-## 组员首次运行：连接现有数据库
-
-拉取 `shiying-branch` 后，在项目根目录执行以下命令（macOS / Linux）：
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-cp .env.example .env
-```
-
-如果已有 `.env`，跳过复制命令，保留已有配置。
-
-向项目负责人通过私密渠道获取数据库连接信息，将 `.env` 中的
-`DATABASE_URL` 替换为完整连接地址。本项目当前使用 **Transaction pooler，
-端口 6543**；以下仅为占位示例：
-
-```dotenv
-DATABASE_URL=postgresql://postgres.PROJECT_REF:PASSWORD@HOST:6543/postgres
-```
-
-主机、用户名和密码必须使用负责人提供的值。密码包含特殊字符时，需要进行
-URL 百分号编码。不要将真实连接地址或 `.env` 提交到 GitHub。
-
-启动服务：
-
-```bash
-uvicorn app:app --reload --port 8001
-```
-
-保持终端运行，在运行服务的这台电脑上打开：
-
-- Dashboard：http://127.0.0.1:8001/
-- 数据库连接检查：http://127.0.0.1:8001/api/health
-- API 文档及测试：http://127.0.0.1:8001/docs
-
-健康接口返回 `"database": "connected"` 表示连接成功。若端口被占用，可以改用
-`--port 8002`，浏览器地址也同步改成 8002。修改 `.env` 后需停止并重新启动服务。
-
-**组员共用现有 Supabase 数据库，不需要本地 CSV，也不要执行建表、数据导入或
-数据更新脚本。** 本地原始、清洗后和模拟数据均未上传 GitHub；运行 Dashboard
-直接读取云端数据库。`database/load_data.py` 会清空并重新加载共享表。
 
 ## Initialize a separate, empty database
 
@@ -117,10 +76,14 @@ python database/update_expenses.py
 | `GET` | `/api/dashboard/action-center` | Severe stock alerts and long-open priority tickets |
 | `GET` | `/api/dashboard/product-performance` | Four Top-5 product rankings |
 | `GET` | `/api/dashboard/marketing-performance` | Top campaigns overlapping the selected month |
+| `POST` | `/api/runs` | Create an observable finance or business-performance run |
+| `POST` | `/api/runs/{run_id}/execute` | Execute the workflow for a run |
+| `GET` | `/api/runs/{run_id}` | Retrieve the current run status |
+| `GET` | `/api/runs/{run_id}/events` | Retrieve events recorded during a run |
 | `POST` | `/api/chat` | Run the Supervisor and return the collected answer |
 | `POST` | `/api/chat/stream` | Stream public progress, tool events, answer tokens, and citations over SSE |
-| `POST` | `/api/sessions` | Create an in-memory chat session |
-| `DELETE` | `/api/sessions/{session_id}` | Delete an in-memory chat session |
+| `POST` | `/api/sessions` | Create a persistent chat session |
+| `DELETE` | `/api/sessions/{session_id}` | Delete a persisted chat session and its history |
 | `POST` | `/api/knowledge/files` | Validate, store, split, embed, and index one TXT/PDF/CSV file |
 | `GET` | `/api/knowledge/files` | List registered knowledge-base source files |
 | `GET` | `/api/knowledge/files/{file_id}/download` | Download a managed source file |
@@ -131,13 +94,12 @@ The month-based endpoints accept `month=YYYY-MM`. Finance, inventory and product
 sales also accept `store_id`; campaign and support-ticket source data do not have
 a store identifier.
 
-Chat conversations use process-local, UUID-keyed sessions. The frontend creates a
+Chat conversations use UUID-keyed sessions persisted in PostgreSQL. The frontend creates a
 session when the page opens and sends its `session_id` with every chat request.
-Only user messages and completed assistant answers are retained; runtime, tool,
-skill, retrieval, and token events are excluded. The Agent receives at most the
-most recent `MAX_CONTEXT_MESSAGES` messages (20 by default). New Chat deletes the
-current session and starts an empty one. These sessions are intentionally not
-persisted and disappear whenever the FastAPI process restarts.
+User and assistant messages are stored in `chat_messages`, while session metadata is
+stored in `chat_sessions`. Runtime, tool, skill, retrieval, and token events are excluded.
+The Agent receives at most the most recent `MAX_CONTEXT_MESSAGES` messages (20 by default).
+New Chat deletes the current session and starts an empty one.
 
 `database/schema.sql` creates the PostgreSQL schema and pgvector extension.
 Uploaded file chunks are indexed in `unstructured_knowledge_chunks`, while the
@@ -175,7 +137,8 @@ The chat panel is connected to a three-agent LangGraph runtime under `rag/agent/
 The user-facing Supervisor routes structured questions to Finance or Operations.
 High-frequency review, support-ticket, and financial calculations use dedicated
 deterministic workflows, while other specialist questions use governed PostgreSQL
-generation as a long-tail fallback. All models use `langchain-openai` with the OpenAI Responses API. Tool permissions are
+generation as a long-tail fallback. Models are accessed through `langchain-openai` using Aliyun Bailian's OpenAI-compatible API.
+The primary chat model is `qwen3.7-plus`, with `qwen3-max` configured as fallback. Tool permissions are
 enforced centrally in `rag/agent/tools/registry.py`, and safe public progress is
 streamed through `/api/chat/stream`.
 
